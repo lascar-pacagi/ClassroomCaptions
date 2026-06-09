@@ -4,6 +4,8 @@ public enum SpokenOverlayAction: Equatable, Sendable {
     case show
     case hide
     case clear
+    case nextQuestion
+    case dismissQuestion
 }
 
 public struct SpokenOverlayCommand: Equatable, Sendable {
@@ -59,13 +61,17 @@ public enum SpokenOverlayCommandRecognizer {
         in text: String,
         showPhrase: String,
         hidePhrase: String,
-        clearPhrase: String = ""
+        clearPhrase: String = "",
+        nextQuestionPhrase: String = "",
+        dismissQuestionPhrase: String = ""
     ) -> SpokenOverlayCommand? {
         recognizeAll(
             in: text,
             showPhrase: showPhrase,
             hidePhrase: hidePhrase,
-            clearPhrase: clearPhrase
+            clearPhrase: clearPhrase,
+            nextQuestionPhrase: nextQuestionPhrase,
+            dismissQuestionPhrase: dismissQuestionPhrase
         ).first
     }
 
@@ -73,31 +79,66 @@ public enum SpokenOverlayCommandRecognizer {
         in text: String,
         showPhrase: String,
         hidePhrase: String,
-        clearPhrase: String = ""
+        clearPhrase: String = "",
+        nextQuestionPhrase: String = "",
+        dismissQuestionPhrase: String = ""
     ) -> [SpokenOverlayCommand] {
+        // Tokenizing is the expensive step (per-word allocation plus locale
+        // diacritic folding over the whole provisional text); do it once and
+        // share the tokens across every phrase matcher.
+        let captionTokens = tokens(in: text)
         let matches = (
-            matches(showPhrase, in: text, action: .show)
-                + matches(hidePhrase, in: text, action: .hide)
-                + matches(clearPhrase, in: text, action: .clear)
+            matches(showPhrase, captionTokens: captionTokens, action: .show)
+                + matches(hidePhrase, captionTokens: captionTokens, action: .hide)
+                + matches(clearPhrase, captionTokens: captionTokens, action: .clear)
+                + matches(
+                    nextQuestionPhrase,
+                    captionTokens: captionTokens,
+                    action: .nextQuestion
+                )
+                + matches(
+                    dismissQuestionPhrase,
+                    captionTokens: captionTokens,
+                    action: .dismissQuestion
+                )
                 + (
                     normalizedWords(showPhrase) == ["sesame", "lumiere"]
-                        ? showAliases(in: text)
+                        ? showAliases(in: captionTokens)
                         : []
                 )
         ).sorted {
-            $0.range.lowerBound < $1.range.lowerBound
+            if $0.range.lowerBound != $1.range.lowerBound {
+                return $0.range.lowerBound < $1.range.lowerBound
+            }
+            return $0.range.upperBound > $1.range.upperBound
         }
         guard !matches.isEmpty else { return [] }
 
+        // Distinct phrases may produce overlapping matches (one phrase a
+        // prefix of another, or two commands configured with the same words).
+        // Removing one range invalidates String indices inside any range that
+        // overlaps it, so keep the longest match at each position and drop
+        // whatever it overlaps before editing the text.
+        var acceptedIndices: [Int] = []
+        var lastUpperBound: String.Index?
+        for (index, match) in matches.enumerated() {
+            if let bound = lastUpperBound, match.range.lowerBound < bound {
+                continue
+            }
+            acceptedIndices.append(index)
+            lastUpperBound = match.range.upperBound
+        }
+        let accepted = acceptedIndices.map { matches[$0] }
+
         var remaining = text
-        for match in matches.reversed() {
+        for match in accepted.reversed() {
             remaining.removeSubrange(match.range)
         }
         let cleaned = cleanRemainingText(remaining)
-        return matches.enumerated().map { index, match in
+        return accepted.enumerated().map { index, match in
             SpokenOverlayCommand(
                 action: match.action,
-                remainingText: index == matches.count - 1 ? cleaned : ""
+                remainingText: index == accepted.count - 1 ? cleaned : ""
             )
         }
     }
@@ -106,11 +147,23 @@ public enum SpokenOverlayCommandRecognizer {
         _ text: String,
         showPhrase: String,
         hidePhrase: String,
-        clearPhrase: String = ""
+        clearPhrase: String = "",
+        nextQuestionPhrase: String = "",
+        dismissQuestionPhrase: String = ""
     ) -> Bool {
-        isPotentialPhrase(text, expectedPhrase: showPhrase)
-            || isPotentialPhrase(text, expectedPhrase: hidePhrase)
-            || isPotentialPhrase(text, expectedPhrase: clearPhrase)
+        let captionTokens = tokens(in: text).map(\.normalized)
+        guard !captionTokens.isEmpty else { return false }
+        return isPotentialPhrase(captionTokens, expectedPhrase: showPhrase)
+            || isPotentialPhrase(captionTokens, expectedPhrase: hidePhrase)
+            || isPotentialPhrase(captionTokens, expectedPhrase: clearPhrase)
+            || isPotentialPhrase(
+                captionTokens,
+                expectedPhrase: nextQuestionPhrase
+            )
+            || isPotentialPhrase(
+                captionTokens,
+                expectedPhrase: dismissQuestionPhrase
+            )
     }
 
     public static func isPotentialCommand(
@@ -179,12 +232,11 @@ public enum SpokenOverlayCommandRecognizer {
 
     private static func matches(
         _ phrase: String,
-        in text: String,
+        captionTokens: [Token],
         action: SpokenOverlayAction
     ) -> [Match] {
         let expectedTokens = tokens(in: phrase).map(\.normalized)
         guard !expectedTokens.isEmpty else { return [] }
-        let captionTokens = tokens(in: text)
         guard captionTokens.count >= expectedTokens.count else { return [] }
 
         var result: [Match] = []
@@ -202,8 +254,7 @@ public enum SpokenOverlayCommandRecognizer {
         return result
     }
 
-    private static func showAliases(in text: String) -> [Match] {
-        let captionTokens = tokens(in: text)
+    private static func showAliases(in captionTokens: [Token]) -> [Match] {
         guard captionTokens.count >= 3 else { return [] }
         let expected = ["ces", "ames", "lumieres"]
         var result: [Match] = []
@@ -221,12 +272,11 @@ public enum SpokenOverlayCommandRecognizer {
     }
 
     private static func isPotentialPhrase(
-        _ text: String,
+        _ captionTokens: [String],
         expectedPhrase: String
     ) -> Bool {
         let expectedTokens = tokens(in: expectedPhrase).map(\.normalized)
-        let captionTokens = tokens(in: text).map(\.normalized)
-        guard !expectedTokens.isEmpty, !captionTokens.isEmpty,
+        guard !expectedTokens.isEmpty,
               captionTokens.count <= expectedTokens.count else {
             return false
         }

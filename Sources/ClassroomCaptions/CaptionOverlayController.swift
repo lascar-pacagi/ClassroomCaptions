@@ -94,6 +94,8 @@ final class CaptionOverlayController: NSObject, NSWindowDelegate {
             rootView: CaptionOverlayView(
                 lines: [],
                 provisional: nil,
+                question: nil,
+                pendingQuestionCount: 0,
                 fontSize: 32
             )
         )
@@ -146,11 +148,15 @@ final class CaptionOverlayController: NSObject, NSWindowDelegate {
         on screen: NSScreen,
         lines: [String],
         provisional: String?,
+        question: String?,
+        pendingQuestionCount: Int,
         fontSize: Double
     ) {
         hostingView.rootView = CaptionOverlayView(
             lines: lines,
             provisional: provisional,
+            question: question,
+            pendingQuestionCount: pendingQuestionCount,
             fontSize: fontSize
         )
 
@@ -298,6 +304,8 @@ struct CaptionOverlayView: View {
 
     let lines: [String]
     let provisional: String?
+    let question: String?
+    let pendingQuestionCount: Int
     let fontSize: Double
 
     private var hasContent: Bool {
@@ -314,6 +322,14 @@ struct CaptionOverlayView: View {
         ZStack {
             VStack(alignment: .leading, spacing: 10) {
                 moveHandle
+
+                if pendingQuestionCount > 0 {
+                    pendingQuestionIndicator
+                }
+
+                if let question, !question.isEmpty {
+                    questionCard(question)
+                }
 
                 ScrollViewReader { proxy in
                     ScrollView(.vertical) {
@@ -376,6 +392,53 @@ struct CaptionOverlayView: View {
             .lineLimit(nil)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func questionCard(_ question: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("Student question", systemImage: "questionmark.bubble.fill")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(.orange)
+
+            ScrollView(.vertical) {
+                Text(question)
+                    .font(.system(
+                        size: max(18, fontSize * 0.72),
+                        weight: .semibold,
+                        design: .rounded
+                    ))
+                    .foregroundStyle(.white)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .scrollIndicators(.visible)
+            .frame(maxHeight: 130)
+        }
+        .padding(12)
+        .background(.orange.opacity(0.18))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(.orange.opacity(0.55), lineWidth: 1)
+        }
+    }
+
+    private var pendingQuestionIndicator: some View {
+        Label(
+            pendingQuestionCount == 1
+                ? "1 student question pending"
+                : "\(pendingQuestionCount) student questions pending",
+            systemImage: "questionmark.bubble.fill"
+        )
+        .font(.system(size: 13, weight: .bold))
+        .foregroundStyle(.orange)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(.orange.opacity(0.18))
+        .clipShape(Capsule())
+        .accessibilityLabel(
+            "\(pendingQuestionCount) pending student questions"
+        )
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {

@@ -119,6 +119,43 @@ final class SpokenOverlayCommandTests: XCTestCase {
         ))
     }
 
+    func testRecognizesNextStudentQuestionCommand() {
+        let command = SpokenOverlayCommandRecognizer.recognize(
+            in: "Bonjour question suivante.",
+            showPhrase: "Bonjour soleil bleu",
+            hidePhrase: "Bonjour soleil rouge",
+            clearPhrase: "Bonjour soleil blanc",
+            nextQuestionPhrase: "Bonjour question suivante"
+        )
+
+        XCTAssertEqual(
+            command,
+            SpokenOverlayCommand(
+                action: .nextQuestion,
+                remainingText: ""
+            )
+        )
+    }
+
+    func testRecognizesDismissStudentQuestionCommand() {
+        let command = SpokenOverlayCommandRecognizer.recognize(
+            in: "Bonjour question terminée.",
+            showPhrase: "Bonjour soleil bleu",
+            hidePhrase: "Bonjour soleil rouge",
+            clearPhrase: "Bonjour soleil blanc",
+            nextQuestionPhrase: "Bonjour question suivante",
+            dismissQuestionPhrase: "Bonjour question terminée"
+        )
+
+        XCTAssertEqual(
+            command,
+            SpokenOverlayCommand(
+                action: .dismissQuestion,
+                remainingText: ""
+            )
+        )
+    }
+
     func testRemovesAllCommandsButRetainsLectureText() {
         let commands = SpokenOverlayCommandRecognizer.recognizeAll(
             in: "Début. Sésame rouge. Suite. Sésame lumière. Fin.",
@@ -230,5 +267,29 @@ final class SpokenOverlayCommandTests: XCTestCase {
             "Nous étudions gloubi",
             triggerPhrase: "Gloubi-boulga"
         ))
+    }
+
+    func testOverlappingPhrasesPreferTheLongestWithoutCrashing() {
+        // One configured phrase is a token-prefix of another. Before the
+        // overlap guard this produced overlapping match ranges whose removal
+        // trapped on invalidated String indices mid-lecture.
+        let commands = SpokenOverlayCommandRecognizer.recognizeAll(
+            in: "Bonjour soleil blanc.",
+            showPhrase: "Bonjour soleil",
+            hidePhrase: "Bonjour soleil rouge",
+            clearPhrase: "Bonjour soleil blanc"
+        )
+        XCTAssertEqual(commands.map(\.action), [.clear])
+    }
+
+    func testIdenticalConfiguredPhrasesYieldOneCommandWithoutCrashing() {
+        // The settings UI does not prevent two commands from sharing one
+        // phrase; both matched the same range and removal crashed.
+        let commands = SpokenOverlayCommandRecognizer.recognizeAll(
+            in: "Bonjour soleil bleu.",
+            showPhrase: "Bonjour soleil bleu",
+            hidePhrase: "Bonjour soleil bleu"
+        )
+        XCTAssertEqual(commands.count, 1)
     }
 }

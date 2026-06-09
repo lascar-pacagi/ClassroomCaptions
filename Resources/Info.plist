@@ -24,5 +24,11 @@
     <true/>
     <key>NSMicrophoneUsageDescription</key>
     <string>Classroom Captions uses the selected microphone to generate local live subtitles.</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Classroom Captions uses the local Wi-Fi network to send live subtitles to your paired iPhone.</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_classcaptions._tcp</string>
+    </array>
 </dict>
 </plist>

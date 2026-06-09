@@ -53,6 +53,42 @@ the command span is removed. Cumulative provisional text may contain several
 commands; they are executed once each in spoken order and all command spans are
 removed before the segment reaches the timeline.
 
+## iPhone Caption Sharing
+
+The first iPhone transport is an explicitly enabled, read-only HTTP and
+Server-Sent Events service implemented with Network.framework. It is restricted
+to Wi-Fi paths, advertises a Bonjour service, and accepts one live subtitle
+client. The browser receives only the three latest visible finalized captions,
+the current provisional caption, session state, and a monotonic revision.
+
+Each server start creates a new 256-bit random pairing token. The private viewer
+QR code embeds the IPv4 URL and token. Stopping sharing cancels the listener and
+client, then erases the token. Requests are bounded to 8 KiB, unauthorized routes
+return the same 404 response, browser caching is disabled, and the page uses a
+restrictive Content Security Policy.
+
+Anonymous student questions use a second, independently enabled QR credential.
+Each browser receives a source-bound, four-hour in-memory ticket. Questions are
+limited to 500 normalized characters, one submission every ten seconds, eight
+submissions per source in five minutes, thirty classroom-wide submissions per
+minute, 256 simultaneous tickets, and a 100-question server cap. The transient
+source address is used only for throttling; it is neither exposed in the Mac UI
+nor archived. Pausing questions invalidates all tickets.
+
+The only mutation route accepts a text question into the professor moderation
+queue. It cannot send model prompts, control captions, activate microphones, or
+invoke application commands. The overlay shows an orange pending-count badge
+without revealing question text. `Bonjour question suivante` is recognized
+locally from the professor microphone and opens the oldest pending question;
+`Bonjour question terminée` dismisses the current question. Both commands are
+removed before text reaches the caption timeline.
+
+This browser phase intentionally does not claim transport encryption: ordinary
+local HTTP protects access with an unguessable bearer token but does not prevent
+a hostile network operator from observing captions. Use a trusted Wi-Fi network
+or personal hotspot. The later native iPhone controller will use an authenticated,
+encrypted peer session before voice-question control is introduced.
+
 ## Live Diagnostics
 
 The optional diagnostics panel counts embedded Voxtral output at the token

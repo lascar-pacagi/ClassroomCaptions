@@ -1,4 +1,6 @@
+import AppKit
 import ClassroomCaptionsCore
+import CoreImage.CIFilterBuiltins
 import SwiftUI
 
 struct DashboardView: View {
@@ -11,8 +13,17 @@ struct DashboardView: View {
                     .fontWeight(.semibold)
                 Label("Transcript", systemImage: "doc.text")
                     .foregroundStyle(.secondary)
-                Label("iPhone", systemImage: "iphone")
-                    .foregroundStyle(.secondary)
+                if model.pendingStudentQuestions.isEmpty {
+                    Label("iPhone", systemImage: "iphone")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Label(
+                        "iPhone · \(model.pendingStudentQuestions.count) question"
+                            + (model.pendingStudentQuestions.count == 1 ? "" : "s"),
+                        systemImage: "questionmark.bubble.fill"
+                    )
+                    .foregroundStyle(.orange)
+                }
                 Label("Models", systemImage: "cpu")
                     .foregroundStyle(.secondary)
             }
@@ -22,6 +33,8 @@ struct DashboardView: View {
                 VStack(alignment: .leading, spacing: 24) {
                     header
                     controls
+                    iphoneSharing
+                    studentQuestions
                     diagnostics
                     microphoneSettings
                     archiveSettings
@@ -103,6 +116,262 @@ struct DashboardView: View {
             return "Starting..."
         }
         return model.hasActiveSession ? "Stop Session" : "Start Session"
+    }
+
+    private var iphoneSharing: some View {
+        GroupBox("iPhone Live Captions") {
+            HStack(alignment: .top, spacing: 20) {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 12) {
+                        if model.isIPhoneSharingActive {
+                            Button("Stop iPhone Sharing") {
+                                model.toggleIPhoneSharing()
+                            }
+                            .buttonStyle(.bordered)
+                        } else {
+                            Button("Start iPhone Sharing") {
+                                model.toggleIPhoneSharing()
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+
+                        Label(
+                            iphoneSharingStatusText,
+                            systemImage: model.isIPhoneConnected
+                                ? "iphone.radiowaves.left.and.right"
+                                : "iphone"
+                        )
+                        .foregroundStyle(
+                            model.isIPhoneConnected ? .green : .secondary
+                        )
+                    }
+
+                    if let url = model.iphonePairingURL {
+                        Text("Scan the QR code with the iPhone Camera, or copy the private pairing link.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Button("Copy Pairing Link") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(
+                                url.absoluteString,
+                                forType: .string
+                            )
+                        }
+
+                        Text(
+                            "One read-only iPhone is allowed. Stopping sharing "
+                                + "disconnects it and invalidates this link."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                        Text(
+                            "Use a trusted Wi-Fi network or your personal hotspot. "
+                                + "This browser phase is authenticated but not encrypted."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                    } else if case .failed(let message) = model.iphoneSharingStatus {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    } else {
+                        Text(
+                            "Sharing is off by default. It uses the current Wi-Fi "
+                                + "network and does not expose model controls."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                }
+
+                Spacer()
+
+                if let url = model.iphonePairingURL,
+                   let image = pairingQRCode(for: url) {
+                    Image(nsImage: image)
+                        .interpolation(.none)
+                        .resizable()
+                        .frame(width: 156, height: 156)
+                        .background(.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .accessibilityLabel("iPhone pairing QR code")
+                }
+            }
+            .padding(.vertical, 6)
+        }
+    }
+
+    private var iphoneSharingStatusText: String {
+        switch model.iphoneSharingStatus {
+        case .stopped:
+            return "Off"
+        case .starting:
+            return "Starting…"
+        case .ready:
+            return "Waiting for iPhone"
+        case .clientConnected:
+            return "iPhone connected"
+        case .failed:
+            return "Unavailable"
+        }
+    }
+
+    private var studentQuestions: some View {
+        GroupBox("Anonymous Student Questions") {
+            HStack(alignment: .top, spacing: 20) {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 12) {
+                        if model.areStudentQuestionsEnabled {
+                            Button("Pause Questions") {
+                                model.toggleStudentQuestions()
+                            }
+                            .buttonStyle(.bordered)
+                        } else {
+                            Button("Enable Questions") {
+                                model.toggleStudentQuestions()
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(!model.isIPhoneSharingActive)
+                        }
+
+                        Label(
+                            studentQuestionStatusText,
+                            systemImage: model.areStudentQuestionsEnabled
+                                ? "questionmark.bubble.fill"
+                                : "questionmark.bubble"
+                        )
+                        .foregroundStyle(
+                            model.areStudentQuestionsEnabled
+                                ? .green
+                                : .secondary
+                        )
+                    }
+
+                    if let url = model.studentQuestionURL {
+                        Text("Students scan this QR code to submit anonymous text questions.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Button("Copy Student Link") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(
+                                url.absoluteString,
+                                forType: .string
+                            )
+                        }
+                    } else if case .failed(let message) = model.studentQuestionStatus {
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    } else {
+                        Text(
+                            "Questions use a separate student QR. They are queued "
+                                + "locally and are never sent directly to a model."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+
+                    Divider()
+
+                    HStack(spacing: 12) {
+                        Text("Pending: \(model.pendingStudentQuestions.count)")
+                            .monospacedDigit()
+                        Button("Show Next") {
+                            model.presentNextStudentQuestion()
+                        }
+                        .disabled(model.pendingStudentQuestions.isEmpty)
+
+                        Button("Dismiss Current") {
+                            model.dismissPresentedStudentQuestion()
+                        }
+                        .disabled(model.presentedStudentQuestion == nil)
+
+                        Button("Clear Pending") {
+                            model.clearPendingStudentQuestions()
+                        }
+                        .disabled(model.pendingStudentQuestions.isEmpty)
+                    }
+                    .font(.caption)
+
+                    HStack {
+                        Text("Show voice command")
+                        TextField(
+                            "Bonjour question suivante",
+                            text: $model.studentNextQuestionVoiceCommand
+                        )
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(!model.overlayVoiceCommandsEnabled)
+                    }
+
+                    HStack {
+                        Text("Dismiss voice command")
+                        TextField(
+                            "Bonjour question terminée",
+                            text: $model.studentDismissQuestionVoiceCommand
+                        )
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(!model.overlayVoiceCommandsEnabled)
+                    }
+
+                    if let question = model.presentedStudentQuestion {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Current question")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(question.text)
+                                .font(.title3.weight(.semibold))
+                                .textSelection(.enabled)
+                                .padding(12)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(.quaternary)
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                        }
+                    }
+                }
+
+                Spacer()
+
+                if let url = model.studentQuestionURL,
+                   let image = pairingQRCode(for: url) {
+                    Image(nsImage: image)
+                        .interpolation(.none)
+                        .resizable()
+                        .frame(width: 156, height: 156)
+                        .background(.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .accessibilityLabel("Student question QR code")
+                }
+            }
+            .padding(.vertical, 6)
+        }
+    }
+
+    private var studentQuestionStatusText: String {
+        switch model.studentQuestionStatus {
+        case .stopped:
+            return "Paused"
+        case .ready:
+            return "Accepting questions"
+        case .failed:
+            return "Unavailable"
+        }
+    }
+
+    private func pairingQRCode(for url: URL) -> NSImage? {
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(url.absoluteString.utf8)
+        filter.correctionLevel = "M"
+        guard let output = filter.outputImage else { return nil }
+        let transformed = output.transformed(
+            by: CGAffineTransform(scaleX: 10, y: 10)
+        )
+        let representation = NSCIImageRep(ciImage: transformed)
+        let image = NSImage(size: representation.size)
+        image.addRepresentation(representation)
+        return image
     }
 
     @ViewBuilder

@@ -2,6 +2,7 @@ import AppKit
 import ClassroomCaptionsCore
 import Foundation
 import Observation
+import Synchronization
 
 struct DisplayChoice: Identifiable, Equatable {
     let id: CGDirectDisplayID
@@ -21,6 +22,12 @@ enum TranscriptionBackend: String, CaseIterable, Identifiable {
         case .webSocket: return "WebSocket (advanced)"
         }
     }
+}
+
+struct ClassroomQuestion: Identifiable, Equatable {
+    let id: UUID
+    let text: String
+    let submittedAt: Date
 }
 
 @MainActor
@@ -52,6 +59,13 @@ final class ClassroomAppModel {
     private(set) var gemmaTransformationPercentage: Double?
     private(set) var appMemoryFootprintBytes: UInt64?
     private(set) var gemmaMemoryFootprintBytes: UInt64?
+    private(set) var iphoneSharingStatus = LocalCaptionServerStatus.stopped
+    private(set) var iphonePairingURL: URL?
+    private(set) var studentQuestionStatus =
+        StudentQuestionServerStatus.stopped
+    private(set) var studentQuestionURL: URL?
+    private(set) var pendingStudentQuestions: [ClassroomQuestion] = []
+    private(set) var presentedStudentQuestion: ClassroomQuestion?
     var selectedDisplayID: CGDirectDisplayID?
     var selectedMicrophoneID: String?
     var transcriptionBackend = TranscriptionBackend.embedded
@@ -168,6 +182,26 @@ final class ClassroomAppModel {
             )
         }
     }
+    var studentNextQuestionVoiceCommand = UserDefaults.standard.string(
+        forKey: "studentNextQuestionVoiceCommand"
+    ) ?? "Bonjour question suivante" {
+        didSet {
+            UserDefaults.standard.set(
+                studentNextQuestionVoiceCommand,
+                forKey: "studentNextQuestionVoiceCommand"
+            )
+        }
+    }
+    var studentDismissQuestionVoiceCommand = UserDefaults.standard.string(
+        forKey: "studentDismissQuestionVoiceCommand"
+    ) ?? "Bonjour question terminée" {
+        didSet {
+            UserDefaults.standard.set(
+                studentDismissQuestionVoiceCommand,
+                forKey: "studentDismissQuestionVoiceCommand"
+            )
+        }
+    }
     var recordSessions = true
     var sessionArchiveDirectory = NSString(
         string: "~/Documents/ClassroomCaptions"
@@ -214,15 +248,21 @@ final class ClassroomAppModel {
     @ObservationIgnored
     private var activeMicrophoneName: String?
     @ObservationIgnored
-    private var processedOverlayVoiceCommandCount = 0
+    private var processedOverlayVoiceCommandActions: [SpokenOverlayAction] = []
     @ObservationIgnored
     private var gemmaProcessID: pid_t?
+    @ObservationIgnored
+    private var captionServer: LocalCaptionServer!
+    @ObservationIgnored
+    private var remoteCaptionRevision: UInt64 = 0
     @ObservationIgnored
     private var overlayMinimumVisibleSequence: Int?
     @ObservationIgnored
     private var overlayClearFinalizationPending = false
     @ObservationIgnored
     private var overlayShouldResumeAfterClear = false
+    @ObservationIgnored
+    private let audioInputEnabled = Mutex(false)
 
     var isListening: Bool {
         session?.phase == .listening
@@ -237,11 +277,67 @@ final class ClassroomAppModel {
         overlayController.isVisible
     }
 
+    var isIPhoneSharingActive: Bool {
+        switch iphoneSharingStatus {
+        case .starting, .ready, .clientConnected:
+            return true
+        case .stopped, .failed:
+            return false
+        }
+    }
+
+    var isIPhoneConnected: Bool {
+        if case .clientConnected = iphoneSharingStatus {
+            return true
+        }
+        return false
+    }
+
+    var areStudentQuestionsEnabled: Bool {
+        if case .ready = studentQuestionStatus {
+            return true
+        }
+        return false
+    }
+
     var recentSegments: [CaptionSegment] {
         session?.timeline.recentSegments(limit: 8) ?? []
     }
 
+    private var terminationObserver: NSObjectProtocol?
+    @ObservationIgnored private var pendingAudioBytes = 0
+    @ObservationIgnored private var lastMeterPublish = ContinuousClock.now
+
     init() {
+        // Quitting via Cmd-Q, the Dock, or window close never runs the
+        // menu-bar Quit button, and a spawned mlx_lm.server child outlives
+        // its parent. Shut services down on every termination path.
+        terminationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.shutdown()
+            }
+        }
+        captionServer = LocalCaptionServer(
+            statusHandler: { [weak self] status in
+                Task { @MainActor [weak self] in
+                    self?.handleIPhoneSharingStatus(status)
+                }
+            },
+            questionStatusHandler: { [weak self] status in
+                Task { @MainActor [weak self] in
+                    self?.handleStudentQuestionStatus(status)
+                }
+            },
+            questionHandler: { [weak self] question in
+                Task { @MainActor [weak self] in
+                    self?.receiveStudentQuestion(question)
+                }
+            }
+        )
         if UserDefaults.standard.object(forKey: "overlayShowVoiceCommand") == nil
             || overlayShowVoiceCommand == "Sésame lumière"
             || overlayShowVoiceCommand == "Rideau bleu" {
@@ -338,9 +434,12 @@ final class ClassroomAppModel {
         guard var session else { return }
         if session.phase == .listening {
             guard session.pause() else { return }
+            audioInputEnabled.withLock { $0 = false }
+            discardBufferedAudioAtPause()
             statusText = "Paused"
         } else if session.phase == .paused {
             guard session.markListening() else { return }
+            audioInputEnabled.withLock { $0 = true }
             statusText = "Listening"
         }
         self.session = session
@@ -350,8 +449,11 @@ final class ClassroomAppModel {
     func stopSession() {
         guard !isStoppingSession, var currentSession = session else { return }
         guard currentSession.beginStopping() else { return }
+        capturedAudioBytes += pendingAudioBytes
+        pendingAudioBytes = 0
         session = currentSession
         isStoppingSession = true
+        audioInputEnabled.withLock { $0 = false }
         commitTask?.cancel()
         commitTask = nil
         silenceFlushTask?.cancel()
@@ -449,6 +551,7 @@ final class ClassroomAppModel {
             return
         }
         microphoneCapture.stop()
+        audioInputEnabled.withLock { $0 = false }
         commitTask?.cancel()
         commitTask = nil
         silenceFlushTask?.cancel()
@@ -526,7 +629,10 @@ final class ClassroomAppModel {
         switch event {
         case .connected:
             voxtralConnected = true
-            isStartingSession = false
+            // isStartingSession stays true until markListening() or failure:
+            // clearing it here re-enables Start while the microphone permission
+            // prompt is up, allowing a second start to reload the model
+            // mid-flight and double-start the archive.
             statusText = "Voxtral connected; requesting microphone access"
             Task { await startMicrophoneAfterVoxtralConnection() }
 
@@ -554,7 +660,7 @@ final class ClassroomAppModel {
                 enqueueCorrection(segment)
             }
             recordFirstCaptionLatencyIfNeeded()
-            processedOverlayVoiceCommandCount = 0
+            processedOverlayVoiceCommandActions = []
             if wasClearingOverlay || overlayClearFinalizationPending {
                 overlayMinimumVisibleSequence =
                     (session.timeline.segments.last?.sequence ?? -1) + 1
@@ -595,6 +701,7 @@ final class ClassroomAppModel {
             }
             activeRecordingEnabled = false
             activeTranscriptionBackend = nil
+            isStartingSession = false
             return
         }
 
@@ -621,43 +728,63 @@ final class ClassroomAppModel {
             try microphoneCapture.start(
                 deviceUID: selectedMicrophoneID
             ) { [weak self] chunk in
-                guard let self else { return }
+                guard let self,
+                      self.audioInputEnabled.withLock({ $0 }) else {
+                    return
+                }
                 if recordingEnabled {
                     archive.appendAudio(chunk)
                 }
                 let reading = PCM16LevelMeter.measure(chunk)
                 if backend == .embedded {
                     self.embeddedVoxtral.sendAudio(chunk)
+                } else if backend == .webSocket {
+                    // Sent synchronously from the capture queue: per-chunk
+                    // Tasks have no FIFO guarantee, so awaiting the send from
+                    // them could deliver audio frames out of order.
+                    self.voxtral.sendAudio(chunk)
                 }
                 Task {
                     await MainActor.run {
                         guard self.isListening else { return }
-                        self.capturedAudioBytes += chunk.count
-                        self.microphoneLevel = reading.normalizedLevel
+                        // Silence detection needs every chunk's level, but the
+                        // observable meter/byte counters only need ~15 Hz:
+                        // writing them at the 100 Hz capture rate invalidates
+                        // SwiftUI views for changes no one can perceive.
+                        self.pendingAudioBytes += chunk.count
                         if backend == .embedded {
                             self.noteEmbeddedVoiceActivity(
                                 level: reading.normalizedLevel
                             )
                         }
-                    }
-                    if backend == .webSocket {
-                        await self.voxtral.sendAudio(chunk)
+                        let now = ContinuousClock.now
+                        if self.lastMeterPublish.duration(to: now)
+                            >= .milliseconds(66) {
+                            self.lastMeterPublish = now
+                            self.capturedAudioBytes += self.pendingAudioBytes
+                            self.pendingAudioBytes = 0
+                            self.microphoneLevel = reading.normalizedLevel
+                        }
                     }
                 }
             }
             _ = newSession.markListening()
             session = newSession
+            audioInputEnabled.withLock { $0 = true }
             sessionListeningStartedAt = Date()
             statusText = "Listening with Voxtral"
+            isStartingSession = false
             if activeTranscriptionBackend == .webSocket {
                 restartCommitTask()
             }
             refreshOverlay()
         } catch {
             sessionArchive.cancel()
+            audioInputEnabled.withLock { $0 = false }
             session = nil
             microphoneError = error.localizedDescription
             statusText = "Microphone failed"
+            isStartingSession = false
             if activeTranscriptionBackend == .embedded {
                 _ = await embeddedVoxtral.stop()
             } else {
@@ -694,6 +821,19 @@ final class ClassroomAppModel {
         }
     }
 
+    private func discardBufferedAudioAtPause() {
+        silenceFlushTask?.cancel()
+        silenceFlushTask = nil
+        if activeTranscriptionBackend == .embedded {
+            Task { [weak self] in
+                guard let self else { return }
+                await self.embeddedVoxtral.flush(finalizeCaption: true)
+            }
+        } else {
+            voxtral.commit()
+        }
+    }
+
     private func recordFirstCaptionLatencyIfNeeded() {
         guard firstCaptionLatency == nil, let sessionListeningStartedAt else { return }
         firstCaptionLatency = Date().timeIntervalSince(sessionListeningStartedAt)
@@ -715,7 +855,50 @@ final class ClassroomAppModel {
         correctionWarmupTask?.cancel()
         correctionWorkerTask?.cancel()
         diagnosticsTask?.cancel()
+        captionServer.stop()
         gemmaServer.stop()
+        embeddedVoxtral.releaseModel()
+    }
+
+    func toggleIPhoneSharing() {
+        if isIPhoneSharingActive {
+            captionServer.setQuestionSubmissionsEnabled(false)
+            captionServer.stop()
+        } else {
+            iphonePairingURL = nil
+            iphoneSharingStatus = .starting
+            captionServer.start()
+            publishRemoteCaptions()
+        }
+    }
+
+    func toggleStudentQuestions() {
+        guard isIPhoneSharingActive else {
+            studentQuestionStatus = .failed(
+                "Start iPhone sharing before enabling student questions."
+            )
+            return
+        }
+        captionServer.setQuestionSubmissionsEnabled(
+            !areStudentQuestionsEnabled
+        )
+    }
+
+    func presentNextStudentQuestion() {
+        presentedStudentQuestion = pendingStudentQuestions.isEmpty
+            ? nil
+            : pendingStudentQuestions.removeFirst()
+        refreshOverlay(forceVisible: presentedStudentQuestion != nil)
+    }
+
+    func dismissPresentedStudentQuestion() {
+        presentedStudentQuestion = nil
+        refreshOverlay()
+    }
+
+    func clearPendingStudentQuestions() {
+        pendingStudentQuestions.removeAll()
+        refreshOverlay()
     }
 
     func diagnosticsSettingChanged() {
@@ -782,8 +965,12 @@ final class ClassroomAppModel {
         startCorrectionWorkerIfNeeded()
     }
 
+    private var correctionWorkerGeneration = 0
+
     private func startCorrectionWorkerIfNeeded() {
         guard correctionWorkerTask == nil else { return }
+        correctionWorkerGeneration += 1
+        let generation = correctionWorkerGeneration
         correctionWorkerTask = Task { [weak self] in
             guard let self else { return }
             while !Task.isCancelled, !self.pendingCorrections.isEmpty {
@@ -792,7 +979,12 @@ final class ClassroomAppModel {
                 await self.correctSegment(pending.segmentID, mode: pending.mode)
                 self.correctionQueueDepth = self.pendingCorrections.count
             }
-            self.correctionWorkerTask = nil
+            // A worker cancelled mid-await can resume after a newer worker was
+            // spawned; only the current generation may release the handle,
+            // otherwise the next enqueue starts a duplicate worker.
+            if self.correctionWorkerGeneration == generation {
+                self.correctionWorkerTask = nil
+            }
         }
     }
 
@@ -926,11 +1118,18 @@ final class ClassroomAppModel {
     }
 
     private func updateGemmaProcessIdentity(endpoint: URL) {
-        gemmaProcessID = gemmaServer.processIdentifier(endpoint: endpoint)
-        if let gemmaProcessID {
-            gemmaMemoryFootprintBytes = ProcessMemory.physicalFootprintBytes(
-                processID: gemmaProcessID
+        Task { [weak self] in
+            guard let self else { return }
+            let identifier = await self.gemmaServer.processIdentifier(
+                endpoint: endpoint
             )
+            self.gemmaProcessID = identifier
+            if let identifier {
+                self.gemmaMemoryFootprintBytes =
+                    ProcessMemory.physicalFootprintBytes(
+                        processID: identifier
+                    )
+            }
         }
     }
 
@@ -948,8 +1147,17 @@ final class ClassroomAppModel {
         let clearPhrase = overlayClearVoiceCommand.trimmingCharacters(
             in: .whitespacesAndNewlines
         )
+        let nextQuestionPhrase =
+            studentNextQuestionVoiceCommand.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            )
+        let dismissQuestionPhrase =
+            studentDismissQuestionVoiceCommand.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            )
         guard !showPhrase.isEmpty, !hidePhrase.isEmpty,
-              !clearPhrase.isEmpty else {
+              !clearPhrase.isEmpty, !nextQuestionPhrase.isEmpty,
+              !dismissQuestionPhrase.isEmpty else {
             return text
         }
 
@@ -957,23 +1165,34 @@ final class ClassroomAppModel {
             in: text,
             showPhrase: showPhrase,
             hidePhrase: hidePhrase,
-            clearPhrase: clearPhrase
+            clearPhrase: clearPhrase,
+            nextQuestionPhrase: nextQuestionPhrase,
+            dismissQuestionPhrase: dismissQuestionPhrase
         )
         if !commands.isEmpty {
-            let firstUnhandledIndex = min(
-                processedOverlayVoiceCommandCount,
-                commands.count
-            )
-            for command in commands.dropFirst(firstUnhandledIndex) {
-                applyOverlayVoiceCommand(
-                    command.action,
-                    provisional: provisional
+            // Compare the recognized actions element-wise with what was
+            // already executed for this utterance: a pure count would treat a
+            // revised hypothesis ("...bleu" -> "...rouge") as already handled
+            // and never execute the corrected command.
+            let actions = commands.map(\.action)
+            for (index, action) in actions.enumerated() {
+                if index < processedOverlayVoiceCommandActions.count {
+                    if processedOverlayVoiceCommandActions[index] != action {
+                        applyOverlayVoiceCommand(action, provisional: provisional)
+                        processedOverlayVoiceCommandActions[index] = action
+                    }
+                } else {
+                    applyOverlayVoiceCommand(action, provisional: provisional)
+                    processedOverlayVoiceCommandActions.append(action)
+                }
+            }
+            if processedOverlayVoiceCommandActions.count > actions.count {
+                processedOverlayVoiceCommandActions.removeLast(
+                    processedOverlayVoiceCommandActions.count - actions.count
                 )
             }
-            if provisional {
-                processedOverlayVoiceCommandCount = commands.count
-            } else {
-                processedOverlayVoiceCommandCount = 0
+            if !provisional {
+                processedOverlayVoiceCommandActions = []
             }
             return commands.last?.remainingText ?? ""
         }
@@ -983,7 +1202,9 @@ final class ClassroomAppModel {
                text,
                showPhrase: showPhrase,
                hidePhrase: hidePhrase,
-               clearPhrase: clearPhrase
+               clearPhrase: clearPhrase,
+               nextQuestionPhrase: nextQuestionPhrase,
+               dismissQuestionPhrase: dismissQuestionPhrase
            ) {
             return ""
         }
@@ -1011,6 +1232,20 @@ final class ClassroomAppModel {
             statusText = "Captions cleared by voice command"
             if provisional {
                 requestCaptionBoundaryForOverlayClear()
+            }
+        case .nextQuestion:
+            if pendingStudentQuestions.isEmpty {
+                statusText = "No pending student question"
+            } else {
+                presentNextStudentQuestion()
+                statusText = "Next student question opened by voice command"
+            }
+        case .dismissQuestion:
+            if presentedStudentQuestion == nil {
+                statusText = "No student question is open"
+            } else {
+                dismissPresentedStudentQuestion()
+                statusText = "Student question dismissed by voice command"
             }
         }
     }
@@ -1042,7 +1277,7 @@ final class ClassroomAppModel {
         overlayMinimumVisibleSequence = nil
         overlayClearFinalizationPending = false
         overlayShouldResumeAfterClear = false
-        processedOverlayVoiceCommandCount = 0
+        processedOverlayVoiceCommandActions = []
     }
 
     func resetOverlayFrame() {
@@ -1055,19 +1290,32 @@ final class ClassroomAppModel {
         refreshOverlay(forceVisible: true)
     }
 
+    /// Last `limit` display lines at or past the clear boundary. Sequences
+    /// are monotonic with position, so the visible segments form a suffix and
+    /// this scan is O(limit), instead of filtering the whole timeline on
+    /// every caption event of a long lecture.
+    private func visibleOverlayLines(limit: Int = 3) -> [String] {
+        guard let segments = session?.timeline.segments else { return [] }
+        var lines: [String] = []
+        for segment in segments.reversed() {
+            if let overlayMinimumVisibleSequence,
+               segment.sequence < overlayMinimumVisibleSequence {
+                break
+            }
+            lines.append(segment.displayText)
+            if lines.count == limit { break }
+        }
+        return lines.reversed()
+    }
+
     func refreshOverlay(forceVisible: Bool = false) {
         let selectedScreen = NSScreen.screens.first { $0.displayID == selectedDisplayID }
             ?? NSScreen.main
-        let lines = session?.timeline.segments
-            .filter { segment in
-                guard let overlayMinimumVisibleSequence else { return true }
-                return segment.sequence >= overlayMinimumVisibleSequence
-            }
-            .suffix(3)
-            .map(\.displayText) ?? []
+        let lines = visibleOverlayLines()
         let provisional = overlayClearFinalizationPending
             ? nil
             : session?.timeline.provisional?.text
+        publishRemoteCaptions(lines: lines, provisional: provisional)
         let shouldShow = forceVisible || overlayController.isVisible
 
         guard shouldShow, let selectedScreen else {
@@ -1079,8 +1327,76 @@ final class ClassroomAppModel {
             on: selectedScreen,
             lines: lines,
             provisional: provisional,
+            question: presentedStudentQuestion?.text,
+            pendingQuestionCount: pendingStudentQuestions.count,
             fontSize: captionFontSize
         )
+    }
+
+    private func handleIPhoneSharingStatus(_ status: LocalCaptionServerStatus) {
+        iphoneSharingStatus = status
+        switch status {
+        case .ready(let url), .clientConnected(let url):
+            iphonePairingURL = url
+            publishRemoteCaptions()
+        case .stopped, .starting, .failed:
+            iphonePairingURL = nil
+            studentQuestionURL = nil
+            if case .stopped = status {
+                studentQuestionStatus = .stopped
+            }
+        }
+    }
+
+    private func handleStudentQuestionStatus(
+        _ status: StudentQuestionServerStatus
+    ) {
+        studentQuestionStatus = status
+        switch status {
+        case .ready(let url):
+            studentQuestionURL = url
+        case .stopped, .failed:
+            studentQuestionURL = nil
+        }
+    }
+
+    private func receiveStudentQuestion(
+        _ submission: SubmittedClassroomQuestion
+    ) {
+        // The server has already answered "202 Accepted", so dropping here
+        // is silent loss. The server admits at most 100 questions per hour;
+        // this much larger cap is purely a memory bound and is unreachable
+        // unless a multi-hour backlog is left entirely unmoderated.
+        guard pendingStudentQuestions.count < 500 else { return }
+        pendingStudentQuestions.append(ClassroomQuestion(
+            id: submission.id,
+            text: submission.text,
+            submittedAt: submission.submittedAt
+        ))
+        refreshOverlay()
+    }
+
+    private func publishRemoteCaptions(
+        lines: [String]? = nil,
+        provisional: String? = nil
+    ) {
+        guard isIPhoneSharingActive else { return }
+        remoteCaptionRevision &+= 1
+        let visibleLines = lines ?? visibleOverlayLines()
+        let visibleProvisional: String?
+        if lines != nil {
+            visibleProvisional = provisional
+        } else {
+            visibleProvisional = overlayClearFinalizationPending
+                ? nil
+                : session?.timeline.provisional?.text
+        }
+        captionServer.publish(RemoteCaptionSnapshot(
+            finalized: visibleLines,
+            provisional: visibleProvisional,
+            sessionActive: hasActiveSession,
+            revision: remoteCaptionRevision
+        ))
     }
 }
 
