@@ -122,7 +122,19 @@ final class SessionExportTests: XCTestCase {
             | UInt32(data[offset + 2]) << 16
             | UInt32(data[offset + 3]) << 24
     }
+
+    func testWAVHeaderHandlesMaximumRIFFSize() {
+        // The RIFF chunk-size field stores dataByteCount + 36; the largest
+        // legal payload must not overflow UInt32 when the header is built.
+        let header = PCM16WAVHeader.make(dataByteCount: UInt32.max - 36)
+        XCTAssertEqual(header.count, PCM16WAVHeader.byteCount)
+        let riffSize = header.subdata(in: 4..<8).withUnsafeBytes {
+            $0.loadUnaligned(as: UInt32.self)
+        }
+        XCTAssertEqual(riffSize, UInt32.max)
+    }
 }
+
 
 private extension JSONDecoder {
     static var iso8601: JSONDecoder {
@@ -130,4 +142,5 @@ private extension JSONDecoder {
         decoder.dateDecodingStrategy = .iso8601
         return decoder
     }
+
 }

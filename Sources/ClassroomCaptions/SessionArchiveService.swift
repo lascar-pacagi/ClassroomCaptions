@@ -96,7 +96,9 @@ final class SessionArchiveService: @unchecked Sendable {
                     userInfo: [NSLocalizedDescriptionKey: writeFailure]
                 )
             }
-            guard self.state.audioBytes <= UInt64(UInt32.max) else {
+            // The RIFF chunk-size field stores dataByteCount + 36, so the
+            // limit must leave room for that addition in UInt32.
+            guard self.state.audioBytes <= UInt64(UInt32.max) - 36 else {
                 throw SessionArchiveError.audioTooLarge
             }
 

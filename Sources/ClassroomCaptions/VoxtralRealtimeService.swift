@@ -87,7 +87,11 @@ final class VoxtralRealtimeService: NSObject, StreamingTranscriptionService,
         task.resume()
     }
 
-    func sendAudio(_ pcm16MonoData: Data) async {
+    // Synchronous on purpose: callers on the capture queue rely on call order
+    // matching frame order, and URLSessionWebSocketTask.send enqueues frames
+    // in call order. (A synchronous method still satisfies the protocol's
+    // async requirement.)
+    func sendAudio(_ pcm16MonoData: Data) {
         guard !pcm16MonoData.isEmpty else { return }
         state.withLock { $0.hasUncommittedAudio = true }
         send([

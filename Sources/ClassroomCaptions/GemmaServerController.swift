@@ -69,32 +69,36 @@ final class GemmaServerController {
         self.process = nil
     }
 
-    func processIdentifier(endpoint: URL) -> pid_t? {
+    func processIdentifier(endpoint: URL) async -> pid_t? {
         if let process, process.isRunning {
             return process.processIdentifier
         }
         guard let port = endpoint.port else { return nil }
 
-        let lookup = Process()
-        let output = Pipe()
-        lookup.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-        lookup.arguments = [
-            "-nP", "-tiTCP:\(port)", "-sTCP:LISTEN",
-        ]
-        lookup.standardOutput = output
-        lookup.standardError = FileHandle.nullDevice
-        do {
-            try lookup.run()
-            lookup.waitUntilExit()
-            guard lookup.terminationStatus == 0 else { return nil }
-            let data = output.fileHandleForReading.readDataToEndOfFile()
-            let value = String(data: data, encoding: .utf8)?
-                .split(whereSeparator: \.isNewline)
-                .first
-            return value.flatMap { pid_t($0) }
-        } catch {
-            return nil
-        }
+        // lsof plus waitUntilExit can stall for noticeable time; run the
+        // lookup off the main actor so the UI and caption path never block.
+        return await Task.detached(priority: .utility) {
+            let lookup = Process()
+            let output = Pipe()
+            lookup.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+            lookup.arguments = [
+                "-nP", "-tiTCP:\(port)", "-sTCP:LISTEN",
+            ]
+            lookup.standardOutput = output
+            lookup.standardError = FileHandle.nullDevice
+            do {
+                try lookup.run()
+                lookup.waitUntilExit()
+                guard lookup.terminationStatus == 0 else { return nil }
+                let data = output.fileHandleForReading.readDataToEndOfFile()
+                let value = String(data: data, encoding: .utf8)?
+                    .split(whereSeparator: \.isNewline)
+                    .first
+                return value.flatMap { pid_t($0) }
+            } catch {
+                return nil
+            }
+        }.value
     }
 
     private func launch(
