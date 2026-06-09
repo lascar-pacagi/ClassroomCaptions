@@ -1,0 +1,168 @@
+---
+title: "Swift Concurrency and Ownership"
+---
+
+The application has three timing domains: the real-time audio callback, the
+serialized Voxtral inference queue, and the main actor. Gemma and networking
+add asynchronous work, but they must never block the first two.
+
+## Suspension is not a thread
+
+`async` means a function may suspend. `await` marks a point where the current
+task can yield while another operation progresses. It does not promise a new
+thread.
+
+```swift
+let drainedText = await embeddedVoxtral.stop()
+```
+
+The caller suspends until `stop` resumes its continuation. UI event processing
+can continue because no thread is synchronously waiting.
+
+## Tasks carry cancellation and actor context
+
+```swift
+correctionWorkerTask = Task { [weak self] in
+    guard let self else { return }
+    while !Task.isCancelled, !self.pendingCorrections.isEmpty {
+        let pending = self.pendingCorrections.removeFirst()
+        await self.correctSegment(pending.segmentID, mode: pending.mode)
+    }
+    self.correctionWorkerTask = nil
+}
+```
+
+This worker serializes corrections by awaiting one request before removing the
+next. Serialization is application policy: it bounds memory, preserves lecture
+order, and prevents simultaneous 26B-model requests from fighting for GPU
+resources.
+
+Cancellation is cooperative. `cancel()` sets a flag; code must check
+`Task.isCancelled` or call an operation that throws `CancellationError`.
+
+## The main actor owns application and UI state
+
+```swift
+@MainActor
+@Observable
+final class ClassroomAppModel { ... }
+```
+
+Every isolated property access and method call belongs to the main actor.
+Compiler diagnostics catch many accidental background mutations. AppKit and
+SwiftUI also expect their objects to be manipulated from the main thread, so
+this language-level boundary matches the platform boundary.
+
+Callbacks arriving from non-main queues explicitly hop:
+
+```swift
+Task { @MainActor [weak self] in
+    self?.handleVoxtralEvent(event)
+}
+```
+
+## A serial dispatch queue owns the C runtime
+
+The embedded service uses:
+
+```swift
+private let inferenceQueue = DispatchQueue(
+    label: "ClassroomCaptions.voxtral.inference",
+    qos: .userInitiated
+)
+```
+
+Model load, stream creation, audio feed, token drain, flush, and destruction
+all execute on this queue. Therefore `vox_stream_t` never receives concurrent
+calls. This is stronger and easier to audit than placing separate locks around
+individual C calls.
+
+The small `State` structure is separately protected:
+
+```swift
+private let state = Mutex(State())
+
+let stream = state.withLock { $0.stream }
+```
+
+The lock protects publication and lookup of handles and the event
+continuation. It does not make the C object internally thread-safe. The serial
+queue still owns operations on the pointee.
+
+## Checked continuations adapt callback APIs
+
+```swift
+try await withCheckedThrowingContinuation {
+    (continuation: CheckedContinuation<Void, Error>) in
+    inferenceQueue.async {
+        // perform synchronous C setup
+        continuation.resume()
+    }
+}
+```
+
+A continuation is a one-shot capability to resume the suspended async
+function. “Checked” means the runtime diagnoses common mistakes such as
+abandoning or resuming it twice. Every branch must resume exactly once.
+
+## `AsyncStream` adapts a sequence of callbacks
+
+Transcription produces many events, so one continuation is retained:
+
+```swift
+func events() -> AsyncStream<TranscriptionEvent> {
+    AsyncStream { continuation in
+        state.withLock { $0.continuation = continuation }
+        continuation.onTermination = { [weak self] _ in
+            self?.state.withLock { $0.continuation = nil }
+        }
+    }
+}
+```
+
+The producer calls `yield(event)`. The app model consumes the stream with
+`for await`. Termination clears the retained continuation and prevents a stale
+subscriber from being called.
+
+## Real-time audio has stricter rules
+
+The Core Audio callback cannot await, allocate unpredictably, log heavily, or
+touch main-actor state. It renders into preallocated memory and hands bounded
+work to the rest of the pipeline. The callback is a deadline-driven C ABI
+entry point even though its implementation is in Swift.
+
+Conceptually:
+
+```text
+Core Audio thread -> render PCM -> bounded callback -> inference queue
+                                            \-> archive queue
+```
+
+Pause closes the capture gate before buffered audio is discarded. This keeps
+paused speech out of both Voxtral and the optional WAV archive.
+
+## Concurrency proof for a caption
+
+1. Core Audio invokes the render callback.
+2. PCM data is copied into owned `Data`; no callback pointer escapes.
+3. `sendAudio` enqueues the owned bytes on `inferenceQueue`.
+4. The queue calls the C bridge and drains complete text tokens.
+5. `AsyncStream` publishes a value-type event.
+6. The observer hops to `MainActor`.
+7. The app model mutates its value-type session and refreshes the overlay.
+8. A finalized segment enters the one-at-a-time correction task.
+
+No UI object enters the audio callback. No C stream call occurs on the main
+actor. No Gemma request delays provisional text.
+
+## Failure patterns to avoid
+
+- Calling C stream functions from both `stop()` and `sendAudio()` without one
+  owner queue creates a use-after-free race.
+- Holding a mutex while awaiting can deadlock or retain mutable state across an
+  arbitrary suspension.
+- Capturing `self` strongly in a callback retained by `self` creates a cycle.
+- Assuming task cancellation interrupts C inference is incorrect; the C layer
+  needs its own cancellation check if interruption is required.
+- Marking a type `@unchecked Sendable` without documenting its synchronization
+  transfers correctness from the compiler to the programmer.

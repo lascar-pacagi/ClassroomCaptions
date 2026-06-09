@@ -1511,9 +1511,12 @@ API for callers that do not need batching.
 ### Recognizing and removing several commands safely
 
 All configured phrases are matched independently, then sorted by source
-position. Ranges are removed in reverse order because deleting a later range
-does not invalidate indices before it. Removing from left to right would make
-subsequent saved indices refer to the wrong positions.
+position, longest first at equal positions. Distinct phrases can produce
+overlapping matches — one phrase may be a token-prefix of another, or two
+commands may be configured with identical words — so the recognizer keeps the
+longest match at each position and drops anything it overlaps. The surviving
+ranges are then removed in reverse order because deleting a later range does
+not invalidate indices before it; deleting an overlapping range would.
 
 The recognizer returns every action in spoken order. Only the final command
 carries the cleaned remaining lecture text; otherwise a caller processing each
@@ -1550,19 +1553,38 @@ enabled only for the known phrase it repairs, limiting accidental matches.
                         : []
                 )
         ).sorted {
-            $0.range.lowerBound < $1.range.lowerBound
+            if $0.range.lowerBound != $1.range.lowerBound {
+                return $0.range.lowerBound < $1.range.lowerBound
+            }
+            return $0.range.upperBound > $1.range.upperBound
         }
         guard !matches.isEmpty else { return [] }
 
+        // Distinct phrases may produce overlapping matches (one phrase a
+        // prefix of another, or two commands configured with the same words).
+        // Removing one range invalidates String indices inside any range that
+        // overlaps it, so keep the longest match at each position and drop
+        // whatever it overlaps before editing the text.
+        var acceptedIndices: [Int] = []
+        var lastUpperBound: String.Index?
+        for (index, match) in matches.enumerated() {
+            if let bound = lastUpperBound, match.range.lowerBound < bound {
+                continue
+            }
+            acceptedIndices.append(index)
+            lastUpperBound = match.range.upperBound
+        }
+        let accepted = acceptedIndices.map { matches[$0] }
+
         var remaining = text
-        for match in matches.reversed() {
+        for match in accepted.reversed() {
             remaining.removeSubrange(match.range)
         }
         let cleaned = cleanRemainingText(remaining)
-        return matches.enumerated().map { index, match in
+        return accepted.enumerated().map { index, match in
             SpokenOverlayCommand(
                 action: match.action,
-                remainingText: index == matches.count - 1 ? cleaned : ""
+                remainingText: index == accepted.count - 1 ? cleaned : ""
             )
         }
     }
@@ -1578,7 +1600,7 @@ completes as a command or diverges into ordinary speech.
 The trigger-only overload compares only the available prefix. Empty input and
 empty configuration are rejected explicitly.
 
-```{.swift .numberLines startFrom="122"}
+```{.swift .numberLines startFrom="141"}
 
     public static func isPotentialCommand(
         _ text: String,
@@ -1627,7 +1649,7 @@ would create too many collisions in normal French speech.
 The local Levenshtein implementation uses Unicode characters and two rows. With
 the tiny command vocabulary, its quadratic time is insignificant.
 
-```{.swift .numberLines startFrom="158"}
+```{.swift .numberLines startFrom="177"}
 
     private static func matches(_ candidate: String, _ expected: String) -> Bool {
         if candidate == expected { return true }
@@ -1676,7 +1698,7 @@ Configured full phrases use a sliding token window, preserving every matching
 source range. This can return more than one occurrence, which is why
 `recognizeAll` later owns ordering and deletion.
 
-```{.swift .numberLines startFrom="197"}
+```{.swift .numberLines startFrom="216"}
 
     private static func action(for token: String) -> SpokenOverlayAction? {
         if ["affiche", "afficher", "montre", "montrer"].contains(token) {
@@ -1721,7 +1743,7 @@ lumières”. This helper recognizes exactly that three-token acoustic confusion
 and maps it to `.show`. It is not a general language-model correction and is
 activated only when the configured show phrase is the corresponding command.
 
-```{.swift .numberLines startFrom="232"}
+```{.swift .numberLines startFrom="251"}
 
     private static func showAliases(in text: String) -> [Match] {
         let captionTokens = tokens(in: text)
@@ -1749,7 +1771,7 @@ be a literal prefix of its expected word, and it must contain at least two
 characters. This models streaming transcription while avoiding a holdback on
 every one-letter utterance.
 
-```{.swift .numberLines startFrom="250"}
+```{.swift .numberLines startFrom="269"}
 
     private static func isPotentialPhrase(
         _ text: String,
@@ -1790,7 +1812,7 @@ This dual representation is the key design point: comparing normalized copies
 alone would make it difficult to remove the corresponding accented,
 punctuated substring from the original caption reliably.
 
-```{.swift .numberLines startFrom="276"}
+```{.swift .numberLines startFrom="295"}
 
     private static func tokens(in text: String) -> [Token] {
         var result: [Token] = []
@@ -1832,7 +1854,7 @@ the third expression collapses a doubled period created where a command used
 to be. Cleanup is intentionally narrow; it does not rewrite punctuation inside
 the student's or professor's sentence.
 
-```{.swift .numberLines startFrom="307"}
+```{.swift .numberLines startFrom="326"}
 
     private static func cleanRemainingText(_ text: String) -> String {
         guard !tokens(in: text).isEmpty else { return "" }

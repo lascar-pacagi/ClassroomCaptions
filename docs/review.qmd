@@ -1,0 +1,116 @@
+---
+title: "Application Review"
+---
+
+## Review scope
+
+The review examined:
+
+- session lifecycle and concurrency;
+- microphone and archive boundaries;
+- C bridge ownership;
+- Voxtral streaming recovery;
+- Gemma process isolation and validation;
+- overlay geometry and scrolling;
+- spoken command handling;
+- HTTP parsing, authentication, rate limiting, and browser rendering;
+- tests, packaging, and documentation.
+
+## Corrected defect
+
+### Paused audio still entered Voxtral and the WAV archive
+
+The session phase changed to `paused`, so the domain model ignored provisional
+and finalized events. However, the microphone callback wrote PCM to the archive
+and sent it to Voxtral before checking session state.
+
+Consequences included:
+
+- recording speech the user believed was paused;
+- accumulating model audio that could join speech after resume;
+- finalizing buffered paused speech during stop;
+- incrementing audio diagnostics while paused.
+
+The fix adds a mutex-protected audio-input gate at the first line of the capture
+processing handler. Pause closes it and requests a model boundary; resume opens
+it. Stop, clear, and microphone failure close it. The gate prevents recording,
+metrics, voice activity, and inference from seeing paused chunks.
+
+## Review conclusions
+
+No additional high-severity correctness or command-execution flaw was found in
+the inspected paths. Important strengths are:
+
+- immutable raw captions;
+- bounded serialized correction;
+- loopback-only Gemma endpoint;
+- explicit model-output validator;
+- no model tools;
+- separate viewer and student capabilities;
+- source-bound question tickets and layered rate limits;
+- text-node browser rendering;
+- serialized C stream ownership;
+- structured bridge errors;
+- overlay frames clamped to a visible display.
+
+## Residual risks and test gaps
+
+### Normal application termination during an active session
+
+The custom menu calls service shutdown, but immediate process termination and
+ordinary macOS Quit do not currently wait for model drain and archive
+finalization. Users should stop the session before quitting. A future release
+should implement an `NSApplicationDelegate` termination handshake that returns
+`.terminateLater`, awaits `stopSession`, then replies to AppKit.
+
+### Minimal HTTP parser
+
+The parser is deliberately narrow and closes ordinary connections. It is
+adequate for generated browser requests, but it is not a reusable RFC-complete
+HTTP server. Future routes should either retain the same restricted grammar or
+move to a maintained HTTP implementation. Fuzzing malformed headers,
+`Content-Length`, and connection termination would strengthen confidence.
+
+### Network address selection
+
+The advertised URL prefers `en0` and otherwise the first active non-loopback
+IPv4 address. Complex VPN, Ethernet-plus-Wi-Fi, or unusual interface ordering
+can select an address that does not correspond to the constrained Wi-Fi
+listener. Test institutional network configurations; a future implementation
+can derive the address from the listener path/interface itself.
+
+### One caption viewer
+
+The SSE design intentionally accepts one live caption connection. This is not a
+bug, but users may assume the QR supports a room of viewers. Supporting multiple
+viewers requires per-connection backpressure, heartbeat, lifecycle, and
+resource limits.
+
+### Long-running C/Metal behavior
+
+Automated tests do not load the full model on every run. The C engine still
+needs:
+
+- multi-hour soak testing;
+- repeated load/free testing;
+- sanitizer runs where compatible with Metal;
+- allocation-failure hardening in upstream helper code;
+- measurements after compiler, macOS, or model changes.
+
+### Correction semantics
+
+Structural validation cannot prove exact semantic equivalence. Raw fallback
+limits the damage, but representative subject-specific corpora should remain
+part of release testing.
+
+## Verification performed
+
+At the time this book was generated:
+
+- the Swift package built;
+- all 65 automated tests passed;
+- plist syntax passed;
+- diff whitespace checks passed;
+- Quarto sources rendered to HTML and PDF;
+- the packaged application was rebuilt.
+

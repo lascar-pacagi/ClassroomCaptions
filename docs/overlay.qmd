@@ -1,0 +1,123 @@
+---
+title: "Overlay, Displays, and Spoken Commands"
+---
+
+## Why AppKit owns the window
+
+SwiftUI is used to describe content, but AppKit's `NSPanel` supplies the exact
+window behavior:
+
+- borderless;
+- non-activating;
+- floating above ordinary windows;
+- visible when the dashboard loses focus;
+- allowed in all Spaces and full-screen auxiliary contexts;
+- independently placed on a selected display.
+
+`NSHostingView<CaptionOverlayView>` embeds the SwiftUI hierarchy inside that
+panel.
+
+## Interaction layer
+
+A transparent `OverlayInteractionView` sits above the hosted content. Its
+`hitTest` returns itself only for:
+
+- a 42-point strip along the top;
+- a 48-by-48-point lower-right resize area.
+
+All other points return `nil`, so the overlay does not intercept the entire
+screen area. `acceptsFirstMouse` allows dragging without activating the app.
+
+Mouse movement is measured in global screen coordinates. The controller stores
+the panel frame at drag start and applies total translation from that fixed
+frame. This avoids integrating many small event deltas, which previously made
+the panel lag behind the cursor.
+
+## Geometry
+
+Each display's frame is persisted in `UserDefaults` under a key containing its
+Core Graphics display ID.
+
+Restoration always clamps:
+
+```text
+width  = clamp(saved width,  minimum width,  visible width)
+height = clamp(saved height, minimum height, visible height)
+x      = clamp(saved x, left margin,  right edge - width)
+y      = clamp(saved y, bottom margin, top edge - height)
+```
+
+The visible frame excludes the menu bar and Dock. This prevents an unplugged or
+reconfigured monitor from stranding the overlay outside reachable space.
+
+## Rendering and scrolling
+
+The overlay receives only:
+
+- three latest visible finalized captions;
+- one provisional caption;
+- optional current question;
+- pending question count;
+- font size.
+
+Final captions are white. Provisional text is dimmer and italic. A
+`ScrollViewReader` assigns an invisible bottom anchor and scrolls to it when a
+content-version string changes. This prevents long captions from ending in an
+unreachable ellipsis.
+
+Questions occupy a separate orange card with their own bounded scroll view.
+Waiting questions use a compact orange count badge without exposing text.
+
+## Display privacy
+
+The selected `NSScreen` determines where the panel appears. In extended-desktop
+mode, the professor can place it on a private display while the projector shows
+other material. In mirrored mode, macOS duplicates the display, so the
+application cannot make mirrored pixels differ.
+
+## Spoken command pipeline
+
+Commands are recognized from Voxtral text before it enters the timeline or
+Gemma:
+
+```{mermaid}
+flowchart TD
+    V[Voxtral cumulative provisional] --> R[Recognizer]
+    R -->|command actions| UI[Overlay/question state]
+    R -->|remaining lecture text| T[Timeline]
+    T --> G[Gemma]
+    T --> A[Archive]
+```
+
+Defaults are:
+
+- `Bonjour soleil bleu`: show;
+- `Bonjour soleil rouge`: hide;
+- `Bonjour soleil blanc`: clear;
+- `Bonjour question suivante`: open oldest pending;
+- `Bonjour question terminée`: dismiss current.
+
+The recognizer lowercases, removes accents, normalizes separators, and permits a
+small edit distance for sufficiently long words. The multiword prefix reduces
+accidental matches in normal computer-science speech.
+
+Voxtral provisional output is cumulative. A command visible in three successive
+provisional strings must execute once, not three times. The application stores
+the number of already-processed commands and applies only the new suffix.
+
+Potential partial commands are temporarily hidden so “Bonjour soleil…” does not
+flash as a caption before the color arrives.
+
+## Clear is a view operation
+
+Clear does not delete the timeline. It records the next sequence number that may
+be shown and creates a transcription boundary. Existing segments remain
+available for:
+
+- Gemma correction;
+- session export;
+- diagnostics;
+- later audit.
+
+If the overlay was visible, it resumes when a new caption arrives.
+

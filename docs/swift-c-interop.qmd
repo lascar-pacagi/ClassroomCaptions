@@ -1,0 +1,139 @@
+---
+title: "Swift and the voxtral.c Boundary"
+---
+
+The project does not expose the large upstream C API directly to application
+code. `ClassroomVoxtral.c` defines a small, project-owned ABI with opaque model
+and stream handles, explicit status values, and caller-provided error buffers.
+
+## Opaque pointers hide layout
+
+The C header declares incomplete structures:
+
+```c
+typedef struct ccv_model ccv_model_t;
+typedef struct ccv_stream ccv_stream_t;
+```
+
+Swift imports pointers to these as `OpaquePointer?`. It can retain the numeric
+handle and pass it back to C, but cannot inspect fields or depend on layout.
+This prevents Swift code from coupling itself to `struct vox_stream`.
+
+```swift
+private struct State: @unchecked Sendable {
+    var model: OpaquePointer?
+    var stream: OpaquePointer?
+}
+```
+
+The optionals encode whether resources currently exist.
+
+## Construction is transactional
+
+The model is loaded first, then a stream is created:
+
+```swift
+let model = ccv_model_load(path, &status, &errorBuffer, errorBuffer.count)
+guard let model else { throw makeError(...) }
+
+let stream = ccv_stream_create(
+    model, options, &status, &errorBuffer, errorBuffer.count
+)
+guard let stream else {
+    ccv_model_free(model)
+    throw makeError(...)
+}
+```
+
+If stream creation fails, the already-created model is released immediately.
+Only after both calls succeed are handles published under the mutex. This is
+the same staged-commit pattern used in careful C constructors.
+
+## Swift arrays become scoped pointers
+
+```swift
+let status = pcm16MonoData.withUnsafeBytes { bytes -> ccv_status_t in
+    let samples = bytes.bindMemory(to: Int16.self)
+    guard let base = samples.baseAddress, !samples.isEmpty else {
+        return CCV_STATUS_INVALID_ARGUMENT
+    }
+    return ccv_stream_feed_pcm16(stream, base, samples.count)
+}
+```
+
+The pointer is valid only during `withUnsafeBytes`. Therefore
+`ccv_stream_feed_pcm16` must consume or copy samples before returning. Retaining
+`base` in C would be a use-after-scope bug.
+
+`bindMemory(to:)` states the element interpretation. It does not resample,
+change endianness, or copy bytes.
+
+## Caller-owned output buffers
+
+Text retrieval first tries a modest buffer:
+
+```swift
+var requiredCapacity = 0
+var buffer = [CChar](repeating: 0, count: 256)
+var status = ccv_stream_read_text(
+    stream, &buffer, buffer.count, &requiredCapacity
+)
+```
+
+If C returns `CCV_STATUS_BUFFER_TOO_SMALL`, Swift allocates the reported
+capacity and retries. This contract avoids returning C-owned strings with
+ambiguous lifetime.
+
+The first zero byte terminates UTF-8:
+
+```swift
+let terminator = buffer.firstIndex(of: 0) ?? buffer.endIndex
+let text = String(decoding: buffer[..<terminator].map(UInt8.init), as: UTF8.self)
+```
+
+Malformed bytes are replaced according to Swift's decoding policy rather than
+causing an unsafe read.
+
+## Destruction order matters
+
+The stream refers to model-owned tensors, so destruction is:
+
+```swift
+ccv_stream_finish(stream)
+ccv_stream_free(stream)
+ccv_model_free(model)
+```
+
+Before freeing, handles are removed from shared `State`. Newly queued audio
+then observes no stream and returns. Actual destruction still runs on the
+inference queue, after earlier feed operations.
+
+## Status codes become Swift errors
+
+C remains explicit and allocation-neutral:
+
+```c
+ccv_status_t ccv_stream_feed_pcm16(
+    ccv_stream_t *stream,
+    const int16_t *samples,
+    size_t sample_count
+);
+```
+
+Swift maps non-success values to `LocalizedError`. Expected terminal statuses,
+such as cancellation or an already-finished stream, are handled separately
+from genuine failures.
+
+## ABI design rules used here
+
+1. Expose opaque handles, never upstream struct layouts.
+2. Give every constructor one matching destructor.
+3. Use fixed-width C types where width crosses the boundary.
+4. Make ownership explicit for every pointer.
+5. Use caller buffers for variable-length text.
+6. Return structured status codes; reserve logs for diagnostics.
+7. Serialize all operations on a mutable inference stream.
+8. Keep Swift `Data` and array pointers scoped to the C call.
+
+These rules make it possible to replace or substantially modify `voxtral.c`
+without rewriting the application layer.

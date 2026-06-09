@@ -1,0 +1,152 @@
+---
+title: "Audio Capture and Session Lifecycle"
+---
+
+## Why AUHAL
+
+`MicrophoneCaptureService` uses the macOS Audio Unit Hardware Abstraction Layer,
+not the simpler default-input APIs. AUHAL permits the application to select a
+specific input device without changing the user's system-wide default.
+
+The configuration sequence is:
+
+1. find the HAL output component;
+2. instantiate an `AudioUnit`;
+3. enable input bus 1;
+4. disable output bus 0;
+5. select the Core Audio device ID;
+6. query the device's native stream format;
+7. create an `AVAudioConverter`;
+8. install an input callback;
+9. initialize and start the unit.
+
+## Real-time callback discipline
+
+Core Audio invokes `microphoneInputCallback`. A real-time callback should avoid
+blocking, model inference, file I/O, UI work, and unbounded allocation.
+
+The callback:
+
+1. allocates an `AVAudioPCMBuffer` for the delivered frames;
+2. calls `AudioUnitRender`;
+3. converts to the application's fixed output format;
+4. dispatches the resulting `Data` to a serial processing queue;
+5. returns to Core Audio.
+
+The fixed model format is:
+
+```text
+signed PCM16, little endian, 16,000 samples/s, one channel
+```
+
+This is the contract consumed by `ccv_stream_feed_pcm16`.
+
+## Resampling
+
+The input device may operate at 44.1 kHz, 48 kHz, multiple channels, or a
+floating-point representation. `AVAudioConverter` handles sample-rate and
+format conversion.
+
+For an input buffer with \(N\) frames:
+
+\[
+N_{out} \approx \left\lceil
+N \frac{16000}{f_{in}}
+\right\rceil
+\text{margin}
+\]
+
+The implementation adds 32 frames of capacity to avoid truncation caused by
+converter delay or rounding.
+
+## Capture gate and pause semantics
+
+The microphone hardware remains open while paused so resume is immediate.
+However, a `Mutex<Bool>` gate is checked at the first line of the processing
+handler. When false, a chunk is neither:
+
+- written to the archive;
+- counted in diagnostics;
+- sent to Voxtral;
+- used for voice activity.
+
+Pausing also requests a model boundary so buffered pre-pause audio cannot be
+joined to speech after resume. This is stricter than merely asking the domain
+model to ignore captions: it protects the recording and inference input too.
+
+## Starting a session
+
+```{mermaid}
+sequenceDiagram
+    participant UI
+    participant App as ClassroomAppModel
+    participant Vox as Voxtral service
+    participant Mic as Microphone service
+    participant Arc as Archive
+
+    UI->>App: Start Session
+    App->>Vox: load model and create stream
+    Vox->>Vox: 3.2 s silent pre-roll
+    Vox-->>App: connected
+    App->>Mic: request permission
+    App->>Arc: create session directory and WAV
+    App->>Mic: configure and start AUHAL
+    App->>App: phase = listening; audio gate = true
+```
+
+The microphone opens only after Voxtral has loaded and completed its silent
+pre-roll. This ordering fixes the common startup bug in which the first words
+are consumed while the decoder constructs its initial audio prompt.
+
+## Voice activity and boundaries
+
+For embedded Voxtral, every chunk is measured:
+
+\[
+\text{RMS} =
+\sqrt{\frac{1}{N}\sum_{i=0}^{N-1}x_i^2}
+\]
+
+RMS is converted to a visual level over an approximate \([-60,0]\) dB range.
+When normalized level exceeds `0.06`, a 900 ms timer is restarted. If no later
+active chunk cancels it, the timer flushes Voxtral and finalizes the current
+caption.
+
+This is a deliberately simple endpoint detector. It is not a learned VAD.
+
+## Stopping safely
+
+Stop is a multi-stage operation:
+
+1. phase becomes `stopping`;
+2. audio gate closes;
+3. capture stops and queued audio callbacks drain;
+4. Voxtral finishes and returns any final provisional text;
+5. pending Gemma corrections are allowed up to 60 seconds;
+6. the session transitions to `idle`;
+7. the WAV header is rewritten with the final byte count;
+8. transcripts and metadata are atomically written.
+
+`stopping` accepts one final caption because `vox_stream_finish` can expose text
+that was not available before the last padding.
+
+## WAV construction
+
+The archive initially writes a 44-byte WAV header with a zero data length, then
+appends PCM bytes. At finalization it seeks to byte zero and replaces the header.
+
+Important RIFF fields are:
+
+| Field | Value |
+| --- | --- |
+| format | PCM (`1`) |
+| channels | `1` |
+| sample rate | `16000` |
+| bits/sample | `16` |
+| byte rate | `16000 * 1 * 2 = 32000` |
+| block align | `2` |
+| data size | final PCM byte count |
+
+Classic RIFF stores sizes in 32 bits, so the service rejects audio above the
+4 GiB format limit rather than writing a corrupt file.
+

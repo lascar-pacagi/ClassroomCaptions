@@ -1,0 +1,112 @@
+---
+title: "Purpose and Reading Guide"
+---
+
+## What this book promises
+
+This book explains the implementation that exists in this repository. It is
+not a generic Swift tutorial and it does not describe an imaginary future
+architecture. After reading it, a C programmer who already understands
+transformers should be able to:
+
+1. rebuild the application skeleton;
+2. capture and resample microphone audio on macOS;
+3. embed the selected `voxtral.c` runtime behind a stable C ABI;
+4. understand every functional region of the vendored `voxtral.c`;
+5. connect C ownership to Swift concurrency without racing the stream;
+6. build the caption state machine and non-activating overlay;
+7. run Gemma behind a loopback-only OpenAI-compatible service;
+8. validate model output before replacing accessibility text;
+9. implement authenticated local HTTP, Server-Sent Events, and anonymous
+   question submission;
+10. generate and reason about the QR codes used for pairing;
+11. reproduce the build, tests, packaging, and security boundaries.
+
+The source is the final authority. Paths and line references in this book refer
+to the checked-out revision from which the book was rendered.
+
+## Intended reader
+
+The explanations assume:
+
+- fluency in C, pointers, ownership, threads, and sockets;
+- familiarity with transformer attention, KV caches, tokenizers, and
+  autoregressive decoding;
+- no prior Swift, SwiftUI, AppKit, Network.framework, or Core Image knowledge.
+
+Swift is therefore introduced by comparing it with C concepts. The text avoids
+teaching elementary transformer theory, but it explains the audio-specific and
+streaming choices that make Voxtral different from an ordinary decoder-only
+language model.
+
+## Repository map
+
+| Path | Responsibility |
+| --- | --- |
+| `Sources/ClassroomCaptionsCore` | Platform-neutral session, timeline, validation, and service contracts |
+| `Sources/ClassroomCaptions` | macOS UI, audio capture, model orchestration, overlay, archive, and network server |
+| `Sources/CVoxtralEngine/ClassroomVoxtral.c` | Stable project-owned C ABI |
+| `Sources/CVoxtralEngine/Engine` | Pinned runtime derived from antirez's `voxtral.c` |
+| `Sources/VoxtralBenchmark` | Offline speed and quality harness |
+| `Tests/ClassroomCaptionsCoreTests` | Domain, bridge, command, export, and server tests |
+| `Vendor/VoxtralEngine` | Upstream revision and license |
+| `Documentation` | Decision records, measurements, and focused design notes |
+| `docs` | This Quarto book |
+
+## The central design rule
+
+The accessibility path never waits for the language model:
+
+```{mermaid}
+flowchart TB
+    subgraph Live["Immediate accessibility path"]
+      direction LR
+      Mic[Microphone PCM] --> Vox[Voxtral]
+      Vox -->|provisional| Overlay[Overlay]
+      Vox -->|finalized| Timeline[Immutable timeline]
+      Timeline --> Overlay
+    end
+    subgraph Polish["Asynchronous optional correction"]
+      direction LR
+      Queue[Serialized queue] --> Gemma[Gemma]
+      Gemma --> Validator[Deterministic validator]
+      Validator -->|rejected| Raw[Keep raw caption]
+    end
+    Timeline --> Queue
+    Validator -->|accepted| Timeline
+```
+
+Raw text is immutable. Correction is an optional field. A slow, unavailable, or
+misbehaving Gemma process can reduce polish, but it cannot remove the live
+Voxtral subtitle.
+
+## How to read the book
+
+Read @sec-system-tour first. C programmers should then read the Swift chapter
+before following the audio and application coordinator code. The two Voxtral
+chapters separate model architecture from source-level implementation.
+Networking, QR, and security are deliberately separate because pairing is not
+equivalent to encryption.
+
+The final chapter gives a clean-room reconstruction order and verification
+checklist.
+
+## Build the book
+
+From the repository root:
+
+```bash
+./scripts/build_book.sh
+```
+
+The script first regenerates the complete `voxtral.c` source chapter and
+verifies that its code blocks reproduce all 1,652 source lines. It then renders
+HTML and PDF with Quarto. Outputs are written under `docs/_build`.
+
+To render one format while editing prose:
+
+```bash
+python3 scripts/generate_voxtral_source_chapter.py
+quarto render docs --to html
+quarto render docs --to typst
+```

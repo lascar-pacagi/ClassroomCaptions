@@ -17,16 +17,24 @@ screen placement, window levels, Spaces behavior, and low-level dragging.
 `NSHostingView` is the bridge: AppKit owns the window; SwiftUI describes its
 caption content.
 
-### SwiftUI concepts introduced here
+::: {.callout-note title="Swift for a C programmer: SwiftUI values, builders, bindings, and modifiers"}
 
 A `View` is a value description with a `body`, not a persistent widget.
+SwiftUI may discard and reconstruct that struct; persistent application state
+must therefore live in the model or in framework-managed storage rather than
+in arbitrary mutable fields of the view.
+
 `@ViewBuilder` is a result builder that transforms declarative child
-expressions and control flow into one composite view type. A `Binding<T>` is a
-pair of get/set operations presented as mutable state to a control.
+expressions and restricted control flow into one composite view value. It is a
+compile-time source transformation, not an interpreter for the block.
+A `Binding<T>` is a pair of get/set operations presented as mutable state to a
+control; compare it with a typed C structure containing getter and setter
+function pointers plus context.
 
 Property wrappers use `@Name` syntax to let a framework synthesize storage or
 access behavior. View modifiers return new values; a chain such as
 `.font(...).padding(...)` does not mutate an existing view object.
+:::
 
 
 ## How to read this chapter
@@ -103,12 +111,12 @@ Length: 975 lines. SHA-256: `ef9502c8f3a153eb3d8a74e98555d7b383b7f491a57f183b055
 
 This map gives the reading spine of the file. Line numbers refer to the original source and to the numbered listings below.
 
-| Line | Declaration or entry point |
-| ---: | --- |
-| 6 | `struct DashboardView: View {` |
-| 363 | `private func pairingQRCode(for url: URL) -> NSImage? {` |
-| 491 | `private func formatMemory(_ bytes: UInt64) -> String {` |
-| 968 | `private func correctionBadge(for state: CaptionCorrectionState) -> some View {` |
+::: {.declaration-map}
+- **Line 6:** `struct DashboardView: View {`
+- **Line 363:** `private func pairingQRCode(for url: URL) -> NSImage? {`
+- **Line 491:** `private func formatMemory(_ bytes: UInt64) -> String {`
+- **Line 968:** `private func correctionBadge(for state: CaptionCorrectionState) -> some View {`
+:::
 
 ### Imports and file preamble {.unnumbered .unlisted}
 
@@ -1180,37 +1188,37 @@ Length: 480 lines. SHA-256: `540455cc58f6ac0d492f1510d3de2fcc2612003adea8a85793f
 
 This map gives the reading spine of the file. Line numbers refer to the original source and to the numbered listings below.
 
-| Line | Declaration or entry point |
-| ---: | --- |
-| 4 | `private final class OverlayInteractionView: NSView {` |
-| 5 | `enum Interaction {` |
-| 18 | `override func hitTest(_ point: NSPoint) -> NSView? {` |
-| 24 | `override func acceptsFirstMouse(for event: NSEvent?) -> Bool {` |
-| 28 | `override func resetCursorRects() {` |
-| 40 | `override func mouseDown(with event: NSEvent) {` |
-| 50 | `override func mouseDragged(with event: NSEvent) {` |
-| 62 | `override func mouseUp(with event: NSEvent) {` |
-| 70 | `final class CaptionOverlayController: NSObject, NSWindowDelegate {` |
-| 86 | `override init() {` |
-| 147 | `func show(` |
-| 174 | `func hide() {` |
-| 179 | `func resetFrame(on screen: NSScreen) {` |
-| 185 | `func windowDidMove(_ notification: Notification) {` |
-| 189 | `func windowDidResize(_ notification: Notification) {` |
-| 193 | `private func movePanel(by translation: CGSize) {` |
-| 206 | `private func resizePanel(by translation: CGSize) {` |
-| 230 | `private func finishInteraction() {` |
-| 239 | `private func restoredFrame(on screen: NSScreen) -> NSRect {` |
-| 248 | `private func persistFrame() {` |
-| 256 | `private func geometryKey(for displayID: CGDirectDisplayID) -> String {` |
-| 260 | `private func applyFrame(_ frame: NSRect, on screen: NSScreen) {` |
-| 270 | `static func defaultFrame(on screen: NSScreen) -> NSRect {` |
-| 282 | `static func clamped(_ frame: NSRect, to visibleFrame: NSRect) -> NSRect {` |
-| 302 | `struct CaptionOverlayView: View {` |
-| 389 | `private func captionText(_ text: String) -> some View {` |
-| 397 | `private func questionCard(_ question: String) -> some View {` |
-| 444 | `private func scrollToBottom(_ proxy: ScrollViewProxy) {` |
-| 476 | `private extension NSScreen {` |
+::: {.declaration-map}
+- **Line 4:** `private final class OverlayInteractionView: NSView {`
+- **Line 5:** `enum Interaction {`
+- **Line 18:** `override func hitTest(_ point: NSPoint) -> NSView? {`
+- **Line 24:** `override func acceptsFirstMouse(for event: NSEvent?) -> Bool {`
+- **Line 28:** `override func resetCursorRects() {`
+- **Line 40:** `override func mouseDown(with event: NSEvent) {`
+- **Line 50:** `override func mouseDragged(with event: NSEvent) {`
+- **Line 62:** `override func mouseUp(with event: NSEvent) {`
+- **Line 70:** `final class CaptionOverlayController: NSObject, NSWindowDelegate {`
+- **Line 86:** `override init() {`
+- **Line 147:** `func show( on screen: NSScreen, lines: [String], provisional: String?, question: String?, pendingQuestionCount: Int, fontSize: Double ) {`
+- **Line 174:** `func hide() {`
+- **Line 179:** `func resetFrame(on screen: NSScreen) {`
+- **Line 185:** `func windowDidMove(_ notification: Notification) {`
+- **Line 189:** `func windowDidResize(_ notification: Notification) {`
+- **Line 193:** `private func movePanel(by translation: CGSize) {`
+- **Line 206:** `private func resizePanel(by translation: CGSize) {`
+- **Line 230:** `private func finishInteraction() {`
+- **Line 239:** `private func restoredFrame(on screen: NSScreen) -> NSRect {`
+- **Line 248:** `private func persistFrame() {`
+- **Line 256:** `private func geometryKey(for displayID: CGDirectDisplayID) -> String {`
+- **Line 260:** `private func applyFrame(_ frame: NSRect, on screen: NSScreen) {`
+- **Line 270:** `static func defaultFrame(on screen: NSScreen) -> NSRect {`
+- **Line 282:** `static func clamped(_ frame: NSRect, to visibleFrame: NSRect) -> NSRect {`
+- **Line 302:** `struct CaptionOverlayView: View {`
+- **Line 389:** `private func captionText(_ text: String) -> some View {`
+- **Line 397:** `private func questionCard(_ question: String) -> some View {`
+- **Line 444:** `private func scrollToBottom(_ proxy: ScrollViewProxy) {`
+- **Line 476:** `private extension NSScreen {`
+:::
 
 ### Imports and file preamble {.unnumbered .unlisted}
 

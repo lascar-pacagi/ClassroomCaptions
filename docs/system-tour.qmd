@@ -1,0 +1,151 @@
+---
+title: "System Tour"
+---
+
+## End-to-end data flow {#sec-system-tour}
+
+The application is a pipeline with two asynchronous branches: the immediate
+caption branch and the delayed correction branch.
+
+```{mermaid}
+sequenceDiagram
+    participant AU as Core Audio AUHAL
+    participant M as MicrophoneCaptureService
+    participant V as VoxtralEmbeddedService
+    participant C as ClassroomAppModel
+    participant T as CaptionTimeline
+    participant O as Overlay
+    participant G as Gemma server
+    participant B as Browser client
+
+    AU->>M: native device frames
+    M->>M: resample to PCM16 / 16 kHz / mono
+    M->>V: ordered PCM chunk
+    V->>C: provisional token accumulation
+    C->>O: redraw latest text
+    C->>B: SSE snapshot
+    V->>C: finalized caption at boundary
+    C->>T: append immutable raw segment
+    C->>G: serialized correction request
+    G-->>C: candidate + token usage
+    C->>C: deterministic validation
+    C->>T: attach correctedText
+    C->>O: redraw corrected segment
+    C->>B: SSE snapshot
+```
+
+### Process boundaries
+
+The normal deployment contains two processes:
+
+1. `ClassroomCaptions`, containing SwiftUI, AppKit, Core Audio, the C bridge,
+   Voxtral weights, Metal resources, the HTTP server, and archives.
+2. `mlx_lm.server`, containing Gemma and exposing only a loopback HTTP endpoint.
+
+Voxtral is in-process because latency and stream control are critical. Gemma is
+out-of-process because MLX-LM already supplies a maintained server and because
+correction failure must be isolated from transcription.
+
+### Swift Package targets
+
+`Package.swift` defines:
+
+- `ClassroomCaptionsCore`, a library without UI or audio frameworks;
+- `CVoxtralEngine`, a C/Objective-C target linked to Accelerate and Metal;
+- `ClassroomCaptions`, the executable depending on both;
+- `VoxtralBenchmark`, an executable depending only on the C engine;
+- `ClassroomCaptionsCoreTests`, which also imports the app target for integration
+  tests.
+
+This dependency direction is important:
+
+```{mermaid}
+flowchart BT
+    Core[ClassroomCaptionsCore]
+    CEngine[CVoxtralEngine]
+    App[ClassroomCaptions]
+    Bench[VoxtralBenchmark]
+    Tests[Tests]
+    App --> Core
+    App --> CEngine
+    Bench --> CEngine
+    Tests --> Core
+    Tests --> App
+    Tests --> CEngine
+```
+
+`Core` cannot accidentally import AppKit or mutate a window. Its value types can
+be tested without microphone permission, displays, Metal, or a network.
+
+## State ownership
+
+`ClassroomAppModel` is annotated `@MainActor` and `@Observable`. Conceptually it
+is the single UI coordinator:
+
+- owns the current `ClassroomSession` value;
+- starts and stops services;
+- translates service events into domain mutations;
+- owns configurable UI state;
+- publishes derived status to SwiftUI;
+- ensures overlay and browser snapshots describe the same timeline.
+
+Subsystems own their internal mutable state:
+
+| Subsystem | Concurrency mechanism |
+| --- | --- |
+| UI coordinator | Swift main actor |
+| Voxtral service | Dedicated serial `DispatchQueue` plus `Mutex` |
+| WebSocket client | `Mutex` around connection state |
+| microphone | Core Audio callback plus serial conversion queue |
+| archive | Serial utility queue |
+| local HTTP server | Serial Network.framework queue |
+| Gemma correction | Swift `actor` and one application worker |
+
+The application does not use a global “thread-safe” claim. Each boundary states
+where mutation is legal.
+
+## Session state machine
+
+`ClassroomSession` is a value type with explicit phases:
+
+```{mermaid}
+stateDiagram-v2
+    [*] --> starting
+    starting --> listening: microphone ready
+    listening --> paused: Pause
+    paused --> listening: Resume
+    listening --> stopping: Stop
+    paused --> stopping: Stop
+    failed --> stopping: cleanup
+    stopping --> idle: model drained and archive written
+```
+
+Only `listening` accepts provisional text. Final captions are accepted while
+`listening` and during `stopping`, because stopping the model may drain one last
+caption. This small exception prevents truncating the final words.
+
+## Configuration latching
+
+Settings that affect an active model session are copied when the session starts:
+
+- selected transcription backend;
+- whether recording is enabled;
+- microphone name;
+- model delay.
+
+This avoids a half-session where the UI picker says one backend while callbacks
+belong to another. Display position and caption font can change live because
+they affect rendering only.
+
+## Failure philosophy
+
+Failures are intentionally asymmetric:
+
+- Voxtral or microphone failure stops useful captioning and is prominent.
+- Gemma failure marks only that correction as failed; raw text remains.
+- browser sharing failure does not stop local captions.
+- archive failure is reported after the session but does not erase the
+  in-memory timeline.
+
+This ordering follows accessibility impact, not implementation convenience.
+

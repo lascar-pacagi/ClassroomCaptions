@@ -23,6 +23,19 @@ the bundle property list consumed by macOS. The shell scripts use `set -eu` so
 an error or unset variable terminates packaging instead of silently producing
 a partial application.
 
+::: {.callout-note title="Swift for a C programmer: Package.swift is executable configuration"}
+`Package.swift` is compiled and executed by Swift Package Manager rather than
+parsed as a passive data file. Array literals describe products, targets,
+dependencies, linker settings, and compiler settings through ordinary typed
+Swift initializers. A leading dot such as `.target(...)` is shorthand for a
+static member when the expected type is already known from context.
+
+The manifest describes compilation; the packaging shell script constructs the
+macOS bundle layout afterward. Consequently a successful `swift build` proves
+the executable links, but it does not by itself prove that the `.app` contains
+the expected resources, property list, signature, or external model paths.
+:::
+
 
 ## How to read this chapter
 
@@ -212,12 +225,12 @@ Length: 120 lines. SHA-256: `2cb98fedd7d52283331ab4cd597fc3816d531f67d0c763cd303
 
 This map gives the reading spine of the file. Line numbers refer to the original source and to the numbered listings below.
 
-| Line | Declaration or entry point |
-| ---: | --- |
-| 20 | `def default_destination():` |
-| 31 | `def download(filename, destination):` |
-| 78 | `def sha256(path):` |
-| 86 | `def main():` |
+::: {.declaration-map}
+- **Line 20:** `def default_destination():`
+- **Line 31:** `def download(filename, destination):`
+- **Line 78:** `def sha256(path):`
+- **Line 86:** `def main():`
+:::
 
 ### Module preamble {.unnumbered .unlisted}
 

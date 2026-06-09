@@ -54,6 +54,21 @@ table {
   background: #f6f9fd;
 }
 
+.declaration-map ul {
+  list-style: none;
+  padding-left: 0;
+}
+
+.declaration-map li {
+  break-inside: avoid;
+  margin: 0.2rem 0;
+}
+
+.declaration-map li code {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 @media (min-width: 1200px) {
   main.content {
     padding-left: 2rem;

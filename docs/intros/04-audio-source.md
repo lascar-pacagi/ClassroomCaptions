@@ -15,6 +15,39 @@ different boundaries. The code reads the device-side input format and installs
 that format on the callback-facing output scope before using
 `AVAudioConverter` to produce the model's fixed format.
 
+## The real-time render callback
+
+`microphoneInputCallback` runs on Core Audio's **real-time thread** — a
+high-priority thread with a hard deadline. The hardware hands over a buffer every
+few milliseconds and expects the next one filled before it comes back around;
+miss the deadline and the listener hears a click or a dropout. Real-time audio
+programming therefore forbids, on this thread, anything that can block for an
+unbounded or priority-inverted time: taking a lock another thread might hold,
+waiting on I/O, or — ideally — even allocating memory. The rule is "do the
+minimum, own your bytes, and get off the thread."
+
+**Bridging a Swift object across a C function pointer.** The Audio Unit callback
+is a plain C function pointer; it cannot capture Swift state the way a closure
+can. The instance is smuggled through `Unmanaged`. At setup the service calls
+`Unmanaged.passRetained(renderContext)` — handing ARC one extra owning reference —
+and stores the resulting opaque pointer as the callback's `inputProcRefCon`. Each
+invocation recovers it with `takeUnretainedValue()`, which performs **no** atomic
+retain or release, so the audio thread never contends on ARC reference counts.
+The single retain taken at setup is balanced by a release during teardown, after
+callbacks have stopped.
+
+**What the callback actually does.** It renders input with `AudioUnitRender`,
+converts that buffer to the model's fixed 16 kHz mono format with
+`AVAudioConverter`, and hands the resulting *owned* chunk to a serial
+`DispatchQueue` with `queue.async`. Everything expensive — Voxtral inference, the
+WAV write, level metering, SwiftUI updates — happens on that queue, off the
+deadline. The callback never touches the model, sockets, files, the UI, or an
+unbounded queue.
+
+It is not perfectly real-time-safe — it allocates an `AVAudioPCMBuffer` and runs
+the converter inline — but those costs are small and bounded. The next section
+explains the trade and what a stricter design would cost.
+
 ## Why conversion leaves the callback
 
 The current implementation performs render and format conversion in the

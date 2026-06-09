@@ -1,0 +1,480 @@
+---
+title: "Annotated voxtral.c"
+---
+
+## Scope and provenance
+
+`Sources/CVoxtralEngine/Engine/voxtral.c` is derived from antirez's
+[`voxtral.c`](https://github.com/antirez/voxtral.c) at commit
+`134d366c24d20c64b614a3dcc8bda2a6922d077d`. The license and import record are
+preserved under `Vendor/VoxtralEngine`.
+
+This chapter is a line-range commentary over the complete 1,652-line file.
+Generated shader source and mathematical kernels live in neighboring files and
+are described where called. Use the rendered HTML beside the source file: each
+subsection states the exact source range and explains every logical statement
+in that range.
+
+## Lines 1-25: translation unit setup
+
+Lines 1-6 state the orchestration sequence. Lines 8-15 import the model,
+kernels, safetensors, audio, tokenizer, and optional Metal APIs. Lines 16-21 are
+the C runtime and timing dependencies.
+
+```c
+int vox_verbose = 0;
+int vox_monitor = 0;
+```
+
+Lines 23-25 define process-global diagnostics. They are not per model or
+thread-safe configuration. ClassroomCaptions leaves them quiet and exposes
+structured counters instead.
+
+## Lines 27-80: delay conditioning
+
+### `vox_compute_time_embedding`, lines 31-45
+
+`dim` is 3072 and `half` is 1536. For each frequency:
+
+```c
+inv_freq = exp(-log(10000) * i / half);
+emb = t_value * inv_freq;
+out[i] = cos(emb);
+out[i + half] = sin(emb);
+```
+
+The first half stores cosines and the second half sines. `t_value` is the integer
+delay measured in 80 ms tokens, represented as `float`.
+
+### `vox_update_time_conditioning`, lines 47-80
+
+Line 48 accepts a nullable context. Line 49 refreshes the 3072-value time
+embedding whenever delay changes.
+
+Lines 51-55 allocate one 3072-value scale per decoder layer:
+
+\[
+26 \times 3072 \times 4 \approx 312\text{ KiB}
+\]
+
+For every layer, lines 62-67 implement the first dense projection
+\(32 \times 3072\). Line 69 applies GELU. Lines 71-78 implement the
+\(3072 \times 32\) projection. The result is cached because recomputing it for
+every token would waste CPU time and the delay is normally constant.
+
+Allocation failure leaves `ada_scale == NULL`; downstream decoder code must
+tolerate this. The project bridge reports model load failure only when the
+larger model construction fails, so this small allocation remains an upstream
+soft-failure behavior.
+
+## Lines 82-110: adapter weight lookup
+
+Lines 86-87 declare loaders implemented in `voxtral_encoder.c` and
+`voxtral_decoder.c`.
+
+`load_bf16_direct` finds a named safetensors tensor and returns a pointer into
+the mapped BF16 file. No 8.3 GB copy is made. A missing name is printed and
+returns `NULL`.
+
+`vox_adapter_load` resolves the two exact checkpoint keys for the
+audio-language projection. Both are required.
+
+## Lines 112-256: model loading
+
+### Context initialization, lines 116-138
+
+`calloc` zeroes all ownership fields, making partial cleanup possible.
+`model_dir` is copied into a fixed 512-byte field. The defaults are:
+
+- four delay tokens, 320 ms;
+- direct BF16 mapping;
+- FP32 KV until the Metal choice is made.
+
+The safetensors path is assembled in a 1024-byte stack buffer. The file remains
+open and mapped for the entire model lifetime because many weight pointers
+refer directly into it.
+
+### Component loading, lines 140-161
+
+Encoder, adapter, and decoder load in that order. Every failure calls
+`vox_free(ctx)`, relying on the zeroed context and null-safe cleanup. Delay
+conditioning is computed only after decoder layer weights exist.
+
+### Metal warmup, lines 163-250
+
+The warmup is a latency optimization and a memory policy:
+
+1. choose FP16 decoder KV by default, overridable with
+   `VOX_DECODER_KV_FP16=0`;
+2. convert/cache merged encoder QKV and SwiGLU `w1+w3`;
+3. cache encoder output and down-projection weights;
+4. cache adapter weights;
+5. cache all decoder projections;
+6. cache the tied token embedding/output matrix;
+7. prepare merged decoder buffers;
+8. warm decoder MPS operations;
+9. preallocate decoder and encoder KV caches.
+
+Merged buffers reduce dispatches and repeated concatenation. The dimensions in
+lines 176-206 are computed from constants rather than checkpoint metadata; the
+runtime is intentionally specialized to this model architecture.
+
+The preallocation sizes exceed the nominal windows slightly to reduce growth
+and permit rolling compaction.
+
+## Lines 258-349: model destruction
+
+`vox_free` is the inverse ownership walk.
+
+The `FREE0` macro frees only arrays copied or converted to FP32 and nulls the
+field. BF16 weight pointers are not individually freed because they point into
+the safetensors mapping.
+
+Lines 297-317 distinguish Metal shared allocations from ordinary heap
+allocations. Lines 318-342 release conditioning and persistent scratch.
+Lines 344-346 close the mapping last, after all borrowed weight pointers are no
+longer used. Line 348 releases the context itself.
+
+This ordering is the C ownership graph:
+
+```{mermaid}
+flowchart TD
+    Ctx[vox_ctx] --> Map[safetensors mapping]
+    Ctx --> CPU[owned FP32 arrays]
+    Ctx --> KV[Metal/shared KV buffers]
+    Ctx --> Scratch[persistent scratch]
+    Map --> Borrowed[borrowed BF16 pointers]
+    CPU --> Free1[free]
+    KV --> Free2[metal_shared_free]
+    Scratch --> Free3[free]
+    Borrowed --> Close[invalidated by safetensors_close]
+```
+
+## Lines 351-407: constants and helpers
+
+The special token IDs are model-specific. Tokens below 1000 are treated as
+control tokens. Token 1000 is a raw zero byte in Tekken and needs special
+handling later.
+
+`RAW_AUDIO_LENGTH_PER_TOK = 1280` equals 80 ms at 16 kHz.
+
+The first encoder run waits for 312 Mel frames. Later runs use the configurable
+interval. Recovery limits bound KV growth, control-token loops, and stalled
+decoding.
+
+`trim_ascii_whitespace` edits an owned C string in place.
+
+`tok_embed_bf16_to_f32` converts one embedding row by placing each BF16 word in
+the high 16 bits of an IEEE-754 float. This is exact BF16 expansion, not a
+numeric multiply.
+
+## Lines 413-479: `struct vox_stream`
+
+The stream is the complete incremental state machine. Its fields fall into ten
+groups:
+
+| Lines | State |
+| --- | --- |
+| 414-415 | shared model context and owned tokenizer |
+| 417-420 | incremental Mel frontend and real-audio count |
+| 421-433 | convolution and downsampling boundary residuals |
+| 435-439 | compactable adapter embedding buffer |
+| 441-453 | decoder cursor, previous token, watchdogs, and mode |
+| 455-459 | circular output queue |
+| 461-463 | optional alternative-token policy |
+| 465-468 | decoder scratch |
+| 470-471 | encoder batching threshold |
+| 473-478 | performance and visible-token counters |
+
+`real_samples_fed` excludes right-padding silence. Watchdogs therefore measure
+progress against actual source audio.
+
+`total_adapter` and `gen_pos` are logical positions. `adapter_pos_offset`
+records how much physical prefix has been compacted away.
+
+## Lines 481-524: token classification and queue
+
+`stream_classify_token` distinguishes:
+
+- EOS;
+- control IDs below 1000;
+- text-range IDs that decode to empty/invalid C strings;
+- visible text.
+
+This distinction fixed a live failure mode where token 1000 looked like decode
+progress but produced no visible bytes.
+
+`stream_enqueue_token` is a circular buffer with one deliberately unused slot.
+When full, capacity doubles. Existing elements are copied in logical order,
+then head becomes zero and tail becomes the old count.
+
+The queue stores tokenizer-owned `const char *` pointers. They remain valid
+until the tokenizer is freed. The project bridge copies bytes before Swift sees
+them.
+
+## Lines 526-716: incremental convolution stem
+
+This is the most boundary-sensitive code in the file.
+
+### First convolution, lines 548-611
+
+On the first chunk, Mel is transposed from row-major `[frame, mel]` to the
+column-major layout expected by `vox_causal_conv1d`. Causal convolution and
+GELU produce one 1280-vector per Mel frame. The last two Mel frames are saved.
+
+On later chunks, the saved two frames are prepended. After convolution, the
+first two outputs are discarded because they belong to overlap and include
+start-padding assumptions. The tail is then updated.
+
+### Stride alignment, lines 613-658
+
+Conv1 has stride two. Feeding an odd number would cause a padded final output and
+shift every future chunk's phase. The code combines a previous one-frame
+residual with new conv0 output, sends only an even count, and saves a final odd
+frame.
+
+This is equivalent to maintaining:
+
+\[
+r' = (r + n) \bmod 2
+\]
+
+where \(r\) is the previous residual count and \(n\) is the new conv0 count.
+
+### Second convolution, lines 660-715
+
+The first chunk legitimately uses zero left-padding. Later chunks prepend the
+last two conv0 frames and discard the first overlapping conv1 output.
+
+The result is transposed back to row-major `[position, 1280]`, which is the
+encoder transformer's input layout.
+
+Every returned allocation belongs to the caller. Several allocation results in
+this upstream code are assumed non-null; this is one reason the engine is kept
+behind the project bridge and subjected to controlled model/machine
+requirements.
+
+## Lines 718-781: compaction and resets
+
+`stream_adapter_compact` removes adapter vectors below `gen_pos`. `memmove` is
+required because source and destination overlap.
+
+`stream_reset_decoder_state` clears:
+
+- decoder KV logical length;
+- adapter backlog;
+- generated position;
+- previous token and EOS;
+- decoder watchdog counters.
+
+It intentionally keeps Mel and encoder state.
+
+`stream_reset_full_state` creates a fresh Mel context before freeing the old
+one, so allocation failure does not destroy the usable stream. It clears
+convolution residuals, encoder KV, and then decoder state.
+
+## Lines 783-908: incremental encoder and adapter
+
+`stream_run_encoder` performs four stages.
+
+1. Compute how many undispatched Mel frames exist.
+2. Run the incremental convolution stem.
+3. Run the 32-layer encoder using its rolling KV cache.
+4. combine residual encoder positions into groups divisible by four and run the
+   adapter.
+
+The first call requires 312 Mel frames; later calls require `min_new_mel`.
+Finishing bypasses the threshold.
+
+Adapter capacity doubles geometrically. The physical write index is:
+
+```c
+phys_len = total_adapter - adapter_pos_offset;
+```
+
+The function saves zero to three leftover encoder vectors, updates timing, and
+discards Mel frames older than `mel_cursor`.
+
+## Lines 910-967: optional alternatives
+
+The application does not use alternatives, but the runtime can:
+
+1. perform numerically stable softmax by subtracting the maximum logit;
+2. repeatedly scan for the next-best visible token;
+3. accept it when
+   \(1 - p_i/p_{best} \leq cutoff\);
+4. store up to four alternatives.
+
+This mutates the logits buffer from logits to probabilities, which is safe only
+after the best token has already been selected.
+
+## Lines 969-1189: decoder core
+
+### Prompt prefill, lines 973-1047
+
+`prompt_len = 1 + 32 + delay_tokens`. The decoder waits until adapter capacity
+covers this prompt.
+
+For each prompt position, the code expands the BOS or streaming-pad embedding
+and adds the matching adapter vector. It clears logical KV state, prefills all
+but the last position, and uses the last position for the first sampled token.
+
+The token is queued only when classification says visible text. Counters track
+whether a restart emitted anything.
+
+### Incremental generation, lines 1049-1133
+
+For every available adapter position:
+
+```c
+step_embed = adapter[gen_pos] + embedding(prev_token);
+prev_token = decoder_forward(step_embed, logits);
+gen_pos++;
+```
+
+Visible pieces enter the queue. Control and invalid pieces increment the
+non-text watchdog. EOS ends the loop. Timing separates initial prefill from
+single-token decode.
+
+The monitor symbols are stderr diagnostics only; ClassroomCaptions does not
+parse them.
+
+### Recovery, lines 1135-1188
+
+After compacting consumed adapter vectors, continuous mode chooses a restart
+reason. EOS alone may use a decoder-only reset. KV overflow, non-text loops, and
+stalls use a full reset; repeated EOS segments with no text also escalate.
+
+If full Mel reinitialization fails, the code falls back to a decoder reset so
+the live service remains available.
+
+## Lines 1191-1236: stream construction
+
+The stream:
+
+- borrows `ctx`;
+- owns a Tekken tokenizer;
+- creates a Mel context with 32 audio-token equivalents of left silence;
+- allocates a 256-position token queue;
+- allocates logits and two 3072-float scratch vectors;
+- resets encoder KV;
+- defaults later encoder runs to two seconds.
+
+The app immediately overrides the processing interval to one second and enables
+continuous mode through the project bridge.
+
+## Lines 1238-1311: feed and retrieval
+
+`vox_stream_feed` is intentionally small: append PCM to Mel state, count real
+samples, run encoder, run decoder.
+
+`vox_stream_finish` first uses the same padding operation as flush, marks the
+stream finished, finalizes the Mel frontend, and runs one final encoder/decoder
+pass.
+
+`vox_stream_get` dequeues best-token pointers. The diagnostics accessors return
+visible token count and accumulated decoder milliseconds. Alternative retrieval
+copies a fixed number of pointers per token position.
+
+## Lines 1313-1342: stream destruction
+
+The stream must be destroyed before its model. It prints optional statistics,
+then releases Mel, tokenizer, adapter buffer, token queue, scratch, and all
+boundary residuals.
+
+## Lines 1344-1596: convenience paths
+
+These paths support the upstream CLI and benchmark:
+
+- `vox_transcribe_audio`: feed one float array and concatenate pieces;
+- `vox_transcribe_stdin`: detect WAV versus raw signed 16-bit input;
+- `vox_transcribe`: load a WAV path then call the audio helper.
+
+The WAV parser walks RIFF chunks, handles mono or channel averaging, and uses
+linear interpolation when resampling. ClassroomCaptions does not use this
+resampler for live capture; AVAudioConverter supplies the model format before
+the C bridge.
+
+String buffers grow geometrically. Returned strings are caller-owned.
+
+## Lines 1598-1652: live controls
+
+### Flush
+
+Flush calculates:
+
+1. padding to the next 1280-sample boundary;
+2. `delay_tokens + 1`;
+3. ten extra offline streaming buffer tokens.
+
+It feeds zero samples directly to the Mel context, temporarily lowers the
+encoder threshold to one frame, and runs encoder/decoder. It does not increment
+`real_samples_fed`, so watchdog time remains tied to real audio.
+
+### Setters
+
+Processing seconds are converted to Mel frames at 100 fps and clamped to at
+least one.
+
+Continuous mode is a Boolean.
+
+Maximum decoder context is clamped to `[250, 8000]`.
+
+Delay is clamped to `[80, 2400]` ms, truncated to 80 ms units, and immediately
+recomputes adaptive time conditioning.
+
+## Project bridge: why direct Swift calls are avoided
+
+`ClassroomVoxtral.c` adds a narrower contract:
+
+- validates the three model files;
+- initializes Metal explicitly and rejects CPU fallback;
+- converts PCM16 to reusable float storage;
+- exposes structured status codes;
+- preserves an unread token across `BUFFER_TOO_SMALL`;
+- copies token bytes into caller-owned memory;
+- exposes finish, flush, cancellation, counters, and pinned revision.
+
+The bridge's two opaque handles encode ownership:
+
+```c
+struct ccv_model {
+    vox_ctx_t *engine;
+};
+
+struct ccv_stream {
+    ccv_model_t *model;       /* borrowed */
+    vox_stream_t *engine;     /* owned */
+    float *conversion_buffer; /* owned */
+    const char *pending_text; /* borrowed tokenizer piece */
+    atomic_bool cancelled;
+    int finished;
+};
+```
+
+Swift destroys `ccv_stream_t` before `ccv_model_t`, and all calls for one stream
+run on one serial inference queue.
+
+## Complete line map
+
+| Lines | Purpose |
+| ---: | --- |
+| 1-25 | includes and diagnostics globals |
+| 27-80 | delay embedding and adaptive scales |
+| 82-110 | encoder/decoder declarations and adapter load |
+| 112-256 | model load and Metal warmup |
+| 258-349 | model cleanup |
+| 351-407 | token, timing, recovery constants and helpers |
+| 413-479 | complete streaming state |
+| 481-524 | token classes and output queue |
+| 526-716 | chunk-correct causal convolution stem |
+| 718-781 | adapter compaction and resets |
+| 783-908 | incremental encoder and adapter |
+| 910-967 | alternative token probabilities |
+| 969-1189 | prompt, decode loop, watchdogs, restart |
+| 1191-1236 | stream allocation |
+| 1238-1311 | feed, finish, counters, token retrieval |
+| 1313-1342 | stream cleanup |
+| 1344-1596 | offline/stdin convenience APIs |
+| 1598-1652 | flush and live configuration |
+

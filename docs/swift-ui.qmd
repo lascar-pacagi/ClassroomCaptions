@@ -1,0 +1,139 @@
+---
+title: "SwiftUI, Observation, and the AppKit Overlay"
+---
+
+SwiftUI builds the settings dashboard. AppKit owns the overlay because the
+overlay needs precise window behavior that is awkward to express as a normal
+SwiftUI scene.
+
+## A SwiftUI view is a description
+
+A `View` is a lightweight value whose `body` describes desired UI:
+
+```swift
+struct DashboardView: View {
+    @Bindable var model: ClassroomAppModel
+
+    var body: some View {
+        Toggle(
+            "Correct finalized captions",
+            isOn: $model.correctionEnabled
+        )
+    }
+}
+```
+
+SwiftUI may evaluate `body` repeatedly. Do not put model loading, network
+requests, or irreversible work directly in it. Event handlers invoke methods
+on the long-lived app model.
+
+`$model.correctionEnabled` is a `Binding<Bool>`, essentially a typed getter and
+setter pair. It is not a pointer to the property's storage.
+
+## Observation tracks dependencies
+
+`@Observable` instruments property access. While evaluating a view, SwiftUI
+records which observable properties were read. A later write invalidates only
+dependent views.
+
+The model remains the source of truth for:
+
+- session state and timeline;
+- model configuration and diagnostics;
+- overlay visibility and geometry;
+- sharing status and question queue;
+- user defaults mirrored into controls.
+
+This is why services publish events rather than writing views directly.
+
+## Why `NSPanel`
+
+The controller creates:
+
+```swift
+panel = NSPanel(
+    contentRect: NSRect(x: 0, y: 0, width: 900, height: 180),
+    styleMask: [.borderless, .nonactivatingPanel],
+    backing: .buffered,
+    defer: true
+)
+```
+
+`.nonactivatingPanel` allows interaction without stealing focus from lecture
+software. `.borderless` removes standard chrome. The level, Spaces behavior,
+mouse policy, and selected screen are then configured explicitly.
+
+## Hosting SwiftUI inside AppKit
+
+`NSHostingView<CaptionOverlayView>` renders the declarative caption view inside
+the imperative AppKit window:
+
+```swift
+hostingView.rootView = CaptionOverlayView(
+    lines: lines,
+    provisional: provisional,
+    question: question,
+    pendingQuestionCount: pendingQuestionCount,
+    fontSize: fontSize
+)
+```
+
+Replacing `rootView` gives the overlay an immutable snapshot. AppKit owns
+window lifetime and geometry; SwiftUI owns text layout inside the content
+rectangle.
+
+## The transparent interaction layer
+
+A separate `NSView` sits above the hosting view and interprets mouse gestures.
+At mouse-down it records the initial panel frame. Mouse movement uses total
+translation from that origin, avoiding lag caused by repeatedly accumulating
+rounded deltas.
+
+The controller clamps the result to `screen.visibleFrame`, enforces a minimum
+size, and persists one rectangle per display identifier. This matters when the
+projector and laptop have different coordinate systems or menu-bar insets.
+
+## Multiple displays
+
+`NSScreen.screens` exposes connected displays. A `CGDirectDisplayID` provides a
+stable key during the current display configuration. The overlay is ordered
+only on the selected screen, so extended desktop mode can show captions on the
+professor's display while the projector remains clean.
+
+Mirror mode is fundamentally different: macOS sends the same framebuffer to
+both physical displays. An application cannot put the overlay on only one
+mirrored output.
+
+## Scrolling captions
+
+The overlay must prioritize recent text. Its content is placed in a scrolling
+container and programmatically anchored to the latest segment. A fixed-height
+label with line truncation would eventually show `...` and hide new speech,
+which is unacceptable for accessibility.
+
+Final and provisional text remain visually distinct. A queued student question
+has a separate marker and count so the professor can notice it without opening
+the dashboard.
+
+## Visibility is presentation state
+
+Hiding or clearing the overlay does not erase the timeline:
+
+```text
+timeline = authoritative transcript
+overlay visibility = whether the window is ordered front
+overlay clear point = earliest sequence currently rendered
+```
+
+That separation allows voice commands to hide, reveal, or clear presentation
+without corrupting the archive or Gemma context.
+
+## Reconstruct the overlay
+
+1. Create a non-activating, borderless `NSPanel`.
+2. Embed a SwiftUI caption view in `NSHostingView`.
+3. Add a transparent AppKit interaction view above it.
+4. Implement move and resize from an initial frame plus total drag translation.
+5. Clamp geometry to the selected screen and persist it.
+6. Render finalized text, provisional text, and questions as distinct data.
+7. Keep visibility and clear position outside the transcript model.

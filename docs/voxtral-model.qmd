@@ -1,0 +1,199 @@
+---
+title: "How Voxtral Realtime Works"
+---
+
+## From waveform to text
+
+Voxtral Mini 4B Realtime is not “Whisper followed by an unrelated LLM.” It is a
+streaming audio-conditioned autoregressive decoder. Audio is transformed into a
+sequence of vectors in the text decoder's embedding dimension. At each decoder
+position, an audio vector is added to a token embedding.
+
+```{mermaid}
+flowchart TD
+    Audio["Audio front end<br/>16 kHz PCM → 128-bin log-Mel"]
+    Encode["Acoustic representation<br/>causal convolutions → 32-layer encoder<br/>→ 4x grouping and modality adapter"]
+    Decode["Conditioned autoregressive decoding<br/>audio + previous-token embeddings<br/>→ 26-layer decoder → next token"]
+    Audio --> Encode --> Decode
+    Decode -->|next token becomes previous token| Decode
+```
+
+## Audio representation
+
+The model expects:
+
+- sample rate: 16 kHz;
+- 128 Mel bins;
+- FFT window: 400 samples, or 25 ms;
+- hop: 160 samples, or 10 ms;
+- Mel rate: 100 frames/s.
+
+The convolution stem contains two causal width-3 convolutions. The second has
+stride 2. The audio transformer therefore receives approximately 50 positions/s.
+The adapter groups four encoder positions, producing:
+
+\[
+\frac{100}{2 \cdot 4} = 12.5
+\]
+
+audio-conditioned decoder positions per second. One final position therefore
+represents 80 ms of source audio. This is why delay and context settings are
+converted using 12.5 tokens/s.
+
+## Audio encoder
+
+The encoder has:
+
+| Property | Value |
+| --- | ---: |
+| layers | 32 |
+| model dimension | 1280 |
+| query heads | 32 |
+| KV heads | 32 |
+| head dimension | 64 |
+| FFN hidden dimension | 5120 |
+| local attention window | 750 positions |
+
+It is causal and uses a rolling KV cache. Each incremental call processes only
+new post-convolution positions while retaining keys and values needed by the
+local window.
+
+The 750-position encoder window is not the same setting as the application's
+decoder restart threshold. At roughly 50 encoder positions/s it covers about 15
+seconds of acoustic encoder context.
+
+## Adapter
+
+The adapter consumes groups of four 1280-dimensional encoder vectors. Concatenation
+produces \(4 \times 1280 = 5120\) values. Two learned linear projections map:
+
+\[
+5120 \rightarrow 3072 \rightarrow 3072
+\]
+
+The output dimension matches the text decoder. The stream keeps zero to three
+encoder positions as a residual until a complete group of four is available.
+
+## Text decoder
+
+The decoder has:
+
+| Property | Value |
+| --- | ---: |
+| layers | 26 |
+| model dimension | 3072 |
+| query heads | 32 |
+| KV heads | 8 |
+| head dimension | 128 |
+| FFN hidden dimension | 9216 |
+| sliding attention window | 8192 |
+| vocabulary | 131072 |
+
+Eight KV heads with 32 query heads implement grouped-query attention: four query
+heads share each key/value head. Token embeddings are tied to the output
+projection.
+
+At position \(i\), the decoder input is:
+
+\[
+x_i = a_i + E(t_{i-1})
+\]
+
+where \(a_i\) is the adapter's audio vector and \(E(t_{i-1})\) is the embedding
+of the previous generated token. This direct sum is the core audio/text fusion.
+
+## Initial prompt and delayed streaming
+
+The initial decoder prompt is:
+
+```text
+[BOS] [STREAMING_PAD] ... [STREAMING_PAD]
+```
+
+with `32 + delay_tokens` pad positions. The C code requires adapter vectors for
+all prompt positions before prefill.
+
+`delay_tokens` controls how far token generation trails audio:
+
+\[
+d = \left\lfloor \frac{\text{delay milliseconds}}{80} \right\rfloor
+\]
+
+The default 320 ms becomes four delay tokens. More delay supplies greater future
+acoustic context before a word is committed; less delay can be faster but less
+stable.
+
+The delay also conditions every decoder layer. The runtime constructs a
+sinusoidal embedding of the numeric delay and passes it through each layer's
+small \(3072 \rightarrow 32 \rightarrow 3072\) MLP. The resulting scale is used
+by adaptive RMS normalization. Delay is therefore both a prompt offset and a
+learned conditioning signal.
+
+## Streaming invariants
+
+Chunked execution must match a logically continuous stream. The runtime retains:
+
+- unfinished Mel analysis state;
+- the last two Mel frames for the first convolution;
+- the last two convolution outputs for the second convolution;
+- one possible stride-alignment residual;
+- encoder KV cache;
+- zero to three encoder outputs awaiting adapter grouping;
+- adapter embeddings not yet consumed by the decoder;
+- decoder KV cache and previous text token;
+- decoded token queue.
+
+The difficult part is not the transformer equations; it is preserving all
+boundary conditions when arbitrary microphone chunk sizes split convolution,
+downsampling, and decoder positions.
+
+## Prefill and decode
+
+Once enough adapter vectors exist:
+
+1. build `BOS + pad` token embeddings;
+2. add the corresponding adapter vectors;
+3. prefill all positions except the last into the KV cache;
+4. run the last prompt position to sample the first token;
+5. for each later adapter position, add the previous generated token embedding;
+6. run one decoder step and enqueue visible text.
+
+The selected runtime uses greedy top-token generation for the visible best path.
+It can calculate a small number of probability-near alternatives, but
+ClassroomCaptions requests only the best token.
+
+## Continuous recovery
+
+A lecture is much longer than a normal utterance. Continuous mode restarts
+decoder state on:
+
+- EOS;
+- configured KV threshold;
+- 64 consecutive control or invalid tokens;
+- 20 seconds of advancing audio without decoder progress.
+
+Repeated empty restarts escalate to a full reset including Mel, convolution,
+encoder, adapter, and decoder state. These watchdogs trade context continuity
+for the ability to recover during a long live session.
+
+The UI's context control sets a maximum decoder threshold between 250 and 8000
+positions. At 12.5 positions/s, the default 2000 is approximately 160 seconds.
+
+## Precision and memory
+
+The official 8.3 GB BF16 safetensors file is memory-mapped. The Metal path
+converts and caches weights as FP16 where useful. Decoder KV can use FP16 shared
+memory. Small normalization and conditioning arrays remain FP32.
+
+This is not a 4-bit transcription path. The design accepts a larger model
+footprint to protect the primary accessibility signal.
+
+## Why silent pre-roll exists
+
+The decoder cannot start until it has enough adapter positions for the initial
+prompt. If microphone audio begins immediately, the first several seconds are
+used to construct that prompt and appear to be “missing.”
+
+`VoxtralEmbeddedService` feeds 3.2 seconds of silence before reporting
+`connected`, drains any generated pieces, and opens the microphone afterward.
+The prompt is then ready before real speech arrives.

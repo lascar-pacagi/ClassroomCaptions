@@ -162,6 +162,33 @@ These controls are availability defenses, not strong identity. NAT can merge
 students into one source, while address changes can invalidate a legitimate
 ticket.
 
+### Operational limits at a glance
+
+Every hard limit lives in one auditable place (`CaptionSharingSecurity` and the
+app model). Knowing them ahead of class avoids surprises mid-lecture:
+
+| Limit | Value | What happens at the limit |
+| --- | --- | --- |
+| Concurrent TCP connections | 64 | further connections are cancelled at accept |
+| Time to complete a request | 10 s | the connection is cancelled (slowloris guard) |
+| Live caption streams | 1 | a newer authenticated viewer pre-empts the old stream |
+| Live student tickets | 256 total, 4 per source, 4-hour lifetime | `503 classroom_full` / `429 ticket_limit` |
+| Question gap per ticket | 10 s | `429` |
+| Questions per source | 8 per 5 min | `429` |
+| Questions globally | 30 per min | `429` |
+| Accepted questions | 100 per sliding hour | `429` until the window clears |
+| Pending questions held by the app | 500 | memory bound only; unreachable below a multi-hour unmoderated backlog |
+| Request size / body size | 8 KiB / 2 KiB | `431` / `413` |
+
+Three of these are deliberate recoveries rather than caps. A connection that
+never completes a request cannot hold one of the 64 slots beyond the timeout,
+because authentication only happens after a full request is parsed. The single
+caption stream goes to the most recent holder of the viewer token, so the
+professor reclaims a stuck or hijacked stream by simply reopening the page.
+And the accepted-question limit is a sliding window, so an active class
+recovers automatically instead of losing questions for the rest of the
+session.
+
 Plain HTTP provides no confidentiality or integrity against a hostile network.
 The intended deployment is trusted classroom Wi-Fi or a personal hotspot.
 

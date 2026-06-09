@@ -1,0 +1,197 @@
+---
+title: "Testing and Reconstructing the Application"
+---
+
+## Test layers
+
+The current automated suite covers:
+
+- RMS and peak audio measurement;
+- C bridge defaults, missing models, and pinned revision;
+- timeline sequencing and raw-caption preservation;
+- session phase transitions;
+- Gemma correction acceptance and rejection;
+- science notation;
+- overlay frame clamping;
+- spoken command tolerance and command removal;
+- memory sampling;
+- WAV and transcript export;
+- remote snapshot capability minimization;
+- random pairing tokens;
+- live server authentication, student tickets, and rate limiting;
+- WebSocket protocol event extraction.
+
+Run:
+
+```bash
+swift test
+```
+
+## Tests that require real hardware
+
+Unit tests cannot establish:
+
+- microphone permission UX;
+- Core Audio device switching;
+- projector and multi-display behavior;
+- Metal model load and thermal stability;
+- real classroom accuracy;
+- QR scanning under glare and distance;
+- institutional Wi-Fi client isolation;
+- true long-session memory behavior.
+
+These require a repeatable manual matrix.
+
+## Recommended classroom acceptance matrix
+
+| Area | Test |
+| --- | --- |
+| startup | begin speaking immediately after status becomes listening |
+| distance | lecturer and students at near/middle/far positions |
+| noise | ventilation, projector, typing, side conversations |
+| technical text | French/English code, symbols, names, acronyms |
+| latency | provisional first text and finalized correction |
+| overlay | resize, move, reconnect displays, full-screen presentation |
+| pause | speak while paused; verify no caption or recording appears |
+| recovery | stop/start repeatedly and after model errors |
+| network | iOS, Android, Windows, and network reconnection |
+| questions | burst submissions, pause links, next/dismiss commands |
+| archive | play WAV and compare raw/corrected JSON |
+| duration | one complete lecture plus thermal cooldown |
+
+## Voxtral benchmark
+
+Use a fixed 16 kHz mono WAV and reference:
+
+```bash
+scripts/benchmark_voxtral.sh lecture.wav reference.txt
+```
+
+Important measures:
+
+- model load time;
+- first visible token;
+- real-time factor;
+- token throughput;
+- word accuracy;
+- provisional revision stability;
+- peak and steady memory.
+
+A real-time factor below one is necessary, but a model can still feel slow if
+it waits too long before the first token.
+
+## Reconstruction order
+
+The safest clean-room implementation sequence is:
+
+### 1. Domain model
+
+Implement `CaptionSegment`, `CaptionTimeline`, and `ClassroomSession` as value
+types. Test phase transitions, sequence numbers, and immutable raw text.
+
+### 2. Manual overlay
+
+Build the non-activating panel and feed it manual captions. Solve per-display
+geometry and scrolling before adding models.
+
+### 3. Audio capture
+
+Capture a selected device, convert to 16 kHz mono PCM16, display a level meter,
+and write a valid WAV. Test pause at this boundary.
+
+### 4. C engine in a benchmark
+
+Vendor the pinned runtime with license. Build a small C ABI and transcribe a
+known WAV. Refuse silent CPU fallback. Record accuracy and speed.
+
+### 5. Streaming bridge
+
+Add model/stream opaque handles, reusable PCM conversion, bounded text copy,
+serial ownership, and `AsyncStream` events.
+
+### 6. Live captions
+
+Start Voxtral, pre-roll silence, then open the microphone. Feed chunks, flush on
+silence, and display provisional/final text.
+
+### 7. Archive
+
+Write streaming PCM and finalize the WAV and transcript only after model drain.
+
+### 8. Gemma
+
+Add the loopback process controller, serialized queue, prompt, validator, and raw
+fallback. Test adversarial questions before enabling by default.
+
+### 9. Spoken controls
+
+Recognize fixed phrases before timeline insertion. Test cumulative provisional
+strings and same-segment lecture text.
+
+### 10. Browser sharing
+
+Implement read-only snapshots first, then SSE, token pairing, and response
+headers. Add question mutation only after a separate capability and rate policy
+exist.
+
+### 11. Packaging and documentation
+
+Package the `Info.plist`, sign the app locally, run the complete test suite,
+render this book, and conduct a real lecture soak test.
+
+## Build and package
+
+```bash
+swift build -c release
+./scripts/package_app.sh
+file dist/ClassroomCaptions.app/Contents/MacOS/ClassroomCaptions
+plutil -lint Resources/Info.plist
+```
+
+The packaging script creates the conventional bundle:
+
+```text
+ClassroomCaptions.app/
+  Contents/
+    Info.plist
+    MacOS/ClassroomCaptions
+    Resources/
+```
+
+It applies an ad-hoc signature. Distribution to other people should eventually
+use a Developer ID signature and notarization; ad-hoc signing is appropriate
+for local development, not a polished public release.
+
+## Render documentation
+
+HTML:
+
+```bash
+quarto render docs --to html
+```
+
+PDF through Quarto's Typst backend:
+
+```bash
+quarto render docs --to typst
+```
+
+Typst produces a PDF without requiring a separate TeX installation.
+
+## Change checklist
+
+Before releasing a revision:
+
+1. inspect `git diff`;
+2. run `git diff --check`;
+3. run all tests;
+4. compile release;
+5. lint the plist;
+6. render HTML and PDF;
+7. launch the packaged app;
+8. verify microphone and model startup;
+9. scan both QR codes;
+10. stop sharing and confirm old links fail;
+11. test pause and final archive;
+12. perform a representative live transcription.
+

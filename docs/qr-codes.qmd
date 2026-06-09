@@ -1,0 +1,146 @@
+---
+title: "How the QR Pairing Code Is Constructed"
+---
+
+## Application-level payload
+
+The QR code does not contain captions or cryptographic keys for encryption. It
+contains the UTF-8 bytes of one capability URL:
+
+```text
+http://<Mac IPv4>:8765/<route>?token=<256-bit random token>
+```
+
+The private caption and student-question QR codes contain different routes and
+different random tokens.
+
+In Swift:
+
+```swift
+let filter = CIFilter.qrCodeGenerator()
+filter.message = Data(url.absoluteString.utf8)
+filter.correctionLevel = "M"
+```
+
+Core Image chooses the smallest QR version that fits the bytes at correction
+level M.
+
+## QR symbol layers
+
+A QR symbol is a square grid of modules. Construction conceptually proceeds:
+
+```{mermaid}
+flowchart TD
+    URL[UTF-8 URL bytes] --> Mode[Mode and length bits]
+    Mode --> Data[Data codewords + padding]
+    Data --> RS[Reed-Solomon error correction]
+    RS --> Interleave[Interleave data and parity blocks]
+    Interleave --> Place[Place bits in module grid]
+    Fixed[Finder, timing, alignment patterns] --> Place
+    Place --> Mask[Try 8 masks and score]
+    Mask --> Format[Write format/version information]
+    Format --> Quiet[Render with quiet zone]
+```
+
+## Encoding details
+
+### Mode
+
+The URL includes lowercase letters and punctuation not covered efficiently by
+QR alphanumeric mode, so Core Image normally uses byte mode. The stream begins
+with a four-bit mode indicator followed by a character-count field whose width
+depends on QR version.
+
+The UTF-8 URL bytes follow. ASCII URL characters each occupy one byte.
+
+### Terminator and padding
+
+If capacity remains, a terminator of up to four zero bits is appended. Bits are
+aligned to an eight-bit codeword boundary. Remaining data capacity is filled
+with alternating QR pad codewords `0xEC` and `0x11`.
+
+### Reed-Solomon parity
+
+QR uses Reed-Solomon error correction over \(GF(256)\). Data codewords are split
+into one or more blocks. For each block, polynomial division by a generator
+polynomial produces parity codewords.
+
+Level M targets recovery of roughly 15% damaged codewords. This is a practical
+balance for a QR displayed on a laptop screen: more parity increases the symbol
+version and module density.
+
+The phrase “15%” is approximate. Recovery depends on damage location,
+interleaving, symbol version, and scanner.
+
+### Fixed patterns
+
+The encoder reserves:
+
+- three large finder patterns and separators;
+- horizontal and vertical timing patterns;
+- alignment patterns for versions above 1;
+- one dark module;
+- format information;
+- version information for versions 7 and above.
+
+Payload and parity bits fill the remaining cells in a two-column zigzag from
+the lower-right, skipping reserved modules.
+
+### Mask selection
+
+QR defines eight Boolean mask formulas. Each candidate flips selected data
+modules, then receives penalties for patterns that are hard for cameras:
+
+- long same-color runs;
+- large uniform blocks;
+- finder-like accidental patterns;
+- poor dark/light balance.
+
+The lowest-penalty mask is selected. Format bits encode both correction level M
+and mask number.
+
+## Rendering in the application
+
+Core Image returns a tiny logical image with one pixel per module. The
+application applies an integer 10x affine scale:
+
+```swift
+let transformed = output.transformed(
+    by: CGAffineTransform(scaleX: 10, y: 10)
+)
+```
+
+SwiftUI uses `.interpolation(.none)` when resizing to 156 points. Integer
+scaling and disabled interpolation preserve hard module edges.
+
+A white background provides contrast and the QR generator's quiet zone. The
+quiet zone should remain unobstructed; logos or decorative overlays would
+reduce robustness and are intentionally absent.
+
+## Security meaning
+
+Scanning is equivalent to receiving a bearer capability. Anyone who can read,
+photograph, or copy the QR can use its URL while the server and token remain
+active.
+
+The QR itself does not prove:
+
+- the scanner's identity;
+- proximity after scanning;
+- encrypted transport;
+- that the displayed Mac is trustworthy.
+
+Stopping sharing rotates the capability by destroying the token. Starting again
+creates a new random URL and therefore a new QR symbol.
+
+## Debugging a QR
+
+When scanning fails:
+
+1. enlarge the QR without smoothing;
+2. keep the complete white border visible;
+3. reduce screen glare;
+4. verify both devices share a reachable Wi-Fi network;
+5. copy the link manually to distinguish encoding from routing problems;
+6. stop/start sharing to generate a fresh token and listener.
+

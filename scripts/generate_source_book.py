@@ -267,18 +267,28 @@ between owners; it does not make those owners share mutable internals.
 
 ![Execution domains coordinated by the main-actor app model. Every arrow carries a value; mutable service internals stay with their owner.](../figures/orchestration-ownership.svg){#fig-orchestration-ownership width=96%}
 
-### Swift concepts introduced here
+::: {.callout-note title="Swift for a C programmer: actors, observation, tasks, and closures"}
 
 `@main` identifies the program entry type. `@MainActor` isolates declarations
-to Swift's main executor. `@Observable` asks the Observation framework to track
-property reads and writes used by SwiftUI. `@State` gives a view persistent
-framework-managed storage across repeated value reconstruction.
+to Swift's main executor. This is stronger than a comment saying “call on the
+UI thread”: the compiler checks cross-actor access and requires an asynchronous
+hop where necessary. `@Observable` asks the Observation framework to track
+property reads and writes used by SwiftUI. It is closest to compiler-generated
+change-notification plumbing around selected fields. `@State` gives a view
+persistent framework-managed storage even though SwiftUI may repeatedly create
+new values of the view struct.
 
 `Task { ... }` creates asynchronous work. `await` permits suspension; it does
-not mean “run on a worker thread.” `[weak self]` captures an optional non-owning
-reference in a closure to avoid a retain cycle. `some View` is an opaque return
-type: the compiler knows one concrete view type while callers depend only on
-its protocol conformance.
+not mean “run on a worker thread,” and code after an `await` may resume later on
+the actor that owns the surrounding function. A closure is Swift's typed,
+capturing function value. `[weak self]` captures an optional non-owning
+reference so a stored closure cannot keep its owner alive in a reference cycle.
+
+`some View` is an opaque return type: the function returns one fixed concrete
+type selected by its implementation, but callers are allowed to rely only on
+the `View` conformance. Unlike returning a C interface pointer, no heap
+allocation or dynamic dispatch is implied.
+:::
 """,
     "04-audio-source": """
 ### Sample path and timing
@@ -290,18 +300,27 @@ partially destroyed resources.
 
 ![The real-time callback creates owned PCM data before dispatching ordinary work, and teardown stops callbacks before releasing context.](../figures/audio-callback-boundary.svg){#fig-audio-callback-boundary width=96%}
 
-### Swift and C-interoperability concepts introduced here
+::: {.callout-note title="Swift for a C programmer: escaping closures and C callback ownership"}
 
 `@preconcurrency import` imports an older framework while suppressing
 concurrency assumptions its declarations cannot yet express.
 `@unchecked Sendable` is a promise made by this project: the compiler cannot
-verify safety, so documented lock and queue ownership must enforce it.
+verify safety, so documented lock and queue ownership must enforce it. It is
+comparable to an explicit cast around the concurrency type system: legitimate
+at a carefully audited boundary, dangerous as a convenience.
 
 `@escaping` means a closure may outlive the function call. `@Sendable` requires
-captures suitable for transfer across concurrency domains. `Unmanaged<T>`
-exposes explicit retain/release operations needed when a C callback stores an
-opaque Swift object pointer. `deinit` is Swift's finalizer under Automatic
-Reference Counting (ARC).
+captures suitable for transfer across concurrency domains. A C callback has no
+way to retain a Swift object automatically, so `Unmanaged.passRetained` converts
+the reference into an opaque pointer while deliberately adding one reference
+count. The teardown path must balance it with `takeRetainedValue` or `release`.
+
+`deinit` is Swift's finalizer under Automatic Reference Counting (ARC). ARC
+inserts retains and releases at compile time; it is deterministic reference
+counting, not tracing garbage collection. Swift object references therefore
+have ownership semantics even though no explicit `free` appears in ordinary
+code.
+:::
 """,
     "05-ui-source": """
 ### Two UI systems, one state owner
@@ -312,16 +331,24 @@ screen placement, window levels, Spaces behavior, and low-level dragging.
 `NSHostingView` is the bridge: AppKit owns the window; SwiftUI describes its
 caption content.
 
-### SwiftUI concepts introduced here
+::: {.callout-note title="Swift for a C programmer: SwiftUI values, builders, bindings, and modifiers"}
 
 A `View` is a value description with a `body`, not a persistent widget.
+SwiftUI may discard and reconstruct that struct; persistent application state
+must therefore live in the model or in framework-managed storage rather than
+in arbitrary mutable fields of the view.
+
 `@ViewBuilder` is a result builder that transforms declarative child
-expressions and control flow into one composite view type. A `Binding<T>` is a
-pair of get/set operations presented as mutable state to a control.
+expressions and restricted control flow into one composite view value. It is a
+compile-time source transformation, not an interpreter for the block.
+A `Binding<T>` is a pair of get/set operations presented as mutable state to a
+control; compare it with a typed C structure containing getter and setter
+function pointers plus context.
 
 Property wrappers use `@Name` syntax to let a framework synthesize storage or
 access behavior. View modifiers return new values; a chain such as
 `.font(...).padding(...)` does not mutate an existing view object.
+:::
 """,
     "06-gemma-source": """
 ### Safety and latency contract
@@ -334,15 +361,28 @@ accessibility dependency.
 
 ![Gemma can produce only a candidate string. Capability absence and deterministic validation decide whether that string affects display.](../figures/gemma-security-pipeline.svg){#fig-gemma-security-pipeline width=96%}
 
-### Swift concepts introduced here
+::: {.callout-note title="Swift for a C programmer: actor, Codable, optionals, and error flow"}
 
-An `actor` is a reference type whose mutable state is isolated; calls from
-outside may require `await`. `Codable` combines `Encodable` and `Decodable`.
-Nested `CodingKeys` map Swift property names to wire-format JSON keys.
+An `actor` is a reference type whose mutable state is serialized by Swift's
+concurrency runtime. It resembles an object with a private serial executor, but
+the isolation is represented in the type system. Calls from outside may require
+`await` even when the method itself performs no I/O.
+
+`Codable` combines the `Encodable` and `Decodable` protocols. The compiler can
+synthesize JSON conversion for compatible stored properties. Nested
+`CodingKeys` map Swift property names to wire-format JSON keys without changing
+the in-memory API.
 
 `if let` and `guard let` perform optional binding: they unwrap an `Optional`
-only on the branch where a value exists. `do`/`catch` handles thrown errors,
-and `try`/`await` mark calls that may fail or suspend.
+only on the branch where a value exists. Unlike a C null test, the unwrapped
+name has a non-optional type in that branch. `guard let` requires its `else`
+branch to leave the current scope, so the unwrapped value remains available
+after the guard.
+
+`do`/`catch` handles thrown errors. `try` marks a call that may transfer control
+to the nearest matching `catch`; `await` independently marks a possible
+suspension. `try await` therefore exposes two distinct effects at the call site.
+:::
 """,
     "07-voxtral-stream-source": """
 ### Five clocks inside one stream
@@ -364,6 +404,20 @@ representation whose frequency bins follow a perceptual Mel scale. KV means
 key-value attention cache. BF16 means bfloat16, a 16-bit format retaining the
 8-bit exponent width of IEEE-754 float. FP16 is IEEE half precision; the two
 formats are not interchangeable.
+
+::: {.callout-note title="Swift for a C programmer: serial queues and checked continuations"}
+The Swift wrapper uses a private `DispatchQueue` as the sole owner of the
+mutable C model and stream handles. `queue.async { ... }` schedules a closure
+and returns immediately; `queue.sync { ... }` blocks the caller until that
+closure completes. Serial execution provides mutual exclusion only when every
+handle access obeys the same rule.
+
+`withCheckedThrowingContinuation` adapts callback-style work to `async throws`.
+The closure receives a continuation representing the suspended Swift caller.
+Exactly one path must call `resume(returning:)` or `resume(throwing:)`.
+“Checked” means debug runtime diagnostics can detect some misuse; it does not
+make the underlying C operation cancellable or thread-safe.
+:::
 """,
     "08-voxtral-input-source": """
 ### Boundary formats
@@ -419,6 +473,19 @@ not use the higher-level MPSGraph framework.)
 `MTLBuffer` is a GPU-visible byte allocation; `MTLCommandBuffer` orders encoded
 work. Objective-C Automatic Reference Counting manages Objective-C objects,
 while raw C allocations still require explicit ownership.
+
+::: {.callout-note title="Objective-C for a C programmer: messages, objects, and ARC"}
+An Objective-C expression such as `[device newCommandQueue]` sends the
+`newCommandQueue` message to `device`. The receiver is written inside brackets;
+arguments are named by selector fragments. Object pointers use types such as
+`id<MTLDevice>`: `id` is a dynamic object reference and the angle-bracket part
+requires conformance to the `MTLDevice` protocol.
+
+Objective-C ARC manages strong object references, but it does not own memory
+obtained through `malloc`, mapped file regions, or C structs. This file crosses
+that boundary repeatedly, so each resource must be classified as an ARC object,
+a borrowed pointer, or explicitly allocated C storage.
+:::
 """,
     "11-network-source": """
 ### Source reading order
@@ -436,6 +503,25 @@ TCP means Transmission Control Protocol. HTTP means Hypertext Transfer
 Protocol. SSE means Server-Sent Events. URL means Uniform Resource Locator. QR
 means Quick Response. `NWListener` and `NWConnection` are Network.framework
 state machines; TCP itself does not preserve HTTP message boundaries.
+
+::: {.callout-note title="Swift for a C programmer: Network.framework callbacks and value captures"}
+Network.framework is asynchronous and callback-driven. `NWListener` accepts
+connections; each `NWConnection` then reports state and delivers arbitrary byte
+chunks. A receive callback is not guaranteed to contain one complete HTTP
+request, so the server appends `Data` into per-connection buffers and parses
+only after finding a complete header and the declared body length.
+
+Closures capture surrounding values. Capturing a class reference strongly
+increments its ARC ownership; `[weak self]` instead captures an
+`Optional<Self>` that becomes `nil` after destruction. The common pattern
+`guard let self else { return }` unwraps that weak reference and keeps a strong
+local reference only for the duration of the callback.
+
+The server's private serial `DispatchQueue` is its synchronization domain.
+Network callbacks are explicitly delivered on that queue, so dictionaries,
+rate-limit windows, tickets, and SSE clients need no separate lock. This is a
+design invariant, not a property automatically supplied by `Dictionary`.
+:::
 """,
     "12-remote-benchmark-source": """
 ### Two consumers of one contract
@@ -450,6 +536,18 @@ WebSocket upgrades one HTTP connection to a bidirectional framed transport.
 Base64 converts arbitrary bytes to printable ASCII at a 4/3 size expansion.
 Word Error Rate (WER) is based on word insertions, deletions, and substitutions;
 the benchmark reports a related normalized accuracy for practical comparison.
+
+::: {.callout-note title="Swift for a C programmer: AsyncStream and Data conversion"}
+`AsyncStream<Element>` presents callback events as an asynchronous sequence.
+Its `Continuation` is a producer handle: `yield` appends an element and
+`finish` closes the sequence. A consumer uses `for await`, which suspends
+without blocking a thread while waiting for the next event.
+
+Foundation `Data` is a value type with copy-on-write byte storage. Converting it
+to Base64 creates text for a JSON transport; decoding performs the inverse
+validation. `withUnsafeBytes` lends a pointer only for the dynamic extent of its
+closure, so code must not store that pointer after the closure returns.
+:::
 """,
     "13-tests-source": """
 ### Tests as behavioral documentation
@@ -465,6 +563,19 @@ whose assertions record failures without changing production behavior.
 `async throws` tests can await asynchronous APIs and propagate unexpected
 errors. Loopback sockets exercise the actual HTTP framing and authorization
 logic without exposing the server beyond the local test process.
+
+::: {.callout-note title="Swift for a C programmer: XCTest assertions and async tests"}
+An `XCTestCase` subclass groups test methods discovered by the test runner.
+`XCTAssertEqual` records a failure and continues the test; `XCTUnwrap` either
+returns a non-optional value or throws a test failure, which avoids force
+unwrapping with `!`.
+
+An `async` test can suspend with `await`. An `async throws` signature also lets
+unexpected errors propagate to XCTest as failures. Expectations model callback
+completion: the test creates an `XCTestExpectation`, the callback calls
+`fulfill()`, and the test waits with a bounded timeout so a missing callback
+cannot hang the suite indefinitely.
+:::
 """,
     "14-build-source": """
 ### Build graph
@@ -480,6 +591,19 @@ a compilation unit; a product is what clients build or link. `Info.plist` is
 the bundle property list consumed by macOS. The shell scripts use `set -eu` so
 an error or unset variable terminates packaging instead of silently producing
 a partial application.
+
+::: {.callout-note title="Swift for a C programmer: Package.swift is executable configuration"}
+`Package.swift` is compiled and executed by Swift Package Manager rather than
+parsed as a passive data file. Array literals describe products, targets,
+dependencies, linker settings, and compiler settings through ordinary typed
+Swift initializers. A leading dot such as `.target(...)` is shorthand for a
+static member when the expected type is already known from context.
+
+The manifest describes compilation; the packaging shell script constructs the
+macOS bundle layout afterward. Consequently a successful `swift build` proves
+the executable links, but it does not by itself prove that the `.app` contains
+the expected resources, property list, signature, or external model paths.
+:::
 """,
 }
 
@@ -894,10 +1018,12 @@ nonempty reasoning channel causes rejection; content then passes through the
 deterministic validator before becoming a result.
 """,
     ("VoxtralEmbeddedService.swift", "func start("): """
-All C construction occurs on the inference queue. Failure unwinds model and
-stream handles before reporting an event. Startup options translate UI
-milliseconds/context values into the bridge ABI, and decoder priming moves
-first-use GPU allocation outside live capture.
+All C construction occurs on the inference queue. The loaded model is reused
+when the model directory has not changed, so only the first session pays the
+multi-second weight load; failure still unwinds whatever was built before
+reporting an event. Startup options translate UI milliseconds/context values
+into the bridge ABI, and decoder priming moves first-use GPU allocation
+outside live capture.
 """,
     ("VoxtralEmbeddedService.swift", "func sendAudio"): """
 `Data` owns the callback bytes. The inference queue converts and feeds them
@@ -906,9 +1032,10 @@ enter the mutable C stream concurrently.
 """,
     ("VoxtralEmbeddedService.swift", "func stop()"): """
 Stop marks the service inactive, finishes the C stream, drains remaining text,
-returns any finalized provisional caption, then destroys stream before model.
-The returned string exists because final drain may produce text after the last
-ordinary event.
+returns any finalized provisional caption, and destroys the stream. The model
+is intentionally retained so the next session starts near-instantly;
+releaseModel() frees it on app shutdown. The returned string exists because
+final drain may produce text after the last ordinary event.
 """,
     ("voxtral.c", "vox_load"): """
 Model loading opens each component, validates expected tensors, initializes
@@ -1071,6 +1198,33 @@ def declaration_names(path: Path, lines: list[str]) -> list[str]:
     return unique(names, 8)
 
 
+def declaration_signature(path: Path, lines: list[str], start: int) -> str:
+    """Return one logical declaration signature, including wrapped parameters."""
+    parts: list[str] = []
+    paren_depth = 0
+    bracket_depth = 0
+
+    for line in lines[start:start + 32]:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        parts.append(" ".join(stripped.split()))
+        paren_depth += stripped.count("(") - stripped.count(")")
+        bracket_depth += stripped.count("[") - stripped.count("]")
+
+        at_signature_level = paren_depth <= 0 and bracket_depth <= 0
+        if at_signature_level:
+            if path.suffix in {".swift", ".c", ".h", ".m", ".metal"}:
+                if "{" in stripped or stripped.endswith(";"):
+                    break
+            elif path.suffix == ".py" and stripped.endswith(":"):
+                break
+            else:
+                break
+
+    return " ".join(parts)
+
+
 def declaration_map(path: Path, lines: list[str]) -> list[tuple[int, str]]:
     declarations: list[tuple[int, str]] = []
     depths = declaration_depths(path, lines)
@@ -1096,8 +1250,9 @@ def declaration_map(path: Path, lines: list[str]) -> list[tuple[int, str]]:
         elif path.name == "Package.swift":
             is_declaration = depth <= 1 and SWIFT_BOUNDARY_RE.match(line) is not None
         if is_declaration:
-            compact = " ".join(stripped.split())
-            declarations.append((number, compact[:180]))
+            declarations.append(
+                (number, declaration_signature(path, lines, number - 1))
+            )
     return declarations
 
 
@@ -1455,13 +1610,11 @@ def write_shader_section(
         output.extend([
             "### Kernel and function map {.unnumbered .unlisted}\n\n",
             "Line numbers refer to the decoded Metal source listed below.\n\n",
-            "| Line | Kernel or function |\n",
-            "| ---: | --- |\n",
+            "::: {.declaration-map}\n",
         ])
         for number, declaration in declarations:
-            escaped = declaration.replace("|", "\\|")
-            output.append(f"| {number} | `{escaped}` |\n")
-        output.append("\n")
+            output.append(f"- **Line {number}:** `{declaration}`\n")
+        output.append(":::\n\n")
     reconstructed: list[str] = []
     boundaries = declaration_boundaries(SHADER_MSL_PATH, msl_lines)
     active_declaration: str | None = None
@@ -1531,13 +1684,11 @@ def write_file_section(path_text: str) -> tuple[str, bytes]:
             "### Declaration map {.unnumbered .unlisted}\n\n",
             "This map gives the reading spine of the file. Line numbers refer to the "
             "original source and to the numbered listings below.\n\n",
-            "| Line | Declaration or entry point |\n",
-            "| ---: | --- |\n",
+            "::: {.declaration-map}\n",
         ])
         for number, declaration in declarations:
-            escaped = declaration.replace("|", "\\|")
-            output.append(f"| {number} | `{escaped}` |\n")
-        output.append("\n")
+            output.append(f"- **Line {number}:** `{declaration}`\n")
+        output.append(":::\n\n")
     reconstructed: list[str] = []
     boundaries = declaration_boundaries(path, lines)
     active_declaration: str | None = None

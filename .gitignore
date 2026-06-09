@@ -3,3 +3,4 @@
 .DS_Store
 dist/
 vendor-review/
+__pycache__/

@@ -1,0 +1,280 @@
+---
+title: "Swift Foundations for a C Programmer"
+---
+
+This chapter teaches the Swift needed to read this repository. It does not
+attempt to survey the whole language. Each construct is connected to code that
+participates in a live caption.
+
+## Start with the module boundaries
+
+Swift Package Manager builds three relevant modules:
+
+| Module | Meaning |
+| --- | --- |
+| `ClassroomCaptionsCore` | Value types, state transitions, validation, and protocols |
+| `ClassroomCaptions` | macOS services, UI, orchestration, and process ownership |
+| `CVoxtralEngine` | C target imported into Swift as a module |
+
+An `import` makes another module's public declarations visible. It is closer to
+linking against a library plus importing a generated declaration database than
+to textual C header inclusion.
+
+```swift
+import ClassroomCaptionsCore
+import CVoxtralEngine
+import Foundation
+import Synchronization
+```
+
+`Foundation` supplies `Data`, `URL`, `Date`, `UUID`, JSON support, and many
+system wrappers. `Synchronization` supplies the typed `Mutex` used around the
+embedded decoder's small shared state.
+
+## Bindings and type inference
+
+`let` creates an immutable binding; `var` creates a mutable binding.
+
+```swift
+let delayMilliseconds = Int(commitIntervalMilliseconds)
+var options = ccv_stream_options_default()
+options.delay_ms = Int32(delayMilliseconds)
+```
+
+The compiler infers the first local's type from the initializer. The explicit
+`Int32` conversion is required because Swift does not silently narrow integers
+at a C boundary.
+
+Properties can restrict who mutates them:
+
+```swift
+public private(set) var phase: ClassroomSessionPhase
+```
+
+Anyone can read `phase`, but only code inside the defining type can assign it.
+This turns the methods on `ClassroomSession` into the state machine's only
+write interface.
+
+## Structures are values
+
+Swift `struct` values have value semantics. Assignment creates an independent
+logical value, although standard containers use copy-on-write internally.
+
+```swift
+guard var currentSession = session else { return }
+guard currentSession.beginStopping() else { return }
+session = currentSession
+```
+
+Read this literally:
+
+1. test the optional property `session`;
+2. unwrap it into a mutable local copy;
+3. invoke a `mutating` state transition;
+4. assign the resulting value back to observable application state.
+
+The state transition is explicit:
+
+```swift
+public mutating func pause() -> Bool {
+    guard phase == .listening else { return false }
+    phase = .paused
+    timeline.updateProvisional("")
+    return true
+}
+```
+
+`mutating` is required because the method changes `self`. Unlike a C function
+receiving a writable pointer, a struct method is non-mutating unless declared
+otherwise.
+
+## Classes are references with identity
+
+Services use classes because they own identity-bearing resources: an
+`AudioUnit`, `NWListener`, `Process`, `NSPanel`, dispatch queue, or C handle.
+
+```swift
+final class VoxtralEmbeddedService: @unchecked Sendable {
+    private let state = Mutex(State())
+    private let inferenceQueue = DispatchQueue(
+        label: "ClassroomCaptions.voxtral.inference",
+        qos: .userInitiated
+    )
+}
+```
+
+`final` prohibits subclassing and permits simpler dispatch. Assignment of a
+class reference shares the same instance. Swift manages class lifetime with
+automatic reference counting (ARC), not tracing garbage collection.
+
+Strong references increment ownership. `weak` references do not keep an object
+alive and are therefore optional:
+
+```swift
+listener.newConnectionHandler = { [weak self] connection in
+    self?.accept(connection)
+}
+```
+
+Without the weak capture, `self` could retain `listener`, which retains the
+closure, which retains `self`.
+
+## Optionals are tagged absence
+
+`T?` is `Optional<T>`: either `.some(T)` or `.none`. It is not merely a pointer
+that happens to accept zero.
+
+```swift
+guard let model else {
+    ccv_model_free(model)
+    return
+}
+```
+
+Common forms are:
+
+```swift
+if let value = optionalValue { use(value) }
+guard let value = optionalValue else { return }
+let value = optionalValue ?? fallback
+optionalObject?.method()
+```
+
+After a successful `guard let`, the unwrapped local is non-optional for the
+rest of the scope. This removes repeated null checks and prevents accidental
+use before validation.
+
+## Enums are checked tagged unions
+
+Swift enums can carry a different payload for each case:
+
+```swift
+public enum TranscriptionEvent: Equatable, Sendable {
+    case connected
+    case provisional(String)
+    case finalized(String)
+    case tokenMetrics(GenerationTokenMetrics)
+    case disconnected
+    case failed(String)
+}
+```
+
+The C analogue is an enum tag plus a union, but Swift binds tag and payload
+together and checks exhaustive switches:
+
+```swift
+switch event {
+case .provisional(let text):
+    updateProvisional(text)
+case .finalized(let text):
+    finalize(text)
+case .failed(let message):
+    report(message)
+case .connected, .disconnected, .tokenMetrics:
+    break
+}
+```
+
+The shorthand `.provisional` is possible because the expected enum type is
+already known.
+
+## Protocols separate policy from implementation
+
+A protocol is a statically checked capability contract:
+
+```swift
+public protocol StreamingTranscriptionService: Sendable {
+    func events() -> AsyncStream<TranscriptionEvent>
+    func start(configuration: TranscriptionConfiguration) async throws
+    func sendAudio(_ pcm16MonoData: Data) async
+    func stop() async
+}
+```
+
+This resembles a C vtable interface, but conformance is checked by the compiler
+and no manual function-pointer table appears in application code. The core
+module depends on these contracts without importing AppKit, Network.framework,
+or the C engine.
+
+## Extensions organize conformance and helpers
+
+An `extension` adds methods or protocol conformance without reopening a class
+body. It is commonly used to separate `NSWindowDelegate` behavior, private
+formatting helpers, or test-only utilities. Extensions cannot add stored
+instance properties.
+
+## Error values replace status propagation inside Swift
+
+A throwing function advertises failure in its type:
+
+```swift
+func start(configuration: TranscriptionConfiguration) async throws
+```
+
+`try` propagates failure, `try?` converts it to `nil`, and `do/catch` handles it:
+
+```swift
+do {
+    try await embeddedVoxtral.start(...)
+} catch {
+    microphoneError = error.localizedDescription
+    statusText = "Voxtral connection failed"
+}
+```
+
+At the C boundary the project still receives status codes. The bridge converts
+them into structured Swift errors once, near the boundary.
+
+## `defer` provides lexical cleanup
+
+`defer` runs when the current scope exits, including every early return:
+
+```swift
+guard getifaddrs(&interfaces) == 0, let first = interfaces else {
+    return nil
+}
+defer { freeifaddrs(interfaces) }
+```
+
+It serves the same role as a disciplined `goto cleanup`, but cleanup remains
+adjacent to successful acquisition.
+
+## Generics and opaque result types
+
+`Array<CaptionSegment>` and `[CaptionSegment]` are the same generic type.
+`Dictionary<String, String>` may be written `[String: String]`.
+
+SwiftUI methods often return `some View`. This means one concrete return type
+known to the compiler but hidden from callers. It is not dynamic typing and it
+does not allocate an interface object by itself.
+
+## Attributes are compiler-facing declarations
+
+Important attributes in this project include:
+
+| Attribute | Effect |
+| --- | --- |
+| `@MainActor` | isolate accesses to the UI actor |
+| `@Observable` | synthesize observation for UI dependencies |
+| `@discardableResult` | allow callers to ignore a result intentionally |
+| `@Sendable` | require a closure safe to cross concurrency domains |
+| `@unchecked Sendable` | programmer asserts thread safety the compiler cannot prove |
+
+`@unchecked Sendable` is a proof obligation. In `VoxtralEmbeddedService`, the
+obligation is discharged by a mutex for shared metadata and one serial queue
+for every C model/stream operation.
+
+## Reading checklist
+
+When reading a Swift declaration, answer these questions:
+
+1. Is it a value (`struct`, `enum`) or identity-bearing reference (`class`)?
+2. Who can mutate each property?
+3. Is absence explicit with `?`?
+4. Can the operation suspend (`async`) or fail (`throws`)?
+5. Which actor, queue, or lock owns mutable state?
+6. Does a closure capture a long-lived owner?
+7. At an unsafe pointer boundary, how long is the pointee valid?
+
+The next three chapters apply that checklist to concurrency, UI, and C
+interoperability.

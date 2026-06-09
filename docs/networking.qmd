@@ -1,0 +1,303 @@
+---
+title: "Local Networking in Detail"
+---
+
+## Requirements and protocol choice
+
+The network feature has two use cases:
+
+1. a read-only live caption viewer;
+2. anonymous text question submission.
+
+Both must work without installing an app. The server therefore uses HTTP
+semantics understood by every modern browser.
+
+The caption stream uses Server-Sent Events (SSE), not WebSocket:
+
+- traffic is one-way from Mac to viewer;
+- `EventSource` reconnects automatically;
+- messages remain ordinary UTF-8 text;
+- there is no client command channel to secure;
+- implementation is smaller.
+
+Questions use bounded HTTP POST requests because they are discrete mutations.
+
+## Network.framework listener
+
+`NWParameters.tcp` creates a TCP listener. The application sets:
+
+```swift
+parameters.requiredInterfaceType = .wifi
+parameters.includePeerToPeer = true
+parameters.allowLocalEndpointReuse = true
+```
+
+The listener is therefore constrained to Wi-Fi paths, supports Apple
+peer-to-peer-capable paths where the system permits, and can reclaim the local
+port after restart.
+
+It binds port 8765 and advertises Bonjour service type:
+
+```text
+_classcaptions._tcp
+```
+
+Bonjour is DNS Service Discovery over multicast DNS. The browser flow currently
+uses the IPv4 URL printed in the QR code; service advertisement prepares for
+native discovery and diagnostics.
+
+All mutable server state lives on one serial `DispatchQueue`. Network.framework
+callbacks are scheduled on that same queue, so dictionaries, connection sets,
+tokens, and rate windows do not require independent locks.
+
+## Finding the advertised address
+
+After the listener reaches `.ready`, the server enumerates interfaces using
+`getifaddrs`, ignores loopback and down interfaces, and selects an IPv4 address.
+It prefers `en0`, the conventional Wi-Fi interface on many Macs, then uses the
+first viable fallback.
+
+The resulting URL resembles:
+
+```text
+http://192.168.1.42:8765/?token=<64 hexadecimal characters>
+```
+
+The IP is private-address routing information, not a globally reachable host.
+Network isolation, client isolation, VPN routing, and firewalls can still
+prevent peer access.
+
+## Connection lifecycle
+
+```{mermaid}
+sequenceDiagram
+    participant Browser
+    participant Listener as NWListener
+    participant Conn as NWConnection
+    participant Parser
+    participant App
+
+    Browser->>Listener: TCP SYN / HTTP request
+    Listener->>Conn: new connection
+    Conn->>Parser: receive up to 2048-byte chunks
+    Parser->>Parser: accumulate until CRLF CRLF
+    Parser->>Parser: validate total and Content-Length
+    Parser->>App: route authenticated request
+    App-->>Conn: response or persistent SSE
+```
+
+The server allows at most 64 simultaneous accepted TCP connections. Each is
+identified by `ObjectIdentifier(connection)` until cancellation, failure, or
+response completion.
+
+## Minimal HTTP parser
+
+This is intentionally not a general web server. It supports only the requests
+the generated pages issue.
+
+### Framing
+
+Data is accumulated until the byte sequence `\r\n\r\n` marks the end of headers.
+Total request size is capped at 8 KiB. Body content is capped at 2 KiB.
+
+The parser reads `Content-Length`, calculates:
+
+```text
+expected bytes = end-of-header offset + content length
+```
+
+and continues receiving until that count is available. Connections are closed
+after ordinary responses, so request pipelining and keep-alive parsing are not
+implemented.
+
+### Request line
+
+The first line is split into exactly:
+
+```text
+METHOD request-target HTTP-version
+```
+
+`URLComponents` parses the request target into path and query items. Header
+names are normalized to lowercase.
+
+### Route table
+
+| Method | Path | Credential | Purpose |
+| --- | --- | --- | --- |
+| GET | `/` | viewer token | caption HTML |
+| GET | `/events` | viewer token | SSE caption stream |
+| GET | `/student` | student token | question HTML |
+| POST | `/student-ticket` | student token | issue browser ticket |
+| POST | `/questions` | source-bound ticket | submit one question |
+
+Everything else returns the same `404 Not Found`, including protected routes
+with a wrong token. This avoids an authentication oracle that reveals whether a
+route exists.
+
+## Pairing tokens
+
+`SecRandomCopyBytes` produces 32 random bytes. Each byte is rendered as two
+lowercase hexadecimal characters, yielding 64 characters and 256 bits of
+entropy.
+
+Comparison first requires equal byte length, then XORs every pair into one
+accumulator:
+
+```swift
+var difference: UInt8 = 0
+for index in left.indices {
+    difference |= left[index] ^ right[index]
+}
+return difference == 0
+```
+
+For equal-length inputs this avoids returning at the first differing byte.
+
+Viewer and student tokens are independent. Stopping sharing erases both.
+Pausing questions erases only the student token and all tickets.
+
+## Caption page and SSE
+
+The HTML is generated inside the executable. It contains no external scripts,
+fonts, images, analytics, or package dependencies.
+
+JavaScript creates:
+
+```javascript
+const source = new EventSource(
+  "/events?token=" + encodeURIComponent(token)
+);
+```
+
+The server responds:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: text/event-stream; charset=utf-8
+Cache-Control: no-store, no-cache, must-revalidate
+Connection: keep-alive
+
+retry: 1000
+```
+
+Caption messages use:
+
+```text
+event: captions
+data: {"finalized":[...],"provisional":"...","sessionActive":true,"revision":42}
+
+```
+
+The blank line ends one SSE event. JSON encoding escapes embedded newlines and
+other string characters. The browser parses `event.data`, replaces its caption
+DOM children, and creates text nodes through `textContent`; caption text is
+never assigned to `innerHTML`.
+
+A comment heartbeat:
+
+```text
+: heartbeat
+
+```
+
+is sent every ten seconds. SSE ignores comment lines, but traffic keeps NAT,
+Wi-Fi, and browser connection state active.
+
+Only one caption SSE connection is accepted. A second receives `409 Conflict`.
+Ordinary page requests and student submissions are separate connections.
+
+## Snapshot model
+
+The server stores the latest `RemoteCaptionSnapshot`. When a viewer connects,
+that snapshot is sent immediately, so the page does not wait for the next spoken
+token.
+
+Snapshots contain only:
+
+- three visible finalized strings;
+- current provisional string;
+- session-active Boolean;
+- monotonic revision.
+
+They contain no command, endpoint, model configuration, question text, file
+path, or microphone control capability.
+
+## Student ticket protocol
+
+The student QR token grants access to the page and ticket endpoint. It is not
+used directly for every question.
+
+```{mermaid}
+sequenceDiagram
+    participant S as Student browser
+    participant Server
+    participant Q as Professor queue
+
+    S->>Server: GET /student?token=studentToken
+    Server-->>S: HTML + embedded token
+    S->>Server: POST /student-ticket?token=studentToken
+    Server-->>S: random ticket, maxCharacters=500
+    S->>Server: POST /questions?ticket=ticket + JSON
+    Server->>Server: authenticate source, normalize, rate-limit
+    Server->>Q: SubmittedClassroomQuestion
+    Server-->>S: 202 Accepted
+```
+
+The ticket is another 256-bit token stored only in memory. It records:
+
+- source ID derived from remote endpoint;
+- expiration time four hours later;
+- submission timestamps.
+
+Binding to source reduces the usefulness of a copied ticket. It is an abuse
+control, not user identity: NAT may cause many students to share one source
+address, and mobile network changes may invalidate a ticket.
+
+## Question validation and limits
+
+Text is decoded from a JSON object with exactly the needed `text` member.
+Whitespace runs collapse to one space. Empty text, control characters, and text
+over 500 Swift characters are rejected.
+
+Limits are:
+
+| Limit | Value |
+| --- | ---: |
+| minimum interval per ticket | 10 seconds |
+| per source | 8 per 5 minutes |
+| classroom-wide | 30 per minute |
+| active tickets | 256 |
+| accepted questions during enabled period | 100 |
+| Mac pending queue | 100 |
+
+The source address is not shown in the UI or archived.
+
+## HTTP response hardening
+
+Ordinary responses include:
+
+- `Cache-Control: no-store`;
+- `Connection: close`;
+- `Referrer-Policy: no-referrer`;
+- `X-Content-Type-Options: nosniff`;
+- `X-Frame-Options: DENY`;
+- Content Security Policy restricting content to the generated page itself.
+
+The CSP permits inline script and style because both are compiled into the
+single page. It denies objects, frames, external images, and base-URL changes.
+
+## What HTTP does not provide
+
+The token authenticates possession of the QR link. Plain HTTP does not encrypt:
+
+- captions;
+- question text;
+- tokens in request targets;
+- source and destination addresses.
+
+A hostile network operator can observe or modify traffic. The feature is
+appropriate for a trusted Wi-Fi network or personal hotspot, not an untrusted
+public network. HTTPS would require certificate provisioning and browser trust;
+a future native client can instead use an authenticated encrypted peer channel.
+

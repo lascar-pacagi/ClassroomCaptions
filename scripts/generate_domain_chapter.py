@@ -525,18 +525,21 @@ source range, and cleans punctuation. The second overload delegates to the
 multi-command implementation and returns its first result, preserving a simple
 API for callers that do not need batching.
 """),
-            Section(77, 121, "Recognizing and removing several commands safely", """
+            Section(77, 140, "Recognizing and removing several commands safely", """
 All configured phrases are matched independently, then sorted by source
-position. Ranges are removed in reverse order because deleting a later range
-does not invalidate indices before it. Removing from left to right would make
-subsequent saved indices refer to the wrong positions.
+position, longest first at equal positions. Distinct phrases can produce
+overlapping matches — one phrase may be a token-prefix of another, or two
+commands may be configured with identical words — so the recognizer keeps the
+longest match at each position and drops anything it overlaps. The surviving
+ranges are then removed in reverse order because deleting a later range does
+not invalidate indices before it; deleting an overlapping range would.
 
 The recognizer returns every action in spoken order. Only the final command
 carries the cleaned remaining lecture text; otherwise a caller processing each
 result could append the same caption multiple times. The special alias is
 enabled only for the known phrase it repairs, limiting accidental matches.
 """),
-            Section(122, 157, "Holding back a possible provisional command", """
+            Section(141, 176, "Holding back a possible provisional command", """
 Voxtral emits partial hypotheses such as “sésame lu…”. These methods answer
 whether current text is a prefix of any configured command. The app can
 temporarily withhold such text from the overlay until the phrase either
@@ -545,7 +548,7 @@ completes as a command or diverges into ordinary speech.
 The trigger-only overload compares only the available prefix. Empty input and
 empty configuration are rejected explicitly.
 """),
-            Section(158, 196, "Bounded tolerance for recognition errors", """
+            Section(177, 215, "Bounded tolerance for recognition errors", """
 Matching proceeds from safest to loosest: exact equality, equality after
 removing a plural `s`, then edit distance at most one. Fuzzy matching is allowed
 only when both roots have at least five characters; applying it to short words
@@ -554,25 +557,25 @@ would create too many collisions in normal French speech.
 The local Levenshtein implementation uses Unicode characters and two rows. With
 the tiny command vocabulary, its quadratic time is insignificant.
 """),
-            Section(197, 231, "Action synonyms and sliding phrase matches", """
+            Section(216, 250, "Action synonyms and sliding phrase matches", """
 The legacy action word maps a small explicit French vocabulary to show/hide.
 Configured full phrases use a sliding token window, preserving every matching
 source range. This can return more than one occurrence, which is why
 `recognizeAll` later owns ordering and deletion.
 """),
-            Section(232, 249, "A narrowly scoped Voxtral alias", """
+            Section(251, 268, "A narrowly scoped Voxtral alias", """
 Empirical testing showed that “sésame lumière” can be transcribed as “ces âmes
 lumières”. This helper recognizes exactly that three-token acoustic confusion
 and maps it to `.show`. It is not a general language-model correction and is
 activated only when the configured show phrase is the corresponding command.
 """),
-            Section(250, 275, "Prefix matching for an unfinished final token", """
+            Section(269, 294, "Prefix matching for an unfinished final token", """
 All complete provisional tokens must match tolerantly. Only the final token may
 be a literal prefix of its expected word, and it must contain at least two
 characters. This models streaming transcription while avoiding a holdback on
 every one-letter utterance.
 """),
-            Section(276, 306, "Unicode-aware tokenization with removable ranges", """
+            Section(295, 325, "Unicode-aware tokenization with removable ranges", """
 The scanner starts a token on letters or numbers and closes it on punctuation
 or whitespace. Normalization folds case and diacritics for recognition, but
 the stored range still addresses the untouched source. The nested
@@ -583,7 +586,7 @@ This dual representation is the key design point: comparing normalized copies
 alone would make it difficult to remove the corresponding accented,
 punctuated substring from the original caption reliably.
 """),
-            Section(307, 328, "Cleaning punctuation left by command removal", """
+            Section(326, 347, "Cleaning punctuation left by command removal", """
 If no lexical token remains, the correct caption is empty. Otherwise anchored
 regular expressions remove punctuation stranded at the beginning or end, and
 the third expression collapses a doubled period created where a command used

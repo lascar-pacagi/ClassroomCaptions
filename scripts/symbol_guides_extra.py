@@ -567,9 +567,11 @@ queue is empty) and refreshes the overlay, forcing it visible only when a
 question was actually presented. The popped question leaves the pending queue.
 """,
     ("ClassroomAppModel.swift", "func receiveStudentQuestion"): """
-Appends an inbound `SubmittedClassroomQuestion` to the pending queue (capped at
-100 to bound memory against spam) and refreshes the overlay so the pending badge
-updates. Runs on the main actor via the server's question callback.
+Appends an inbound `SubmittedClassroomQuestion` to the pending queue and
+refreshes the overlay so the pending badge updates. The 500-entry cap is purely
+a memory bound: the server admits at most 100 questions per hour, so the cap is
+unreachable unless a multi-hour backlog is left entirely unmoderated. Runs on
+the main actor via the server's question callback.
 """,
     ("ClassroomAppModel.swift", "func publishRemoteCaptions"): """
 Builds and pushes a `RemoteCaptionSnapshot` to connected phones, bumping a
@@ -639,8 +641,10 @@ separation.
 The caseless namespace holding every security constant and the three pure
 crypto/sanitization helpers, so limits live in one auditable place: 32-byte
 tokens, an 8 KiB request cap, a 2 KiB / 500-character question cap, 256
-concurrent tickets, a 4-hour ticket life, and the layered rate-limit windows
-(10 s per ticket, 8 per source per 5 min, 30 global per minute).
+concurrent tickets (at most 4 per source) with a 4-hour life, the layered
+rate-limit windows (10 s per ticket, 8 per source per 5 min, 30 global per
+minute, 100 accepted per sliding hour), and the 10 s request-completion
+timeout that defeats slowloris-style slot exhaustion.
 """,
     ("LocalCaptionServer.swift", "makeToken"): """
 Mints a 256-bit secret by drawing tokenByteCount bytes from the system CSPRNG
@@ -732,26 +736,32 @@ Keeping URL construction here prevents callers from combining a current host
 with a stale student token after restart or disablement.
 """,
     ("LocalCaptionServer.swift", "issueStudentTicket"): """
-Issues one rate-limit ticket per request: it first sweeps expired tickets, then
-refuses with 503 once maximumTickets live tickets exist, capping memory and
-enrollment. A fresh makeToken value keys a StudentTicket recording the source ID,
-a now+ticketLifetime expiry, and an empty submission history. A failed token draw
-degrades to 503 rather than issuing a weak ticket.
+Issues one rate-limit ticket per request: it first sweeps expired tickets,
+refuses with 503 once maximumTickets live tickets exist, and refuses with 429
+once one source already holds maximumTicketsPerSource live tickets — so a
+single device looping the route cannot exhaust the table for the class. A
+fresh makeToken value keys a StudentTicket recording the source ID, a
+now+ticketLifetime expiry, and an empty submission history. A failed token
+draw degrades to 503 rather than issuing a weak ticket.
 """,
     ("LocalCaptionServer.swift", "submitQuestion"): """
 Validates and rate-limits one question. The ticket must exist, be unexpired, and
 bind to the same sourceID that obtained it (else 401), preventing ticket sharing
 across peers. The body is JSON-decoded and run through normalizedQuestion (else
-422). Three sliding windows are checked: a 10 s per-ticket gap, 8 per source per
-5 min, 30 globally per minute, plus a 100-question lifetime cap; any breach
-yields 429. Only on success is the question forwarded with a 202.
+422). Four sliding windows are checked: a 10 s per-ticket gap, 8 per source per
+5 min, 30 globally per minute, and 100 accepted per hour — a window rather than
+a lifetime cap, so an active class recovers instead of losing questions for the
+rest of the session; any breach yields 429. Only on success is the question
+forwarded with a 202.
 """,
     ("LocalCaptionServer.swift", "beginEventStream"): """
-Establishes the single SSE caption stream. If streamConnection is already set it
-rejects with 409, enforcing exactly one connected phone at a time. Otherwise it
-claims the connection, writes the SSE headers (nosniff, no-referrer, a 1 s retry
-hint), immediately replays the last snapshot so a late joiner is not blank,
-starts the heartbeat timer, and reports clientConnected.
+Establishes the single SSE caption stream. A newer authenticated viewer
+pre-empts an existing stream (the old connection is cancelled before the slot
+is reassigned), so a stuck or hijacked stream is reclaimed by simply reopening
+the page rather than restarting sharing. The new stream gets the SSE headers
+(nosniff, no-referrer, a 1 s retry hint), an immediate replay of the last
+snapshot so a late joiner is not blank, the heartbeat timer, and a
+clientConnected status report.
 """,
     ("LocalCaptionServer.swift", "startHeartbeat"): """
 Creates a repeating dispatch timer on the server queue and sends SSE comment
@@ -846,8 +856,9 @@ stderr go to /dev/null. A run failure is rethrown as launchFailed.
     ("GemmaServerController.swift", "processIdentifier"): """
 Resolves the server's PID, preferring the live owned Process's identifier. When
 the app did not spawn the server it falls back to running `lsof -nP -tiTCP:port
--sTCP:LISTEN`, taking the first output line as the listener's PID. Any lsof
-failure, non-zero exit, or unparseable output yields nil rather than a wrong PID.
+-sTCP:LISTEN` in a detached task, so a slow lsof can never stall the main actor
+or the caption path. Any lsof failure, non-zero exit, or unparseable output
+yields nil rather than a wrong PID.
 """,
     ("GemmaServerController.swift", "func stop("): """
 Terminates the owned server: if no process is tracked or it already exited it
@@ -1143,9 +1154,9 @@ while the safetensors mapping is open.
 Tears down a context: frees the f32 weight buffers converted out of safetensors
 (conv stem, per-layer norms and biases, decoder ada/norm rows), releases KV
 caches (Metal-shared free or plain free per build and the shared flag), the
-persistent encoder/decoder scratch, ada_scale, and finally closes the safetensors
-mapping. Borrowed bf16 pointers are owned by the mapping and not freed here.
-Null-safe and idempotent.
+persistent encoder/decoder scratch, ada_scale, the cached tokenizer, and finally
+closes the safetensors mapping. Borrowed bf16 pointers are owned by the mapping
+and not freed here. Null-safe and idempotent.
 """,
     ("voxtral.c", "stream_classify_token"): """
 Classifies a sampled token into EOS, CONTROL (id below the 1000 text range),
@@ -1177,12 +1188,13 @@ overflow, or a control-token loop so live transcription restarts without
 rebuilding the mel/encoder front end.
 """,
     ("voxtral.c", "vox_stream_init"): """
-Allocates a zeroed stream, loads the Tekken tokenizer, and initializes the
-incremental mel context with 32 streaming-pad tokens of leading silence. Sets up
-the circular token queue, the decoder scratch, single-best alternative mode, and
-the default 2-second processing interval. The returned stream borrows the context
-but owns its own tokenizer, mel context, and buffers. On any allocation failure
-it tears down partial state and returns NULL.
+Allocates a zeroed stream and initializes the incremental mel context with 32
+streaming-pad tokens of leading silence. The Tekken tokenizer is borrowed from
+the context, parsed once on the first stream and reused by every later one so a
+session restart does not re-parse the 14 MB tekken.json. Sets up the circular
+token queue, the decoder scratch, single-best alternative mode, and the default
+2-second processing interval. On any allocation failure it tears down partial
+state and returns NULL.
 """,
     ("voxtral.c", "vox_stream_finish"): """
 Finalizes a stream: flushes the delay-window padding (shared with
@@ -1199,10 +1211,10 @@ vocab and must not be freed by the caller.
 """,
     ("voxtral.c", "vox_stream_free"): """
 Optionally prints timing stats, then releases everything the stream owns: mel
-context, tokenizer, adapter buffer, token queue, decoder scratch, and conv-stem
-boundary buffers. The shared vox_ctx_t is borrowed and not freed here. Must be
-called only after the caller has drained all wanted tokens, since the queued
-string pointers die with the tokenizer.
+context, adapter buffer, token queue, decoder scratch, and conv-stem boundary
+buffers. The tokenizer and the shared vox_ctx_t are borrowed and not freed here;
+the context owns the tokenizer, so queued token strings remain valid until
+vox_free.
 """,
     ("voxtral.c", "vox_set_delay"): """
 Sets the streaming look-ahead delay in milliseconds (clamped 80..2400), converted
@@ -1718,8 +1730,11 @@ are initialized for Swift callers that start from defaults.
     ("ClassroomVoxtral.c", "ccv_stream_create"): """
 Builds an opaque streaming handle over a loaded model: applies the delay to the
 shared engine context, initializes a vox_stream, then sets processing interval,
-continuous mode, and the decode-context cap from options. On stream-init failure
-it sets status, frees the handle, and returns NULL.
+continuous mode, and the decode-context cap from options. It also preallocates
+the decoder KV cache at the restart bound plus a margin rather than the full
+8192-position window, saving roughly 740 MB at the default context; the cache
+still grows on demand. On stream-init failure it sets status, frees the handle,
+and returns NULL.
 """,
     ("ClassroomVoxtral.c", "ccv_model_free"): """
 Null-safe wrapper destruction: frees the upstream model, then the small ABI
@@ -1824,8 +1839,10 @@ inference queue.
     ("VoxtralEmbeddedService.swift", "func drainText"): """
 Pulls every available token from the engine via ccv_stream_read_text, growing the
 buffer once on BUFFER_TOO_SMALL, and appends each non-empty token to the locked
-provisionalText. After each token it emits updated token-rate metrics and a
-provisional caption event. Stops cleanly on NO_TEXT and surfaces any other status
+provisionalText. Tokens arrive in bursts (one decode pass yields about a
+dozen), so the drain emits one token-rate metrics event and one provisional
+caption event per burst rather than per token — each provisional event costs a
+full main-actor caption-pipeline pass. Stops cleanly on NO_TEXT and surfaces any other status
 as a failure event.
 """,
     ("VoxtralEmbeddedService.swift", "func takeFinalizedProvisional"): """
@@ -2076,7 +2093,9 @@ present, so the caller can reserve capacity up front and avoid mid-stream grow
 copies. Returns 0 when the cache already exists.
 """,
     ("voxtral_decoder.c", "kv_cache_grow"): """
-Doubles kv_cache_max until it covers the requirement, allocates fresh K/V buffers
+Doubles kv_cache_max (starting from 256 if the cache was never allocated, so a
+failed initial allocation cannot loop the doubling forever) until it covers the
+requirement, allocates fresh K/V buffers
 (fp16 or fp32, shared or heap to match the current mode), and copies the first
 kv_cache_len valid rows of every layer across the changed per-layer stride. The
 per-layer stride is max*kv_dim, so growth is a strided re-pack rather than a flat
@@ -2162,11 +2181,18 @@ count, leaving baked-in RoPE valid. Mirrors the decoder's kv_cache_compact but
 always operates on f32 rows.
 """,
     ("voxtral_encoder.c", "vox_encoder_forward_incremental"): """
-Streaming encoder step: compacts/grows the KV cache for new_len incoming frames,
+Public entry that feeds new positions to the encoder in batches of at most
+VOX_ENC_INC_MAX_BATCH. The shared (Metal) KV cache is preallocated at
+VOX_ENC_WINDOW plus that batch size and cannot grow, so a single oversized call
+would fail and silently discard audio; batching keeps results identical to
+separate smaller feeds while concatenating their outputs into one buffer.
+""",
+    ("voxtral_encoder.c", "encoder_forward_incremental_batch"): """
+One bounded encoder step: compacts/grows the KV cache for the incoming frames,
 runs RoPE at logical positions enc_kv_pos_offset+cache_len, projects Q/K/V only
 for the new positions, appends K/V to the cache, and attends each new query over
 the full window. After 32 layers and the final norm it returns the new positions'
-[new_len,1280] output; the GPU path runs all layers in one command buffer when
+[batch,1280] output; the GPU path runs all layers in one command buffer when
 the cache is shared.
 """,
     ("voxtral_encoder.c", "vox_adapter_forward"): """
@@ -2379,22 +2405,25 @@ MPSMatrixMultiplication accepts f32/f16, not bf16.
 """,
     ("voxtral_metal.m", "get_cached_bf16_as_f16_buffer"): """
 Returns a shared-storage MTLBuffer of f16 weights for a given bf16 CPU pointer,
-converting once via bf16_to_f16 and caching the result keyed by the source
-pointer under a pthread mutex. The conversion uploads with newBufferWithBytes
-(StorageModeShared, zero-copy CPU/GPU). The cache holds up to 512 entries; cleared
-by clear_f16_cache at shutdown.
+converting once and caching the result keyed by the source pointer under a
+pthread mutex. The conversion runs through convert_bf16_to_f16 (NEON, eight
+elements per iteration, parallelized across cores for large tensors) directly
+into the shared buffer, with no intermediate malloc. The cache holds up to 512
+entries; cleared by clear_f16_cache at shutdown.
 """,
     ("voxtral_metal.m", "get_merged_f16_2"): """
 Concatenates two bf16 weight matrices into one contiguous f16 buffer so a fused
-matmul can produce both outputs in a single MPS call. It resolves each half
-through the f16 cache, then memcpys the two f16 blocks into a fresh shared buffer
-cached by the pair of source pointers. Note the lookup only compares key1/key2.
+matmul can produce both outputs in a single MPS call. Each component is converted
+directly into its slice of the merged buffer — deliberately not through the f16
+cache, which would permanently keep an individual copy of every component that
+the default paths never read again (about 5.3 GB of duplicated weights across the
+encoder and decoder stacks).
 """,
     ("voxtral_metal.m", "get_merged_f16_3"): """
-Like get_merged_f16_2 but concatenates three bf16 matrices (e.g. Wq, Wk, Wv) into
-one f16 buffer for a single merged QKV matmul. The cache key only stores key1 and
-key2 (not key3) and the lookup ignores the third pointer, so two triples sharing
-the first two pointers will alias -- a real latent bug worth noting.
+Like get_merged_f16_2 but concatenates three bf16 matrices (Wq, Wk, Wv) into one
+f16 buffer for a single merged QKV matmul, converting each component directly
+into its slice. The cache entry records all three source pointers, so distinct
+triples can never alias.
 """,
     ("voxtral_metal.m", "get_cached_weight_buffer"): """
 Caches f32 buffers (norm weights, biases, ada_scale) keyed by CPU pointer and
@@ -2545,10 +2574,10 @@ waits on dummy matmuls so the GPU compiles each pipeline variant before real aud
 arrives, eliminating first-token stalls.
 """,
     ("voxtral_metal.m", "vox_metal_memory_used"): """
-Reports the total bytes held by the GPU weight caches by summing num_elements*2
-across the f16 cache and size across the f32 weight cache, each under its own
-mutex. It deliberately ignores the activation pool and merged cache, so it
-reflects persistent weight residency rather than peak usage.
+Reports the total bytes held by the GPU weight caches by summing the f16 cache,
+the f32 weight cache, and the merged-buffer cache. It deliberately ignores the
+transient activation pool, so it reflects persistent weight residency rather
+than peak usage.
 """,
     ("voxtral_shaders.metal", "rms_norm"): """
 Computes out = x * rsqrt(mean(x^2)+eps) * weight with one threadgroup per row.
