@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 500" role="img" aria-labelledby="title desc">
+  <title id="title">Swift package dependency boundaries</title>
+  <desc id="desc">The application executable depends on the platform-independent core module and the C Voxtral engine. Tests depend on the core. The benchmark depends on the C engine.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#334155"/>
+    </marker>
+    <style>
+      .title { font: 700 26px sans-serif; fill: #172033; }
+      .box { fill: #f8fafc; stroke: #475569; stroke-width: 2; }
+      .app { fill: #eef6ff; stroke: #1769aa; stroke-width: 3; }
+      .name { font: 700 19px sans-serif; fill: #172033; }
+      .detail { font: 14px sans-serif; fill: #475569; }
+      .line { fill: none; stroke: #334155; stroke-width: 3; marker-end: url(#arrow); }
+      .label { font: 14px sans-serif; fill: #334155; }
+    </style>
+  </defs>
+  <text x="40" y="45" class="title">Compile-time dependency direction</text>
+
+  <rect x="430" y="80" width="340" height="100" rx="12" class="app"/>
+  <text x="600" y="118" text-anchor="middle" class="name">ClassroomCaptions executable</text>
+  <text x="600" y="146" text-anchor="middle" class="detail">orchestration, AppKit, SwiftUI, Network, Core Audio</text>
+
+  <rect x="80" y="265" width="310" height="100" rx="12" class="box"/>
+  <text x="235" y="303" text-anchor="middle" class="name">ClassroomCaptionsCore</text>
+  <text x="235" y="331" text-anchor="middle" class="detail">value types and deterministic rules</text>
+
+  <rect x="810" y="265" width="310" height="100" rx="12" class="box"/>
+  <text x="965" y="303" text-anchor="middle" class="name">CVoxtralEngine</text>
+  <text x="965" y="331" text-anchor="middle" class="detail">C, Objective-C, Metal, inference handles</text>
+
+  <rect x="80" y="415" width="310" height="65" rx="10" class="box"/>
+  <text x="235" y="455" text-anchor="middle" class="name">Core tests</text>
+
+  <rect x="810" y="415" width="310" height="65" rx="10" class="box"/>
+  <text x="965" y="455" text-anchor="middle" class="name">VoxtralBenchmark</text>
+
+  <path d="M500 180 L305 265" class="line"/>
+  <path d="M700 180 L895 265" class="line"/>
+  <path d="M235 415 V365" class="line"/>
+  <path d="M965 415 V365" class="line"/>
+
+  <text x="349" y="211" class="label">imports</text>
+  <text x="806" y="211" class="label">links</text>
+  <text x="247" y="399" class="label">exercises</text>
+  <text x="977" y="399" class="label">links</text>
+</svg>

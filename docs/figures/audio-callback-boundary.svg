@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 480" role="img" aria-labelledby="t d">
+  <title id="t">Real-time audio callback boundary and teardown</title>
+  <desc id="d">The callback renders, converts, copies into owned data, and leaves the real-time thread. Teardown stops callbacks before releasing retained context.</desc>
+  <defs><marker id="a" markerWidth="11" markerHeight="11" refX="10" refY="4" orient="auto"><path d="M0 0L10 4L0 8Z" fill="#1769aa"/></marker><style>.h{font:700 25px sans-serif;fill:#172033}.n{font:700 16px sans-serif;fill:#172033}.s{font:13px sans-serif;fill:#475569}.b{fill:#eef6ff;stroke:#1769aa;stroke-width:2}.q{fill:#ecfdf5;stroke:#15803d;stroke-width:2}.l{fill:none;stroke:#1769aa;stroke-width:3;marker-end:url(#a)}.r{font:700 15px sans-serif;fill:#b42318}</style></defs>
+  <text x="35" y="40" class="h">Bytes become owned before leaving the callback</text>
+  <rect x="35" y="100" width="190" height="90" rx="10" class="b"/><text x="130" y="135" text-anchor="middle" class="n">AUHAL input</text><text x="130" y="160" text-anchor="middle" class="s">device-native frames</text>
+  <rect x="275" y="100" width="190" height="90" rx="10" class="b"/><text x="370" y="135" text-anchor="middle" class="n">AudioUnitRender</text><text x="370" y="160" text-anchor="middle" class="s">borrowed callback buffer</text>
+  <rect x="515" y="100" width="210" height="90" rx="10" class="b"/><text x="620" y="135" text-anchor="middle" class="n">AVAudioConverter</text><text x="620" y="160" text-anchor="middle" class="s">mono PCM16, 16 kHz</text>
+  <rect x="775" y="100" width="190" height="90" rx="10" class="q"/><text x="870" y="135" text-anchor="middle" class="n">Owned Data</text><text x="870" y="160" text-anchor="middle" class="s">safe after callback</text>
+  <rect x="1015" y="100" width="190" height="90" rx="10" class="q"/><text x="1110" y="135" text-anchor="middle" class="n">Processing queue</text><text x="1110" y="160" text-anchor="middle" class="s">handler may do normal work</text>
+  <path d="M225 145H275" class="l"/><path d="M465 145H515" class="l"/><path d="M725 145H775" class="l"/><path d="M965 145H1015" class="l"/>
+  <text x="35" y="255" class="r">Forbidden in the callback: await, model inference, network I/O, SwiftUI mutation, blocking locks, filesystem work.</text>
+  <text x="35" y="315" class="n">Teardown order</text>
+  <text x="35" y="350" class="s">1. Remove published state under the lock.</text><text x="310" y="350" class="s">2. Stop and uninitialize the Audio Unit.</text>
+  <text x="630" y="350" class="s">3. Dispose the Audio Unit.</text><text x="865" y="350" class="s">4. Release retained callback context.</text>
+  <text x="35" y="395" class="s">5. Synchronize with the processing queue so no queued handler still depends on teardown state.</text>
+</svg>

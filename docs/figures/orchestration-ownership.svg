@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 520" role="img" aria-labelledby="t d">
+  <title id="t">Application orchestration ownership domains</title>
+  <desc id="d">The main actor coordinates four independently owned execution domains by sending values rather than sharing mutable internals.</desc>
+  <defs>
+    <marker id="a" markerWidth="11" markerHeight="11" refX="10" refY="4" orient="auto"><path d="M0 0L10 4L0 8Z" fill="#334155"/></marker>
+    <style>.h{font:700 25px sans-serif;fill:#172033}.n{font:700 17px sans-serif;fill:#172033}.s{font:13px sans-serif;fill:#475569}.b{fill:#f8fafc;stroke:#475569;stroke-width:2}.m{fill:#eef6ff;stroke:#1769aa;stroke-width:3}.l{fill:none;stroke:#334155;stroke-width:2.5;marker-end:url(#a)}.x{font:13px sans-serif;fill:#334155;paint-order:stroke;stroke:white;stroke-width:4px}</style>
+  </defs>
+  <text x="35" y="40" class="h">The coordinator transfers values between owners</text>
+  <rect x="420" y="75" width="400" height="95" rx="12" class="m"/>
+  <text x="620" y="112" text-anchor="middle" class="n">ClassroomAppModel on @MainActor</text>
+  <text x="620" y="139" text-anchor="middle" class="s">session state, settings, UI projection, workflow decisions</text>
+  <rect x="35" y="270" width="250" height="100" rx="12" class="b"/>
+  <text x="160" y="307" text-anchor="middle" class="n">Core Audio callback</text>
+  <text x="160" y="333" text-anchor="middle" class="s">renders and owns PCM chunks</text>
+  <rect x="330" y="270" width="250" height="100" rx="12" class="b"/>
+  <text x="455" y="307" text-anchor="middle" class="n">Voxtral serial queue</text>
+  <text x="455" y="333" text-anchor="middle" class="s">model and mutable stream handle</text>
+  <rect x="625" y="270" width="250" height="100" rx="12" class="b"/>
+  <text x="750" y="307" text-anchor="middle" class="n">Gemma actor/task</text>
+  <text x="750" y="333" text-anchor="middle" class="s">one HTTP correction at a time</text>
+  <rect x="920" y="270" width="285" height="100" rx="12" class="b"/>
+  <text x="1062" y="307" text-anchor="middle" class="n">Network serial queue</text>
+  <text x="1062" y="333" text-anchor="middle" class="s">connections, capabilities, tickets</text>
+  <path d="M160 270V215H500V170" class="l"/><text x="245" y="208" class="x">owned Data</text>
+  <path d="M455 270V215H570V170" class="l"/><text x="450" y="208" class="x">events</text>
+  <path d="M690 170V215H750V270" class="l"/><text x="690" y="208" class="x">immutable request</text>
+  <path d="M740 170V215H1062V270" class="l"/><text x="895" y="208" class="x">snapshot</text>
+  <path d="M750 270V225H675V170" class="l"/><text x="680" y="248" class="x">result</text>
+  <path d="M1062 270V235H785V170" class="l"/><text x="885" y="260" class="x">status/question</text>
+  <text x="35" y="445" class="s">No arrow transfers a mutable model, Audio Unit, NWConnection, or window. Lifetime remains with the box that owns it.</text>
+</svg>

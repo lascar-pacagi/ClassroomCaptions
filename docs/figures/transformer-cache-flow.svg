@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 540" role="img" aria-labelledby="title description">
+  <title id="title">One transformer layer and its key-value cache</title>
+  <desc id="description">Input is normalized and projected into Q K V, rotary position is applied, K and V are appended to cache, causal attention reads the cache, and residual and feed-forward paths produce output.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="11" markerHeight="11" refX="10" refY="4" orient="auto">
+      <path d="M0 0L10 4L0 8Z" fill="#1769aa"/>
+    </marker>
+    <style>
+      .heading{font:700 25px sans-serif;fill:#172033}
+      .name{font:700 15px sans-serif;fill:#172033}
+      .small{font:13px sans-serif;fill:#475569}
+      .box{fill:#eef6ff;stroke:#1769aa;stroke-width:2}
+      .cache{fill:#fff7ed;stroke:#c66a13;stroke-width:2}
+      .arrow{fill:none;stroke:#1769aa;stroke-width:3;marker-end:url(#arrow)}
+      .cacheArrow{fill:none;stroke:#c66a13;stroke-width:3;marker-end:url(#arrow)}
+      .label{font:13px sans-serif;fill:#334155;paint-order:stroke;stroke:white;stroke-width:4px}
+    </style>
+  </defs>
+  <text x="35" y="42" class="heading">One new position reuses all prior K/V rows</text>
+
+  <rect x="35" y="105" width="150" height="76" rx="10" class="box"/>
+  <text x="110" y="137" text-anchor="middle" class="name">Input X</text>
+  <text x="110" y="160" text-anchor="middle" class="small">new row/chunk</text>
+  <rect x="245" y="105" width="160" height="76" rx="10" class="box"/>
+  <text x="325" y="137" text-anchor="middle" class="name">RMSNorm</text>
+  <text x="325" y="160" text-anchor="middle" class="small">learned scale</text>
+  <rect x="465" y="75" width="170" height="136" rx="10" class="box"/>
+  <text x="550" y="111" text-anchor="middle" class="name">Q, K, V projections</text>
+  <text x="550" y="137" text-anchor="middle" class="small">reshape into heads</text>
+  <text x="550" y="160" text-anchor="middle" class="small">RoPE on Q and K</text>
+  <rect x="720" y="75" width="210" height="136" rx="10" class="cache"/>
+  <text x="825" y="111" text-anchor="middle" class="name">Per-layer KV cache</text>
+  <text x="825" y="137" text-anchor="middle" class="small">append current K/V row</text>
+  <text x="825" y="160" text-anchor="middle" class="small">retain earlier positions</text>
+  <rect x="1000" y="105" width="205" height="76" rx="10" class="box"/>
+  <text x="1102" y="137" text-anchor="middle" class="name">Causal attention</text>
+  <text x="1102" y="160" text-anchor="middle" class="small">Q reads cached K/V</text>
+  <path d="M185 143H245" class="arrow"/>
+  <path d="M405 143H465" class="arrow"/>
+  <path d="M635 143H720" class="cacheArrow"/><text x="652" y="128" class="label">append</text>
+  <path d="M930 143H1000" class="cacheArrow"/><text x="943" y="128" class="label">read</text>
+
+  <rect x="1000" y="285" width="205" height="76" rx="10" class="box"/>
+  <text x="1102" y="317" text-anchor="middle" class="name">Output projection</text>
+  <text x="1102" y="340" text-anchor="middle" class="small">+ residual X</text>
+  <rect x="720" y="285" width="210" height="76" rx="10" class="box"/>
+  <text x="825" y="317" text-anchor="middle" class="name">RMSNorm</text>
+  <text x="825" y="340" text-anchor="middle" class="small">second sublayer</text>
+  <rect x="445" y="270" width="215" height="106" rx="10" class="box"/>
+  <text x="552" y="304" text-anchor="middle" class="name">Gated feed-forward</text>
+  <text x="552" y="329" text-anchor="middle" class="small">SiLU(gate) * up</text>
+  <text x="552" y="351" text-anchor="middle" class="small">down projection</text>
+  <rect x="210" y="285" width="165" height="76" rx="10" class="box"/>
+  <text x="292" y="317" text-anchor="middle" class="name">Layer output</text>
+  <text x="292" y="340" text-anchor="middle" class="small">+ second residual</text>
+  <path d="M1102 181V285" class="arrow"/>
+  <path d="M1000 323H930" class="arrow"/>
+  <path d="M720 323H660" class="arrow"/>
+  <path d="M445 323H375" class="arrow"/>
+
+  <text x="35" y="450" class="name">Compaction rule</text>
+  <text x="35" y="478" class="small">Moving cache rows changes physical indices only. The logical base position and RoPE positions must advance together.</text>
+  <text x="35" y="505" class="small">The decoder may store rows as FP16 for memory efficiency, but attention accumulation and model outputs remain float.</text>
+</svg>

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 450" role="img" aria-labelledby="t d">
+  <title id="t">Voxtral streaming time domains</title>
+  <desc id="d">Audio samples become Mel frames, convolution positions, encoder positions, and adapter decoder positions, each with separate counters and retained tails.</desc>
+  <defs><marker id="a" markerWidth="11" markerHeight="11" refX="10" refY="4" orient="auto"><path d="M0 0L10 4L0 8Z" fill="#1769aa"/></marker><style>.h{font:700 25px sans-serif;fill:#172033}.n{font:700 16px sans-serif;fill:#172033}.s{font:13px sans-serif;fill:#475569}.b{fill:#eef6ff;stroke:#1769aa;stroke-width:2}.l{fill:none;stroke:#1769aa;stroke-width:3;marker-end:url(#a)}</style></defs>
+  <text x="35" y="40" class="h">Five counters describe one continuous stream</text>
+  <rect x="30" y="105" width="200" height="95" rx="10" class="b"/><text x="130" y="137" text-anchor="middle" class="n">PCM samples</text><text x="130" y="161" text-anchor="middle" class="s">16 000 per second</text><text x="130" y="181" text-anchor="middle" class="s">waveform tail retained</text>
+  <rect x="275" y="105" width="200" height="95" rx="10" class="b"/><text x="375" y="137" text-anchor="middle" class="n">Mel frames</text><text x="375" y="161" text-anchor="middle" class="s">window/hop clock</text><text x="375" y="181" text-anchor="middle" class="s">absolute frame offset</text>
+  <rect x="520" y="105" width="200" height="95" rx="10" class="b"/><text x="620" y="137" text-anchor="middle" class="n">Convolution positions</text><text x="620" y="161" text-anchor="middle" class="s">stride-reduced sequence</text><text x="620" y="181" text-anchor="middle" class="s">only stable outputs exposed</text>
+  <rect x="765" y="105" width="200" height="95" rx="10" class="b"/><text x="865" y="137" text-anchor="middle" class="n">Encoder positions</text><text x="865" y="161" text-anchor="middle" class="s">audio transformer clock</text><text x="865" y="181" text-anchor="middle" class="s">incremental KV cache</text>
+  <rect x="1010" y="105" width="200" height="95" rx="10" class="b"/><text x="1110" y="137" text-anchor="middle" class="n">Adapter/decoder</text><text x="1110" y="161" text-anchor="middle" class="s">grouped audio embeddings</text><text x="1110" y="181" text-anchor="middle" class="s">autoregressive text clock</text>
+  <path d="M230 152H275" class="l"/><path d="M475 152H520" class="l"/><path d="M720 152H765" class="l"/><path d="M965 152H1010" class="l"/>
+  <text x="35" y="280" class="n">Streaming invariant</text>
+  <text x="35" y="315" class="s">Compaction may move retained bytes to the front of a buffer, but absolute counters must not move backward.</text>
+  <text x="35" y="345" class="s">A downstream stage consumes only positions proven stable; the exact left tail remains available for the next chunk.</text>
+  <text x="35" y="375" class="s">Chunked execution should therefore produce the same stable positions as one continuous input, modulo deliberate caption boundaries.</text>
+</svg>

@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 500" role="img" aria-labelledby="title desc">
+  <title id="title">Live caption and optional correction pipelines</title>
+  <desc id="desc">Audio travels from the microphone through Core Audio and Voxtral to the overlay. Finalized captions may independently pass through Gemma and a validator before updating the displayed text.</desc>
+  <defs>
+    <marker id="arrow-blue" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#1769aa"/>
+    </marker>
+    <marker id="arrow-orange" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#b45309"/>
+    </marker>
+    <style>
+      .title { font: 700 26px sans-serif; fill: #172033; }
+      .lane { font: 700 18px sans-serif; }
+      .box-title { font: 700 18px sans-serif; fill: #172033; }
+      .box-detail { font: 14px sans-serif; fill: #3d4758; }
+      .fast-box { fill: #eef6ff; stroke: #1769aa; stroke-width: 2; }
+      .slow-box { fill: #fff7ed; stroke: #b45309; stroke-width: 2; }
+      .neutral-box { fill: #f8fafc; stroke: #596579; stroke-width: 2; }
+      .fast-line { fill: none; stroke: #1769aa; stroke-width: 3; marker-end: url(#arrow-blue); }
+      .slow-line { fill: none; stroke: #b45309; stroke-width: 3; marker-end: url(#arrow-orange); }
+      .note { font: italic 14px sans-serif; fill: #596579; }
+    </style>
+  </defs>
+
+  <text x="40" y="42" class="title">Two pipelines with different latency contracts</text>
+  <text x="40" y="91" class="lane" fill="#1769aa">Immediate accessibility path</text>
+
+  <rect x="40" y="120" width="180" height="82" rx="10" class="fast-box"/>
+  <text x="130" y="153" text-anchor="middle" class="box-title">Microphone</text>
+  <text x="130" y="178" text-anchor="middle" class="box-detail">hardware frames</text>
+
+  <rect x="280" y="120" width="180" height="82" rx="10" class="fast-box"/>
+  <text x="370" y="153" text-anchor="middle" class="box-title">Core Audio</text>
+  <text x="370" y="178" text-anchor="middle" class="box-detail">mono PCM, 16 kHz</text>
+
+  <rect x="520" y="120" width="180" height="82" rx="10" class="fast-box"/>
+  <text x="610" y="153" text-anchor="middle" class="box-title">Voxtral</text>
+  <text x="610" y="178" text-anchor="middle" class="box-detail">streaming decoder</text>
+
+  <rect x="760" y="120" width="210" height="82" rx="10" class="fast-box"/>
+  <text x="865" y="153" text-anchor="middle" class="box-title">Provisional text</text>
+  <text x="865" y="178" text-anchor="middle" class="box-detail">replaceable immediately</text>
+
+  <rect x="1030" y="120" width="210" height="82" rx="10" class="fast-box"/>
+  <text x="1135" y="153" text-anchor="middle" class="box-title">Visible caption</text>
+  <text x="1135" y="178" text-anchor="middle" class="box-detail">overlay and browsers</text>
+
+  <path d="M220 161 H280" class="fast-line"/>
+  <path d="M460 161 H520" class="fast-line"/>
+  <path d="M700 161 H760" class="fast-line"/>
+  <path d="M970 161 H1030" class="fast-line"/>
+
+  <text x="40" y="283" class="lane" fill="#b45309">Optional asynchronous refinement path</text>
+
+  <rect x="280" y="312" width="210" height="82" rx="10" class="slow-box"/>
+  <text x="385" y="345" text-anchor="middle" class="box-title">Finalized raw segment</text>
+  <text x="385" y="370" text-anchor="middle" class="box-detail">immutable evidence</text>
+
+  <rect x="550" y="312" width="180" height="82" rx="10" class="slow-box"/>
+  <text x="640" y="345" text-anchor="middle" class="box-title">FIFO queue</text>
+  <text x="640" y="370" text-anchor="middle" class="box-detail">one request at a time</text>
+
+  <rect x="790" y="312" width="180" height="82" rx="10" class="slow-box"/>
+  <text x="880" y="345" text-anchor="middle" class="box-title">Gemma</text>
+  <text x="880" y="370" text-anchor="middle" class="box-detail">candidate correction</text>
+
+  <rect x="1030" y="312" width="210" height="82" rx="10" class="slow-box"/>
+  <text x="1135" y="345" text-anchor="middle" class="box-title">Swift validator</text>
+  <text x="1135" y="370" text-anchor="middle" class="box-detail">accept or keep raw text</text>
+
+  <path d="M610 202 V252 H385 V312" class="slow-line"/>
+  <path d="M490 353 H550" class="slow-line"/>
+  <path d="M730 353 H790" class="slow-line"/>
+  <path d="M970 353 H1030" class="slow-line"/>
+  <path d="M1135 312 V242 H1135 V202" class="slow-line"/>
+
+  <text x="40" y="452" class="note">Blue determines when words first appear. Orange may replace finalized display text later, but never blocks the blue path.</text>
+</svg>

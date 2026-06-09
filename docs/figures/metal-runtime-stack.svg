@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1160 500" role="img" aria-labelledby="t d">
+  <title id="t">Metal runtime stack</title>
+  <desc id="d">C transformer code calls an Objective-C host layer that manages caches and command encoding, which dispatches Metal and MPS operations to GPU buffers.</desc>
+  <defs><marker id="a" markerWidth="11" markerHeight="11" refX="10" refY="4" orient="auto"><path d="M0 0L10 4L0 8Z" fill="#334155"/></marker><style>.h{font:700 25px sans-serif;fill:#172033}.n{font:700 17px sans-serif;fill:#172033}.s{font:13px sans-serif;fill:#475569}.b{fill:#f8fafc;stroke:#475569;stroke-width:2}.m{fill:#eef6ff;stroke:#1769aa;stroke-width:2}.l{fill:none;stroke:#334155;stroke-width:3;marker-end:url(#a)}</style></defs>
+  <text x="35" y="40" class="h">Host code owns lifetime; command buffers own execution order</text>
+  <rect x="240" y="75" width="680" height="70" rx="10" class="b"/><text x="580" y="106" text-anchor="middle" class="n">C encoder, decoder, and numerical kernels</text><text x="580" y="129" text-anchor="middle" class="s">shapes, counters, fallback semantics</text>
+  <rect x="180" y="195" width="800" height="95" rx="10" class="m"/><text x="580" y="228" text-anchor="middle" class="n">Objective-C Metal host runtime</text><text x="580" y="253" text-anchor="middle" class="s">device, queue, pipelines, activation pool, weight caches, MPSGraph cache, synchronization</text>
+  <rect x="80" y="350" width="300" height="80" rx="10" class="b"/><text x="230" y="381" text-anchor="middle" class="n">Metal shader pipelines</text><text x="230" y="405" text-anchor="middle" class="s">custom MSL kernels</text>
+  <rect x="430" y="350" width="300" height="80" rx="10" class="b"/><text x="580" y="381" text-anchor="middle" class="n">MPS / MPSGraph</text><text x="580" y="405" text-anchor="middle" class="s">tuned matrix and graph operations</text>
+  <rect x="780" y="350" width="300" height="80" rx="10" class="b"/><text x="930" y="381" text-anchor="middle" class="n">MTLBuffer storage</text><text x="930" y="405" text-anchor="middle" class="s">weights, activations, caches</text>
+  <path d="M580 145V195" class="l"/><path d="M400 290L230 350" class="l"/><path d="M580 290V350" class="l"/><path d="M760 290L930 350" class="l"/>
+</svg>

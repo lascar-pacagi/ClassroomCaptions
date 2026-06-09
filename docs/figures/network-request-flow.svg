@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 500" role="img" aria-labelledby="t d">
+  <title id="t">Local network request and caption stream flow</title>
+  <desc id="d">A QR transfers a capability URL. The browser opens HTTP and SSE connections. Student questions additionally use a ticket and POST route. The server sends values to the app model but has no control capability.</desc>
+  <defs><marker id="a" markerWidth="11" markerHeight="11" refX="10" refY="4" orient="auto"><path d="M0 0L10 4L0 8Z" fill="#334155"/></marker><style>.h{font:700 25px sans-serif;fill:#172033}.n{font:700 16px sans-serif;fill:#172033}.s{font:13px sans-serif;fill:#475569}.b{fill:#f8fafc;stroke:#475569;stroke-width:2}.m{fill:#eef6ff;stroke:#1769aa;stroke-width:2}.l{fill:none;stroke:#334155;stroke-width:2.5;marker-end:url(#a)}.x{font:13px sans-serif;fill:#334155;paint-order:stroke;stroke:white;stroke-width:4px}</style></defs>
+  <text x="35" y="40" class="h">The QR transfers a URL; TCP/HTTP carry the data</text>
+  <rect x="35" y="95" width="210" height="80" rx="10" class="b"/><text x="140" y="127" text-anchor="middle" class="n">Mac dashboard QR</text><text x="140" y="151" text-anchor="middle" class="s">local URL + bearer capability</text>
+  <rect x="330" y="95" width="210" height="80" rx="10" class="b"/><text x="435" y="127" text-anchor="middle" class="n">Phone camera/browser</text><text x="435" y="151" text-anchor="middle" class="s">decodes URL and performs GET</text>
+  <rect x="625" y="75" width="270" height="120" rx="10" class="m"/><text x="760" y="112" text-anchor="middle" class="n">LocalCaptionServer</text><text x="760" y="137" text-anchor="middle" class="s">NWListener + HTTP framing</text><text x="760" y="160" text-anchor="middle" class="s">capabilities, tickets, rate limits</text>
+  <rect x="980" y="95" width="225" height="80" rx="10" class="b"/><text x="1092" y="127" text-anchor="middle" class="n">ClassroomAppModel</text><text x="1092" y="151" text-anchor="middle" class="s">snapshots and question queue</text>
+  <path d="M245 135H330" class="l"/><path d="M540 135H625" class="l"/><path d="M895 135H980" class="l"/>
+  <text x="262" y="121" class="x">pixels</text><text x="556" y="121" class="x">TCP + HTTP</text><text x="916" y="121" class="x">values only</text>
+  <rect x="330" y="290" width="210" height="80" rx="10" class="b"/><text x="435" y="322" text-anchor="middle" class="n">Caption viewer</text><text x="435" y="346" text-anchor="middle" class="s">persistent SSE GET</text>
+  <rect x="625" y="290" width="270" height="80" rx="10" class="b"/><text x="760" y="322" text-anchor="middle" class="n">Student question form</text><text x="760" y="346" text-anchor="middle" class="s">ticket exchange + bounded POST</text>
+  <path d="M690 195C630 245 520 250 470 290" class="l"/><path d="M800 195V290" class="l"/>
+  <path d="M980 160C900 230 620 220 500 290" class="l"/><text x="700" y="230" class="x">revisioned snapshots</text>
+  <path d="M760 290V245H980" class="l"/><text x="825" y="262" class="x">normalized question</text>
+  <text x="35" y="440" class="s">No route receives a model prompt, shell command, filesystem path, microphone command, or overlay-control object.</text>
+</svg>

@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 700" role="img" aria-labelledby="title desc">
+  <title id="title">Domain aggregate and two explicit state machines</title>
+  <desc id="desc">The top row shows ownership. The middle row shows each legal session transition as a separate arrow. The bottom row shows each legal correction transition as a separate arrow. Failure replacement is described in a callout because the fail method is not state guarded.</desc>
+  <defs>
+    <marker id="blue-arrow" markerWidth="12" markerHeight="12" refX="10" refY="4" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L10,4 L0,8 Z" fill="#1769aa"/>
+    </marker>
+    <marker id="gray-arrow" markerWidth="12" markerHeight="12" refX="10" refY="4" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L10,4 L0,8 Z" fill="#334155"/>
+    </marker>
+    <marker id="red-arrow" markerWidth="12" markerHeight="12" refX="10" refY="4" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L10,4 L0,8 Z" fill="#b42318"/>
+    </marker>
+    <style>
+      .title { font: 700 25px sans-serif; fill: #172033; }
+      .subtitle { font: 700 18px sans-serif; fill: #334155; }
+      .box { fill: #f8fafc; stroke: #475569; stroke-width: 2; }
+      .blue { fill: #eef6ff; stroke: #1769aa; stroke-width: 2.5; }
+      .red { fill: #fff1f0; stroke: #b42318; stroke-width: 2.5; }
+      .callout { fill: #fff8e8; stroke: #a16207; stroke-width: 2; }
+      .name { font: 700 16px sans-serif; fill: #172033; }
+      .detail { font: 13px sans-serif; fill: #475569; }
+      .blue-line { fill: none; stroke: #1769aa; stroke-width: 2.7; marker-end: url(#blue-arrow); }
+      .line { fill: none; stroke: #334155; stroke-width: 2.7; marker-end: url(#gray-arrow); }
+      .red-line { fill: none; stroke: #b42318; stroke-width: 2.7; marker-end: url(#red-arrow); }
+      .label { font: 13px sans-serif; fill: #334155; paint-order: stroke; stroke: white; stroke-width: 4px; stroke-linejoin: round; }
+    </style>
+  </defs>
+
+  <text x="35" y="36" class="title">Ownership and legal transitions</text>
+
+  <text x="35" y="78" class="subtitle">Aggregate ownership</text>
+  <rect x="35" y="98" width="210" height="72" rx="10" class="blue"/>
+  <text x="140" y="128" text-anchor="middle" class="name">TranscriptionEvent</text>
+  <text x="140" y="151" text-anchor="middle" class="detail">backend value</text>
+  <rect x="350" y="98" width="230" height="72" rx="10" class="blue"/>
+  <text x="465" y="128" text-anchor="middle" class="name">ClassroomSession</text>
+  <text x="465" y="151" text-anchor="middle" class="detail">aggregate root</text>
+  <rect x="685" y="98" width="230" height="72" rx="10" class="blue"/>
+  <text x="800" y="128" text-anchor="middle" class="name">CaptionTimeline</text>
+  <text x="800" y="151" text-anchor="middle" class="detail">ordered history</text>
+  <rect x="1020" y="98" width="225" height="72" rx="10" class="blue"/>
+  <text x="1132" y="128" text-anchor="middle" class="name">CaptionSegment</text>
+  <text x="1132" y="151" text-anchor="middle" class="detail">raw + correction</text>
+  <path d="M245 134 H350" class="blue-line"/>
+  <path d="M580 134 H685" class="blue-line"/>
+  <path d="M915 134 H1020" class="blue-line"/>
+  <text x="274" y="121" class="label">mutates</text>
+  <text x="621" y="121" class="label">owns</text>
+  <text x="950" y="121" class="label">appends</text>
+
+  <text x="35" y="205" class="subtitle">Session lifecycle: every arrow below has one source and one destination</text>
+  <rect x="35" y="255" width="145" height="58" rx="9" class="box"/>
+  <text x="107" y="290" text-anchor="middle" class="name">starting</text>
+  <rect x="270" y="255" width="145" height="58" rx="9" class="box"/>
+  <text x="342" y="290" text-anchor="middle" class="name">listening</text>
+  <rect x="505" y="255" width="145" height="58" rx="9" class="box"/>
+  <text x="577" y="290" text-anchor="middle" class="name">paused</text>
+  <rect x="740" y="255" width="145" height="58" rx="9" class="box"/>
+  <text x="812" y="290" text-anchor="middle" class="name">stopping</text>
+  <rect x="975" y="255" width="145" height="58" rx="9" class="box"/>
+  <text x="1047" y="290" text-anchor="middle" class="name">idle</text>
+
+  <path d="M180 284 H270" class="line"/>
+  <text x="207" y="270" class="label">ready</text>
+  <path d="M415 284 H505" class="line"/>
+  <text x="445" y="270" class="label">pause</text>
+  <path d="M577 313 V350 H342 V313" class="line"/>
+  <text x="438" y="343" class="label">resume</text>
+  <path d="M650 284 H740" class="line"/>
+  <text x="678" y="270" class="label">stop paused</text>
+  <path d="M342 255 V239 H812 V255" class="line"/>
+  <text x="505" y="235" class="label">stop listening</text>
+  <path d="M885 284 H975" class="line"/>
+  <text x="910" y="270" class="label">finish</text>
+
+  <rect x="925" y="345" width="320" height="76" rx="10" class="callout"/>
+  <text x="1085" y="373" text-anchor="middle" class="name">Failure is a state replacement</text>
+  <text x="1085" y="396" text-anchor="middle" class="detail">fail(message) is unguarded: it sets phase = failed</text>
+  <text x="1085" y="414" text-anchor="middle" class="detail">from any current phase; failed may then enter stopping</text>
+  <rect x="740" y="363" width="145" height="58" rx="9" class="red"/>
+  <text x="812" y="398" text-anchor="middle" class="name">failed</text>
+  <path d="M812 363 V313" class="red-line"/>
+  <text x="824" y="340" class="label">cleanup stop</text>
+
+  <text x="35" y="478" class="subtitle">Correction lifecycle of one finalized segment</text>
+  <rect x="35" y="512" width="185" height="58" rx="9" class="box"/>
+  <text x="127" y="547" text-anchor="middle" class="name">notRequested</text>
+  <rect x="300" y="512" width="150" height="58" rx="9" class="box"/>
+  <text x="375" y="547" text-anchor="middle" class="name">queued</text>
+  <rect x="565" y="512" width="150" height="58" rx="9" class="box"/>
+  <text x="640" y="547" text-anchor="middle" class="name">correcting</text>
+  <rect x="830" y="512" width="150" height="58" rx="9" class="blue"/>
+  <text x="905" y="547" text-anchor="middle" class="name">corrected</text>
+  <rect x="1095" y="512" width="150" height="58" rx="9" class="red"/>
+  <text x="1170" y="547" text-anchor="middle" class="name">failed</text>
+
+  <path d="M450 541 H565" class="line"/>
+  <text x="479" y="527" class="label">worker starts</text>
+  <path d="M715 541 H830" class="line"/>
+  <text x="748" y="527" class="label">accepted</text>
+  <path d="M375 570 V650 H1170 V570" class="red-line"/>
+  <text x="610" y="643" class="label">failure before model execution</text>
+  <path d="M715 555 C835 605 965 605 1095 555" class="red-line"/>
+  <text x="800" y="581" class="label">model, transport, or validation failure</text>
+
+  <text x="35" y="680" class="detail">notRequested and queued are alternative initial states selected at finalization; no arrow connects them.</text>
+</svg>

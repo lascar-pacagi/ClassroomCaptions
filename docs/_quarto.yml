@@ -1,0 +1,61 @@
+project:
+  type: book
+  output-dir: _build
+
+book:
+  title: "Reconstructing ClassroomCaptions"
+  subtitle: "A C programmer's guide to local realtime subtitles on macOS"
+  author: "ClassroomCaptions project"
+  date: last-modified
+  chapters:
+    - index.qmd
+    - generated/02-domain-professional.qmd
+    - generated/03-orchestration-source.qmd
+    - generated/04-audio-source.qmd
+    - generated/05-ui-source.qmd
+    - generated/06-gemma-source.qmd
+    - generated/07-voxtral-stream-source.qmd
+    - generated/08-voxtral-input-source.qmd
+    - generated/09-voxtral-transformers-source.qmd
+    - generated/10-metal-source.qmd
+    - generated/11-network-source.qmd
+    - generated/12-remote-benchmark-source.qmd
+    - generated/13-tests-source.qmd
+    - generated/14-build-source.qmd
+    - glossary.qmd
+
+crossref:
+  fig-prefix: Figure
+  tbl-prefix: Table
+  sec-prefix: Section
+
+format:
+  html:
+    theme:
+      light: cosmo
+      dark: darkly
+    toc: true
+    toc-depth: 4
+    code-copy: true
+    code-line-numbers: true
+    code-overflow: scroll
+    css: styles.css
+  typst:
+    template-partials:
+      - page.typ
+    papersize: a4
+    margin:
+      x: 18mm
+      y: 17mm
+    fontsize: 9.5pt
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-line-numbers: true
+    code-overflow: wrap
+    include-in-header:
+      - typst-code.typ
+
+highlight-style: github
+number-sections: true
+link-external-newwindow: true

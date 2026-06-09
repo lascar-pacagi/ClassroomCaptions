@@ -1,0 +1,62 @@
+:root {
+  --cc-code-bg: #f5f7fa;
+  --cc-border: #d8dee8;
+}
+
+main.content {
+  max-width: 1120px;
+}
+
+body {
+  line-height: 1.62;
+}
+
+h2 {
+  margin-top: 2.4rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid var(--cc-border);
+}
+
+pre {
+  background: var(--cc-code-bg);
+  border: 1px solid var(--cc-border);
+  border-radius: 0.35rem;
+  font-size: 0.82rem;
+  line-height: 1.38;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+code {
+  font-variant-ligatures: none;
+}
+
+.cell-output-display svg,
+.mermaid-js svg {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  margin-inline: auto;
+}
+
+table {
+  font-size: 0.94rem;
+}
+
+.source-region {
+  margin-top: 2.8rem;
+}
+
+.source-notes {
+  border-left: 4px solid #3569a8;
+  padding: 0.35rem 1rem;
+  background: #f6f9fd;
+}
+
+@media (min-width: 1200px) {
+  main.content {
+    padding-left: 2rem;
+    padding-right: 2rem;
+  }
+}

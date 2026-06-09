@@ -1,0 +1,297 @@
+---
+title: "Glossary: Swift, Apple APIs, Models, and Protocols"
+---
+
+This glossary is a reference index. The book also defines each term at its
+first meaningful use, where its local design consequences are easier to see.
+
+## Swift language
+
+`actor`
+: A reference type whose mutable state is isolated by Swift concurrency.
+
+ARC
+: Automatic Reference Counting, Swift and Objective-C's compiler-assisted
+  strong-reference lifetime system.
+
+`async`
+: Marks a function that may suspend. It does not guarantee a background thread
+  or make shared state thread-safe.
+
+`AsyncStream<Element>`
+: A generic asynchronous sequence whose producer yields values and whose
+  consumer iterates them with `for await`.
+
+attribute
+: Metadata beginning with `@`, such as `@discardableResult` or `@MainActor`,
+  that changes compiler checking or generated behavior.
+
+closure
+: An anonymous function value that can capture variables from its surrounding
+  scope. `{ $0.id == target }` uses `$0` for its first inferred parameter.
+
+`Codable`
+: The composition of Swift's `Encodable` and `Decodable` protocols.
+
+computed property
+: A property implemented by accessor code rather than a stored field.
+
+copy-on-write
+: Value semantics implemented by sharing storage until one copy mutates.
+
+`enum`
+: A compiler-checked sum type. Cases may carry typed payloads, making it
+  comparable to a tagged C union.
+
+`Equatable`
+: Protocol requiring equality comparison with `==`.
+
+`extension`
+: Adds methods or conformances to an existing type without subclassing it.
+
+generic type
+: A type parameterized by another type, such as `AsyncStream<Event>`.
+
+`guard`
+: An early-exit construct. `guard condition else { return }` guarantees that
+  the condition is true for the remainder of the scope.
+
+`init`
+: A Swift initializer. Every stored property must be initialized before the
+  value becomes usable.
+
+`let`
+: Declares an immutable binding or stored property.
+
+`LocalizedError`
+: Foundation protocol exposing a human-readable error description.
+
+`mutating`
+: Allows a struct or enum method to modify `self`.
+
+`nil`
+: The absence case of an `Optional`; it is not an unchecked null pointer.
+
+nil coalescing (`??`)
+: Returns an optional's wrapped value or a fallback when it is `nil`.
+
+optional chaining (`?.`)
+: Calls a member only when the preceding optional contains a value.
+
+`Optional<T>` / `T?`
+: A sum type containing either `.some(T)` or `.none`.
+
+`private(set)`
+: Exposes a property getter more widely than its setter.
+
+`protocol`
+: A compiler-checked interface contract.
+
+`Sendable`
+: Concurrency protocol indicating that a value may cross isolation boundaries.
+  It does not serialize mutable implementation state.
+
+`struct`
+: A Swift value type. Assignment conceptually copies the value.
+
+`throws`, `throw`, and `try`
+: Swift's structured error-propagation mechanism.
+
+trailing closure
+: Syntax placing a function's final closure argument after the closing
+  parenthesis.
+
+`var`
+: Declares a mutable binding or stored property.
+
+`@MainActor`
+: Global-actor annotation isolating a declaration to Swift's main executor.
+
+`@Observable`
+: Observation-framework macro that synthesizes change tracking used by SwiftUI.
+
+`@State`
+: SwiftUI property wrapper providing persistent framework-managed storage to a
+  transient view value.
+
+`@unchecked Sendable`
+: Manual promise that a type satisfies cross-isolation safety even though the
+  compiler cannot prove it.
+
+`@ViewBuilder`
+: Result builder used to compose declarative SwiftUI child expressions.
+
+`Binding<T>`
+: A typed getter/setter pair exposed as mutable state to SwiftUI controls.
+
+`deinit`
+: Finalizer run when the last strong reference to a class instance is released.
+
+`some Protocol`
+: Opaque return type hiding one concrete type while preserving static typing.
+
+`Task`
+: Unit of Swift asynchronous work with cancellation and task-local context.
+
+`Unmanaged<T>`
+: Explicit retain/release interface for passing Swift object references through
+  C APIs that do not participate in ARC.
+
+## Application and models
+
+ASR
+: Automatic Speech Recognition.
+
+attention KV cache
+: Key-value cache retaining transformer attention projections from previous
+  positions during autoregressive decoding.
+
+AUHAL
+: Audio Unit Hardware Abstraction Layer.
+
+CLI
+: Command-Line Interface.
+
+dBFS
+: Decibels relative to Full Scale.
+
+DTO
+: Data Transfer Object.
+
+FIFO
+: First In, First Out.
+
+GPU
+: Graphics Processing Unit.
+
+MLX
+: Apple's array and machine-learning framework for Apple silicon.
+
+MLX-LM
+: Language-model tooling built on MLX.
+
+PCM
+: Pulse-Code Modulation.
+
+RMS
+: Root Mean Square.
+
+UI
+: User Interface.
+
+UUID
+: Universally Unique Identifier.
+
+WAV
+: Waveform Audio File Format.
+
+FFT
+: Fast Fourier Transform.
+
+FP16
+: IEEE-754 binary16 half-precision floating-point format.
+
+GELU
+: Gaussian Error Linear Unit activation.
+
+MSL
+: Metal Shading Language.
+
+MPS
+: Metal Performance Shaders.
+
+RMSNorm
+: Root Mean Square Layer Normalization.
+
+RoPE
+: Rotary Position Embedding.
+
+SiLU
+: Sigmoid Linear Unit activation.
+
+SPM
+: Swift Package Manager.
+
+STFT
+: Short-Time Fourier Transform.
+
+WER
+: Word Error Rate.
+
+## Networking and formats
+
+ABI
+: Application Binary Interface.
+
+API
+: Application Programming Interface.
+
+ASCII
+: American Standard Code for Information Interchange.
+
+BF16
+: Brain Floating Point, a 16-bit floating-point format.
+
+BLAS
+: Basic Linear Algebra Subprograms.
+
+HTTP
+: Hypertext Transfer Protocol.
+
+I/O
+: Input/Output.
+
+IPv4
+: Internet Protocol version 4.
+
+JSON
+: JavaScript Object Notation.
+
+little-endian
+: Integer byte order storing the least significant byte first.
+
+PC
+: Personal Computer.
+
+POST
+: HTTP request method conventionally used to submit data.
+
+QR
+: Quick Response code.
+
+RIFF
+: Resource Interchange File Format, the chunk container used by WAV.
+
+SSE
+: Server-Sent Events.
+
+TCP
+: Transmission Control Protocol.
+
+URL
+: Uniform Resource Locator.
+
+UTF-8
+: Unicode Transformation Format, 8-bit form.
+
+Wi-Fi
+: Wi-Fi Alliance brand name for IEEE 802.11 wireless networking. It is not an
+  acronym for “Wireless Fidelity.”
+
+Base64
+: Binary-to-text encoding representing each 24 input bits as four printable
+  characters, normally expanding data by roughly one third.
+
+`mmap`
+: POSIX operation mapping file-backed bytes into a process's virtual address
+  space.
+
+`MTLBuffer`
+: Metal byte allocation visible to GPU commands and, depending on storage mode,
+  the CPU.
+
+`MTLCommandBuffer`
+: Ordered collection of Metal commands submitted to a command queue.
+
+WebSocket
+: HTTP-upgraded bidirectional framed transport over one connection.
