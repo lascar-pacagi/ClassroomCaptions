@@ -349,7 +349,7 @@ application control APIs.
 
 Length: 1066 lines. SHA-256: `cece167f6008b9140850f5c2ce94ea35da1bf24e51c39a32b7d3af938d4b1b8a`.
 
-### Declaration map
+### Declaration map {.unnumbered .unlisted}
 
 This map gives the reading spine of the file. Line numbers refer to the original source and to the numbered listings below.
 
@@ -395,9 +395,9 @@ This map gives the reading spine of the file. Line numbers refer to the original
 | 887 | `private static func studentQuestionPage(token: String) -> String {` |
 | 996 | `private static func browserPage(token: String) -> String {` |
 
-### Continuation of the surrounding declaration (lines 1-5)
+### Imports and file preamble {.unnumbered .unlisted}
 
-Original source lines 1-5. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+The file begins by importing `Darwin`, `Foundation`, `Network`, `Security`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
 ```{.swift .numberLines startFrom="1"}
 import Darwin
@@ -408,8 +408,6 @@ import Security
 ```
 
 ### `struct RemoteCaptionSnapshot: Codable, Equatable, Sendable`
-
-Original source lines 6-12. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 The Codable wire payload sent over Server-Sent Events to each phone: the
 finalized caption lines, an optional in-progress provisional line, a flag for
@@ -429,8 +427,6 @@ struct RemoteCaptionSnapshot: Codable, Equatable, Sendable {
 
 ### `struct SubmittedClassroomQuestion: Equatable, Sendable`
 
-Original source lines 13-18. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 The value handed to the app when a student question clears all validation and
 rate limits: a fresh UUID, the normalized text, and the acceptance timestamp. It
 carries no source identifier or ticket, so nothing that could deanonymize the
@@ -446,8 +442,6 @@ struct SubmittedClassroomQuestion: Equatable, Sendable {
 ```
 
 ### `enum LocalCaptionServerStatus: Equatable, Sendable`
-
-Original source lines 19-26. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 The dashboard-facing lifecycle of caption sharing. Associated `URL` values
 exist only after listener readiness; `failed` carries presentation text rather
@@ -467,8 +461,6 @@ enum LocalCaptionServerStatus: Equatable, Sendable {
 
 ### `enum StudentQuestionServerStatus: Equatable, Sendable`
 
-Original source lines 27-32. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Question intake has a separate lifecycle because it can be disabled while the
 caption viewer remains active. The ready URL contains the independent student
 capability, never the viewer token, so the type separation mirrors the security
@@ -484,8 +476,6 @@ enum StudentQuestionServerStatus: Equatable, Sendable {
 ```
 
 ### `enum CaptionSharingSecurity`
-
-Original source lines 33-45. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 The caseless namespace holding every security constant and the three pure
 crypto/sanitization helpers, so limits live in one auditable place: 32-byte
@@ -511,8 +501,6 @@ enum CaptionSharingSecurity {
 
 ### `static func makeToken() throws -> String`
 
-Original source lines 46-54. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Mints a 256-bit secret by drawing tokenByteCount bytes from the system CSPRNG
 via SecRandomCopyBytes and hex-encoding them, so the pairing/student tokens and
 per-student tickets are unguessable. It throws rather than falling back to a weak
@@ -531,8 +519,6 @@ source if the draw fails, so a caller never proceeds with a predictable token.
 ```
 
 ### `static func tokensMatch(_ candidate: String, _ expected: String) -> Bool`
-
-Original source lines 55-65. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Constant-time-ish token comparison: it UTF-8-encodes both strings, rejects
 immediately on a length mismatch, then ORs the XOR of every byte pair into an
@@ -554,8 +540,6 @@ inside the loop denies a timing oracle that could leak the token byte-by-byte.
 ```
 
 ### `static func normalizedQuestion(_ text: String) -> String?`
-
-Original source lines 66-81. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Sanitizes untrusted student text before it is ever surfaced: it splits on
 whitespace and newlines, drops empties, rejoins with single spaces, then rejects
@@ -583,8 +567,6 @@ control bytes and oversized input never reach the moderation queue or the model.
 ```
 
 ### `final class LocalCaptionServer: @unchecked Sendable`
-
-Original source lines 82-106. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Owns the complete local-server state machine. `@unchecked Sendable` is a promise
 the compiler cannot verify; safety comes from confining every mutable field and
@@ -621,8 +603,6 @@ final class LocalCaptionServer: @unchecked Sendable {
 
 ### `private struct StudentTicket`
 
-Original source lines 107-117. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Queue-confined authorization state issued after the page capability is
 presented. It records the source observed by the Mac, an absolute expiry, and
 that ticket's accepted submission times. Tickets are neither persisted nor
@@ -643,8 +623,6 @@ forwarded to the application model.
 ```
 
 ### `init(…)`
-
-Original source lines 118-133. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Injects three escaping `@Sendable` callbacks and the listening port. `@escaping`
 means the server retains each closure after initialization; `@Sendable` makes
@@ -672,8 +650,6 @@ callbacks keep caption-only construction free of optional closure branches.
 
 ### `func start()`
 
-Original source lines 134-139. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Start generates fresh independent capabilities, creates Wi-Fi-constrained TCP
 parameters, installs listener callbacks on the server queue, and publishes
 URLs only after listener readiness and local-address selection.
@@ -689,8 +665,6 @@ URLs only after listener readiness and local-address selection.
 
 ### `func stop()`
 
-Original source lines 140-145. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Schedules teardown on the owner queue. The call returns before cancellation
 necessarily completes, but ordering with prior publishes and later starts is
 deterministic because every operation enters the same serial queue.
@@ -705,8 +679,6 @@ deterministic because every operation enters the same serial queue.
 ```
 
 ### `func publish(_ snapshot: RemoteCaptionSnapshot)`
-
-Original source lines 146-153. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 SSE framing JSON-encodes one immutable snapshot, prefixes protocol fields, and
 ends the event with a blank line. Slow or failed connections are removed by the
@@ -725,8 +697,6 @@ queue owner rather than blocking the app model.
 
 ### `func setQuestionSubmissionsEnabled(_ enabled: Bool)`
 
-Original source lines 154-159. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Transfers one Boolean command to the queue-owned implementation. Credential
 rotation and ticket clearing therefore cannot race an incoming question request
 with a main-actor write to `questionsEnabled`.
@@ -741,8 +711,6 @@ with a main-actor write to `questionsEnabled`.
 ```
 
 ### `private func startOnQueue()`
-
-Original source lines 160-188. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Performs restart as one queue transaction: discard old state, report starting,
 mint a viewer capability, configure Wi-Fi TCP and Bonjour, install callbacks,
@@ -783,8 +751,6 @@ readiness nor an advertisable local address has been established.
 
 ### `private func stopOnQueue(reportStatus: Bool)`
 
-Original source lines 189-211. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Cancels heartbeat, stream, ordinary connections, and listener before clearing
 their state. Both capabilities and every ticket/rate window are destroyed, so a
 QR photographed before stop cannot authorize the next server run.
@@ -816,8 +782,6 @@ QR photographed before stop cannot authorize the next server run.
 ```
 
 ### `private func handleListenerState(_ state: NWListener.State)`
-
-Original source lines 212-237. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Turns Network.framework states into application states. On `.ready` it chooses
 a Wi-Fi IPv4 address and constructs the capability URL; on `.failed` it reports
@@ -855,8 +819,6 @@ address are deliberately treated as separate conditions.
 
 ### `private func accept(_ connection: NWConnection)`
 
-Original source lines 238-262. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Admits a new TCP connection, enforcing a hard ceiling of 64 concurrent
 connections by cancelling anything beyond it to blunt connection-flood abuse. It
 records the connection, derives a stable source ID from the peer endpoint for
@@ -892,8 +854,6 @@ failure/cancel, and starts the incremental request read.
 ```
 
 ### `private func receiveRequest(…)`
-
-Original source lines 263-352. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Each receive callback appends arbitrary TCP bytes to a bounded accumulator.
 Routing starts only after a complete header and declared body are present.
@@ -994,8 +954,6 @@ Header and body limits are checked before allocation can grow without bound.
 
 ### `private func handleRequest(…)`
 
-Original source lines 353-432. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Routing authenticates capabilities before exposing protected route behavior.
 Unknown routes and wrong credentials deliberately share a response shape.
 Viewer routes cannot submit questions; student routes cannot control captions.
@@ -1085,8 +1043,6 @@ Viewer routes cannot submit questions; student routes cannot control captions.
 
 ### `private func setQuestionSubmissionsEnabledOnQueue(_ enabled: Bool)`
 
-Original source lines 433-462. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Enabling questions mints a fresh student capability and clears every previous
 ticket and rate window; disabling destroys the same state. The helper publishes
 a URL only when the caption server has already discovered a host, so it cannot
@@ -1127,8 +1083,6 @@ advertise a half-constructed capability.
 
 ### `private func updateStudentQuestionURL(host: String?)`
 
-Original source lines 463-474. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Projects queue-owned host, enablement, and token state into a dashboard status.
 Keeping URL construction here prevents callers from combining a current host
 with a stale student token after restart or disablement.
@@ -1149,8 +1103,6 @@ with a stale student token after restart or disablement.
 ```
 
 ### `private func handleStudentRequest(…)`
-
-Original source lines 475-545. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 The student-feature router, returning true once it owns a request so the caption
 path is bypassed. It claims only /student, /student-ticket, and /questions; if
@@ -1234,8 +1186,6 @@ the feature is disabled it 404s to hide its existence. GET /student and POST
 
 ### `private func issueStudentTicket(…)`
 
-Original source lines 546-587. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Issues one rate-limit ticket per request: it first sweeps expired tickets, then
 refuses with 503 once maximumTickets live tickets exist, capping memory and
 enrollment. A fresh makeToken value keys a StudentTicket recording the source ID,
@@ -1288,8 +1238,6 @@ degrades to 503 rather than issuing a weak ticket.
 ```
 
 ### `private func submitQuestion(…)`
-
-Original source lines 588-671. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Validates and rate-limits one question. The ticket must exist, be unexpired, and
 bind to the same sourceID that obtained it (else 401), preventing ticket sharing
@@ -1387,8 +1335,6 @@ yields 429. Only on success is the question forwarded with a 202.
 
 ### `private func respondNotFound(on connection: NWConnection)`
 
-Original source lines 672-680. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 ```{.swift .numberLines startFrom="672"}
     private func respondNotFound(on connection: NWConnection) {
         respond(
@@ -1402,8 +1348,6 @@ Original source lines 672-680. The boundary follows a declaration or a paginatio
 ```
 
 ### `private func beginEventStream(on connection: NWConnection)`
-
-Original source lines 681-722. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Establishes the single SSE caption stream. If streamConnection is already set it
 rejects with 409, enforcing exactly one connected phone at a time. Otherwise it
@@ -1458,8 +1402,6 @@ starts the heartbeat timer, and reports clientConnected.
 
 ### `private func startHeartbeat()`
 
-Original source lines 723-741. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Creates a repeating dispatch timer on the server queue and sends SSE comment
 frames during quiet periods. Comments carry no application event, but periodic
 bytes keep the TCP path alive. Cancelling an existing timer first makes stream
@@ -1489,8 +1431,6 @@ replacement and teardown idempotent.
 
 ### `private func removeStreamConnection(_ connection: NWConnection)`
 
-Original source lines 742-751. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Clears the registered SSE stream only if the callback belongs to that exact
 `NWConnection`. This identity check prevents a delayed cancellation from an old
 phone from erasing a newer connection; the heartbeat stops when no stream
@@ -1510,8 +1450,6 @@ remains.
 ```
 
 ### `private func send(…)`
-
-Original source lines 752-771. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 JSON-encodes one immutable snapshot and frames it as an SSE `event:`/`data:`
 record terminated by a blank line. A missing viewer is a no-op. Transport
@@ -1542,8 +1480,6 @@ cleanup.
 ```
 
 ### `private func respond(…)`
-
-Original source lines 772-804. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Writes a complete one-shot HTTP/1.1 response and closes: it frames the body with
 Content-Length, Connection: close, and no-store caching, and stamps a strict
@@ -1589,8 +1525,6 @@ nosniff and X-Frame-Options DENY.
 
 ### `private static func contentLength(in headerText: String) -> Int`
 
-Original source lines 805-809. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Parses the Content-Length header into a non-negative Int, defaulting to 0 when
 absent or unparseable. receiveRequest uses it to decide when a body is fully
 buffered and to reject anything over maximumQuestionBytes, so a malformed or
@@ -1605,8 +1539,6 @@ hostile length never causes an over-read.
 ```
 
 ### `private static func headers(in headerText: String) -> [String: String]`
-
-Original source lines 810-824. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Parses only the header grammar needed by the generated clients. Names are
 trimmed and lowercased because HTTP field names are case-insensitive. Repeated
@@ -1633,8 +1565,6 @@ outside this small server's protocol.
 
 ### `private static func queryValue(…)`
 
-Original source lines 825-833. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Delegates query parsing and percent-decoding to `URLComponents` instead of
 splitting raw strings. The generated routes emit one value per capability or
 ticket name, so returning the first matching item is a complete contract.
@@ -1653,8 +1583,6 @@ ticket name, so returning the first matching item is a complete contract.
 
 ### `private static func sourceID(for endpoint: NWEndpoint) -> String`
 
-Original source lines 834-840. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Derives a coarse rate-limit key from the peer endpoint. It is not student
 identity: NAT may merge users and address changes may split one user. The value
 never leaves queue-owned abuse-control tables.
@@ -1670,8 +1598,6 @@ never leaves queue-owned abuse-control tables.
 ```
 
 ### `private static func wifiIPv4Address() -> String?`
-
-Original source lines 841-886. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Discovers the LAN IPv4 address to advertise by walking getifaddrs, skipping
 interfaces that are down, loopback, or non-IPv4. It prefers en0 (the Wi-Fi
@@ -1728,8 +1654,6 @@ guarantees the C allocation is released on every exit path.
 ```
 
 ### `private static func studentQuestionPage(token: String) -> String`
-
-Original source lines 887-995. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Returns the complete HTML/CSS/JavaScript student client, embedding the student
 capability through JSON encoding rather than string concatenation. JavaScript
@@ -1849,8 +1773,6 @@ caption, microphone, overlay, or model control.
 ```
 
 ### `private static func browserPage(token: String) -> String`
-
-Original source lines 996-1066. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Returns the read-only caption viewer. Its JavaScript opens an `EventSource`
 carrying the viewer capability, replaces the rendered snapshot on each event,

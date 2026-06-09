@@ -101,7 +101,7 @@ that the model receives text and returns text without application tools.
 
 Length: 150 lines. SHA-256: `91372950c0e0df892621b158a77a66e5670f6cf3c7ee2d38a2a806fdfecca074`.
 
-### Declaration map
+### Declaration map {.unnumbered .unlisted}
 
 This map gives the reading spine of the file. Line numbers refer to the original source and to the numbered listings below.
 
@@ -116,9 +116,9 @@ This map gives the reading spine of the file. Line numbers refer to the original
 | 100 | `private func launch(` |
 | 137 | `private func isHealthy(endpoint: URL) async -> Bool {` |
 
-### Continuation of the surrounding declaration (lines 1-2)
+### Imports and file preamble {.unnumbered .unlisted}
 
-Original source lines 1-2. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+The file begins by importing `Foundation`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
 ```{.swift .numberLines startFrom="1"}
 import Foundation
@@ -126,8 +126,6 @@ import Foundation
 ```
 
 ### `enum GemmaServerError: LocalizedError`
-
-Original source lines 3-19. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 The typed failure set for the locally launched MLX-LM server, conforming to
 LocalizedError so each case renders a user-facing string: executableMissing
@@ -156,8 +154,6 @@ enum GemmaServerError: LocalizedError {
 
 ### `final class GemmaServerController`
 
-Original source lines 20-24. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Main-actor owner of the optional MLX-LM child and its health-check session.
 Actor isolation serializes launch and termination with UI workflows, while
 health probes suspend instead of blocking the event loop. Only the child stored
@@ -172,8 +168,6 @@ final class GemmaServerController {
 ```
 
 ### `init()`
-
-Original source lines 25-31. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Creates an ephemeral session with one-second request and two-second resource
 timeouts. Individual failed probes therefore return quickly; `ensureReady`
@@ -191,8 +185,6 @@ No cookies or persistent cache are useful for loopback health checks.
 ```
 
 ### `func ensureReady(…)`
-
-Original source lines 32-62. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Readiness is idempotent: a healthy existing endpoint returns immediately.
 Otherwise the owned process is launched once and polled with `ContinuousClock`,
@@ -235,8 +227,6 @@ reported without waiting for the full timeout.
 
 ### `func stop()`
 
-Original source lines 63-71. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Terminates the owned server: if no process is tracked or it already exited it
 just clears the reference, otherwise it sends SIGTERM via terminate and drops the
 reference. It only ever kills a process this controller launched, never one
@@ -255,8 +245,6 @@ discovered through the lsof fallback.
 ```
 
 ### `func processIdentifier(endpoint: URL) -> pid_t?`
-
-Original source lines 72-99. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Resolves the server's PID, preferring the live owned Process's identifier. When
 the app did not spawn the server it falls back to running `lsof -nP -tiTCP:port
@@ -295,8 +283,6 @@ failure, non-zero exit, or unparseable output yields nil rather than a wrong PID
 ```
 
 ### `private func launch(…)`
-
-Original source lines 100-136. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Spawns the owned mlx_lm.server child once. It verifies the path is executable
 (else executableMissing) and the endpoint yields host and port, then runs it with
@@ -346,8 +332,6 @@ stderr go to /dev/null. A run failure is rethrown as launchFailed.
 
 ### `private func isHealthy(endpoint: URL) async -> Bool`
 
-Original source lines 137-150. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Probes readiness with a GET to v1/models on the short-timeout ephemeral health
 session, returning true only for a 2xx HTTPURLResponse. Any thrown error,
 non-HTTP response, or non-2xx status maps to false, so polling treats
@@ -388,7 +372,7 @@ rewrite leaves the raw caption visible.
 
 Length: 206 lines. SHA-256: `4243247bc2b5dbb5745ffcba8f05d5cd358bc09f2f5e3535c41b872409180ce6`.
 
-### Declaration map
+### Declaration map {.unnumbered .unlisted}
 
 This map gives the reading spine of the file. Line numbers refer to the original source and to the numbered listings below.
 
@@ -403,9 +387,9 @@ This map gives the reading spine of the file. Line numbers refer to the original
 | 118 | `init(endpoint: URL) {` |
 | 126 | `func correct(` |
 
-### Continuation of the surrounding declaration (lines 1-3)
+### Imports and file preamble {.unnumbered .unlisted}
 
-Original source lines 1-3. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+The file begins by importing `ClassroomCaptionsCore`, `Foundation`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
 ```{.swift .numberLines startFrom="1"}
 import ClassroomCaptionsCore
@@ -414,8 +398,6 @@ import Foundation
 ```
 
 ### `enum GemmaCorrectionError: LocalizedError`
-
-Original source lines 4-20. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Separates malformed endpoint construction, structurally invalid success
 payloads, and non-2xx server replies carrying status plus body. Typed errors let
@@ -444,8 +426,6 @@ enum GemmaCorrectionError: LocalizedError {
 
 ### `actor GemmaCorrectionService: CaptionCorrectionService`
 
-Original source lines 21-21. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 An actor is a reference type whose mutable state is isolated by a Swift
 executor. External calls require `await`, preventing concurrent corrections
 through this instance. Even though its stored fields are immutable, actor
@@ -456,8 +436,6 @@ actor GemmaCorrectionService: CaptionCorrectionService {
 ```
 
 ### `private struct Message: Codable`
-
-Original source lines 22-26. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 The smallest chat-protocol unit: role and content. It remains a wire value rather
 than a domain enum because the OpenAI-compatible endpoint owns role vocabulary.
@@ -472,8 +450,6 @@ than a domain enum because the OpenAI-compatible endpoint owns role vocabulary.
 ```
 
 ### `private struct CompletionRequest: Encodable`
-
-Original source lines 27-34. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 The OpenAI-style chat-completions request body. It hard-codes temperature 0 and
 stream false for deterministic, single-shot proofreading and pins model to
@@ -492,8 +468,6 @@ fields have defaults, so they are encoded without being passed at the call site.
 ```
 
 ### `private struct CompletionResponse: Decodable`
-
-Original source lines 35-110. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 The decoded response envelope: an array of choices and optional usage. It
 surfaces each choice's reasoningContent alongside content so correct() can reject
@@ -581,8 +555,6 @@ caption. Nested CodingKeys remap the server's snake_case to camelCase.
 
 ### `private static func systemPrompt(for mode: CaptionCorrectionMode) -> String`
 
-Original source lines 111-117. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Assembles the effective system prompt by concatenating sharedPrompt with either
 sciencePrompt or standardPrompt based on the request mode. The shared safety
 block always comes first, so the mode-specific notation rules extend rather than
@@ -600,8 +572,6 @@ override the injection defenses.
 
 ### `init(endpoint: URL)`
 
-Original source lines 118-125. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Stores the already validated loopback endpoint and configures an ephemeral
 session with bounded request and resource deadlines. The initializer does not
 rewrite hosts or ports; endpoint policy remains the app model's responsibility.
@@ -618,8 +588,6 @@ rewrite hosts or ports; endpoint policy remains the app model's responsibility.
 ```
 
 ### `func correct(…)`
-
-Original source lines 126-206. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 The request budget scales with caption length but remains bounded. Context and
 target are placed in separate data markers. After HTTP and JSON checks, any

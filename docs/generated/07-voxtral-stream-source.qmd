@@ -115,7 +115,7 @@ options collect the latency/context controls that must be fixed at creation.
 
 Length: 83 lines. SHA-256: `5a4141791cad55bc9e944f61cf757d31b19c1d0ed1100525ce4e05179f9618c1`.
 
-### Declaration map
+### Declaration map {.unnumbered .unlisted}
 
 This map gives the reading spine of the file. Line numbers refer to the original source and to the numbered listings below.
 
@@ -150,8 +150,6 @@ This map gives the reading spine of the file. Line numbers refer to the original
 
 ### `#ifndef CLASSROOM_VOXTRAL_H`
 
-Original source lines 1-1. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 This is the first half of the conventional C include guard. On the first
 inclusion the macro is absent, so preprocessing continues; the next line
 defines it. On later inclusions the preprocessor skips everything through the
@@ -164,8 +162,6 @@ header through more than one path.
 ```
 
 ### `#define CLASSROOM_VOXTRAL_H`
-
-Original source lines 2-6. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Defining the include-guard macro records that this header has been processed.
 The two standard headers provide `size_t` and fixed-width integers. They are
@@ -182,8 +178,6 @@ indirect include would make this header sensitive to unrelated include order.
 
 ### `#ifdef __cplusplus`
 
-Original source lines 7-8. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 When a C++ compiler reads the header, `extern "C"` suppresses C++ name mangling
 for the declarations that follow, preserving the exact linker symbols exported
 by `ClassroomVoxtral.c`. A C or Objective-C compiler skips the linkage wrapper.
@@ -196,16 +190,12 @@ extern "C" {
 
 ### `#endif`
 
-Original source lines 9-10. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 ```{.c .numberLines startFrom="9"}
 #endif
 
 ```
 
 ### `typedef struct ccv_model ccv_model_t;`
-
-Original source lines 11-11. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Declares an opaque model handle. Callers may store and pass `ccv_model_t *`, but
 cannot inspect its fields or allocate the object themselves because the
@@ -218,8 +208,6 @@ typedef struct ccv_model ccv_model_t;
 
 ### `typedef struct ccv_stream ccv_stream_t;`
 
-Original source lines 12-13. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Declares the second opaque handle, containing mutable state for one incremental
 audio stream. A stream borrows its model for its entire lifetime, so the required
 destruction order is stream first, model second. Opacity prevents Swift from
@@ -231,8 +219,6 @@ typedef struct ccv_stream ccv_stream_t;
 ```
 
 ### `typedef enum ccv_status_t`
-
-Original source lines 14-27. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Defines the complete status domain crossing the C/Swift boundary. Zero is
 success; positive values are nonfatal polling outcomes (`NO_TEXT` and
@@ -259,8 +245,6 @@ typedef enum {
 
 ### `typedef struct ccv_stream_options_t`
 
-Original source lines 28-34. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Groups creation-time stream policy into one value passed by copy. `delay_ms`
 controls model delay conditioning, `processing_interval_seconds` controls how
 often accumulated audio advances inference, `continuous` enables long-running
@@ -280,8 +264,6 @@ typedef struct {
 
 ### `ccv_stream_options_t ccv_stream_options_default(void);`
 
-Original source lines 35-36. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Returns a fully initialized policy value whose defaults are owned by the bridge.
 Swift starts from this value and overrides only settings exposed by the UI,
 which prevents newly added C fields from being left indeterminate by older
@@ -293,8 +275,6 @@ ccv_stream_options_t ccv_stream_options_default(void);
 ```
 
 ### `ccv_model_t *ccv_model_load(…)`
-
-Original source lines 37-43. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Loads the immutable model context from a directory and returns an opaque owned
 handle. `status` and `error_message` are optional out-parameters for structured
@@ -314,8 +294,6 @@ ccv_model_t *ccv_model_load(
 
 ### `void ccv_model_free(ccv_model_t *model);`
 
-Original source lines 44-45. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Releases a model handle returned by `ccv_model_load`. It is null-tolerant, but
 the caller must already have destroyed every stream borrowing this model. The
 Swift service enforces that lifetime order on its serial inference queue.
@@ -326,8 +304,6 @@ void ccv_model_free(ccv_model_t *model);
 ```
 
 ### `ccv_stream_t *ccv_stream_create(…)`
-
-Original source lines 46-53. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Allocates mutable decoding state that borrows an already loaded model and
 applies the supplied options. As with model loading, null indicates failure and
@@ -347,8 +323,6 @@ ccv_stream_t *ccv_stream_create(
 
 ### `ccv_status_t ccv_stream_feed_pcm16(…)`
 
-Original source lines 54-59. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Copies one buffer of mono signed 16-bit PCM into the incremental stream after
 normalizing samples to floating point. `sample_count` counts samples, not bytes;
 at the fixed 16 kHz model rate, 16,000 samples represent one second. Success
@@ -366,8 +340,6 @@ ccv_status_t ccv_stream_feed_pcm16(
 
 ### `ccv_status_t ccv_stream_flush(ccv_stream_t *stream);`
 
-Original source lines 60-60. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Forces currently buffered, stable work through the live pipeline without ending
 the stream. The application uses this at caption boundaries after silence or a
 manual commit, then continues feeding later speech into the same context.
@@ -378,8 +350,6 @@ ccv_status_t ccv_stream_flush(ccv_stream_t *stream);
 
 ### `ccv_status_t ccv_stream_finish(ccv_stream_t *stream);`
 
-Original source lines 61-61. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Marks input complete, adds the front-end's required terminal padding, and drains
 the final decoder work. After a successful finish no more audio may be fed; text
 must still be read until `CCV_STATUS_NO_TEXT` before the stream is freed.
@@ -389,8 +359,6 @@ ccv_status_t ccv_stream_finish(ccv_stream_t *stream);
 ```
 
 ### `void ccv_stream_cancel(ccv_stream_t *stream);`
-
-Original source lines 62-63. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Requests early termination through the bridge's atomic cancellation flag. It is
 the one operation designed to signal a stream independently; it does not make
@@ -403,8 +371,6 @@ void ccv_stream_cancel(ccv_stream_t *stream);
 ```
 
 ### `ccv_status_t ccv_stream_read_text(…)`
-
-Original source lines 64-70. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Copies the next queued UTF-8 text fragment into caller-owned storage and reports
 its required byte count through `bytes_written`. `NO_TEXT` means polling may
@@ -423,8 +389,6 @@ ccv_status_t ccv_stream_read_text(
 
 ### `uint64_t ccv_stream_samples_fed(const ccv_stream_t *stream);`
 
-Original source lines 71-71. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Returns the cumulative number of PCM samples accepted by this stream. The app
 uses this monotonic counter for diagnostics; it is not a timestamp and does not
 subtract samples whose derived features were compacted from internal buffers.
@@ -435,8 +399,6 @@ uint64_t ccv_stream_samples_fed(const ccv_stream_t *stream);
 
 ### `uint64_t ccv_stream_text_tokens_generated(const ccv_stream_t *stream);`
 
-Original source lines 72-72. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Returns the cumulative decoder-token count for live throughput diagnostics.
 Tokens are model vocabulary units, not words or Unicode characters, so this
 counter cannot be inferred reliably from the displayed caption length.
@@ -446,8 +408,6 @@ uint64_t ccv_stream_text_tokens_generated(const ccv_stream_t *stream);
 ```
 
 ### `double ccv_stream_decoder_milliseconds(const ccv_stream_t *stream);`
-
-Original source lines 73-73. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Returns accumulated wall time spent in decoder inference for this stream. Swift
 combines it with the token count to report decoder tokens per second; model
@@ -460,8 +420,6 @@ double ccv_stream_decoder_milliseconds(const ccv_stream_t *stream);
 
 ### `void ccv_stream_free(ccv_stream_t *stream);`
 
-Original source lines 74-75. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Destroys all mutable buffers and upstream state owned by one stream. The handle
 must no longer be used afterward. It is freed before the borrowed model, on the
 same serial queue that performed inference.
@@ -473,8 +431,6 @@ void ccv_stream_free(ccv_stream_t *stream);
 
 ### `const char *ccv_status_description(ccv_status_t status);`
 
-Original source lines 76-76. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Maps a status enum to a static human-readable string for logs and fallback error
 messages. The returned pointer is borrowed program storage: callers neither free
 nor modify it, and program logic should still branch on the enum value.
@@ -484,8 +440,6 @@ const char *ccv_status_description(ccv_status_t status);
 ```
 
 ### `const char *ccv_upstream_revision(void);`
-
-Original source lines 77-78. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Returns the pinned upstream Voxtral revision compiled into the bridge. This
 makes benchmark reports and bug investigations reproducible without exposing
@@ -497,8 +451,6 @@ const char *ccv_upstream_revision(void);
 ```
 
 ### `#ifdef __cplusplus`
-
-Original source lines 79-80. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 When a C++ compiler reads the header, `extern "C"` suppresses C++ name mangling
 for the declarations that follow, preserving the exact linker symbols exported
@@ -512,16 +464,12 @@ The matching conditional near the end closes the brace only in C++ mode.
 
 ### `#endif`
 
-Original source lines 81-82. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 ```{.c .numberLines startFrom="81"}
 #endif
 
 ```
 
 ### `#endif`
-
-Original source lines 83-83. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 ```{.c .numberLines startFrom="83"}
 #endif
@@ -542,7 +490,7 @@ atomic does not make arbitrary concurrent stream entry safe.
 
 Length: 290 lines. SHA-256: `d504d5d28fc5adb6bf6e8df6d59b0cd24cb697af5aefbbdf9f5186c3b96b2e6f`.
 
-### Declaration map
+### Declaration map {.unnumbered .unlisted}
 
 This map gives the reading spine of the file. Line numbers refer to the original source and to the numbered listings below.
 
@@ -569,9 +517,9 @@ This map gives the reading spine of the file. Line numbers refer to the original
 | 271 | `const char *ccv_status_description(ccv_status_t status) {` |
 | 288 | `const char *ccv_upstream_revision(void) {` |
 
-### Continuation of the surrounding declaration (lines 1-14)
+### Translation-unit preamble {.unnumbered .unlisted}
 
-Original source lines 1-14. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+This translation-unit preamble selects dependencies, compile-time features, and file-local constants used by the definitions that follow.
 
 ```{.c .numberLines startFrom="1"}
 #include "ClassroomVoxtral.h"
@@ -592,8 +540,6 @@ Original source lines 1-14. The boundary follows a declaration or a pagination b
 
 ### `struct ccv_model`
 
-Original source lines 15-18. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 The concrete body hidden behind `ccv_model_t`: one owned upstream context.
 Keeping this wrapper distinct leaves room for project metadata without exposing
 `vox_ctx_t` through the stable ABI.
@@ -606,8 +552,6 @@ struct ccv_model {
 ```
 
 ### `struct ccv_stream`
-
-Original source lines 19-29. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Bridge-owned mutable state: upstream stream, cancellation/finish flags, reusable
 PCM conversion storage, and a pending text buffer retained across a too-small
@@ -629,8 +573,6 @@ struct ccv_stream {
 
 ### `static void ccv_set_status(ccv_status_t *status, ccv_status_t value)`
 
-Original source lines 30-33. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Writes an optional status out-parameter. Null tolerance keeps callers free to
 request only the handle/error string they need.
 
@@ -642,8 +584,6 @@ static void ccv_set_status(ccv_status_t *status, ccv_status_t value) {
 ```
 
 ### `static void ccv_set_error(char *output, size_t capacity, const char *message)`
-
-Original source lines 34-38. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Copies a diagnostic into caller-owned bounded storage with guaranteed
 termination; null or zero-capacity output is a no-op.
@@ -657,8 +597,6 @@ static void ccv_set_error(char *output, size_t capacity, const char *message) {
 ```
 
 ### `static int ccv_model_file_exists(const char *directory, const char *name)`
-
-Original source lines 39-45. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Builds one required model path into a fixed local buffer and checks regular file
 availability before invoking the heavier loader.
@@ -674,8 +612,6 @@ static int ccv_model_file_exists(const char *directory, const char *name) {
 ```
 
 ### `ccv_stream_options_t ccv_stream_options_default(void)`
-
-Original source lines 46-54. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Returns the bridge's complete real-time policy baseline, ensuring future fields
 are initialized for Swift callers that start from defaults.
@@ -693,8 +629,6 @@ ccv_stream_options_t ccv_stream_options_default(void) {
 ```
 
 ### `ccv_model_t *ccv_model_load(…)`
-
-Original source lines 55-114. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Validates the model directory (must hold consolidated.safetensors, tekken.json,
 params.json), initializes Metal when built with it, then loads the engine via
@@ -767,8 +701,6 @@ ccv_model_t *ccv_model_load(
 
 ### `void ccv_model_free(ccv_model_t *model)`
 
-Original source lines 115-123. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Null-safe wrapper destruction: frees the upstream model, then the small ABI
 handle. Streams borrowing it must already be gone.
 
@@ -785,8 +717,6 @@ void ccv_model_free(ccv_model_t *model) {
 ```
 
 ### `ccv_stream_t *ccv_stream_create(…)`
-
-Original source lines 124-165. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Builds an opaque streaming handle over a loaded model: applies the delay to the
 shared engine context, initializes a vox_stream, then sets processing interval,
@@ -840,8 +770,6 @@ ccv_stream_t *ccv_stream_create(
 
 ### `ccv_status_t ccv_stream_feed_pcm16(…)`
 
-Original source lines 166-196. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Converts an int16 PCM block to f32 in [-1,1) through a reused, lazily-grown
 conversion_buffer owned by the stream, then feeds it to the engine.
 Short-circuits to CANCELLED or STREAM_FINISHED when those flags are set,
@@ -884,8 +812,6 @@ ccv_status_t ccv_stream_feed_pcm16(
 
 ### `ccv_status_t ccv_stream_flush(ccv_stream_t *stream)`
 
-Original source lines 197-204. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Validates lifecycle/cancellation, calls the upstream nonterminal flush, and maps
 its integer convention to the stable project status enum.
 
@@ -901,8 +827,6 @@ ccv_status_t ccv_stream_flush(ccv_stream_t *stream) {
 ```
 
 ### `ccv_status_t ccv_stream_finish(ccv_stream_t *stream)`
-
-Original source lines 205-215. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Finishes exactly once, records terminal state only after upstream success, and
 maps repeated or cancelled calls to explicit statuses.
@@ -923,8 +847,6 @@ ccv_status_t ccv_stream_finish(ccv_stream_t *stream) {
 
 ### `void ccv_stream_cancel(ccv_stream_t *stream)`
 
-Original source lines 216-219. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Sets the stream's atomic cancelled flag so concurrent or subsequent
 feed/flush/finish calls short-circuit to CCV_STATUS_CANCELLED. The atomic makes
 this safe to call from a different thread than the inference loop; it does not
@@ -938,8 +860,6 @@ void ccv_stream_cancel(ccv_stream_t *stream) {
 ```
 
 ### `ccv_status_t ccv_stream_read_text(…)`
-
-Original source lines 220-247. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Pops one pending token from the engine queue and copies its NUL-terminated UTF-8
 into the caller's output buffer. A token already dequeued but not yet delivered is
@@ -979,8 +899,6 @@ ccv_status_t ccv_stream_read_text(
 
 ### `uint64_t ccv_stream_samples_fed(const ccv_stream_t *stream)`
 
-Original source lines 248-251. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Exposes the upstream cumulative sample counter without revealing stream layout.
 Invalid handles return zero for diagnostics.
 
@@ -992,8 +910,6 @@ uint64_t ccv_stream_samples_fed(const ccv_stream_t *stream) {
 ```
 
 ### `uint64_t ccv_stream_text_tokens_generated(const ccv_stream_t *stream)`
-
-Original source lines 252-257. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Forwards the cumulative text-token counter used by the app's live rate display.
 
@@ -1008,8 +924,6 @@ uint64_t ccv_stream_text_tokens_generated(const ccv_stream_t *stream) {
 
 ### `double ccv_stream_decoder_milliseconds(const ccv_stream_t *stream)`
 
-Original source lines 258-263. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Forwards accumulated decoder timing as a double for rate calculation.
 
 ```{.c .numberLines startFrom="258"}
@@ -1022,8 +936,6 @@ double ccv_stream_decoder_milliseconds(const ccv_stream_t *stream) {
 ```
 
 ### `void ccv_stream_free(ccv_stream_t *stream)`
-
-Original source lines 264-270. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Releases pending text, conversion scratch, upstream stream, and finally the ABI
 wrapper. No borrowed output pointer survives this call.
@@ -1039,8 +951,6 @@ void ccv_stream_free(ccv_stream_t *stream) {
 ```
 
 ### `const char *ccv_status_description(ccv_status_t status)`
-
-Original source lines 271-287. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Provides static fallback text for every bridge status without allocation.
 
@@ -1065,8 +975,6 @@ const char *ccv_status_description(ccv_status_t status) {
 ```
 
 ### `const char *ccv_upstream_revision(void)`
-
-Original source lines 288-290. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Returns the compile-time pinned upstream revision string used in diagnostics and
 tests.
@@ -1093,7 +1001,7 @@ before releasing the stream; cancellation remains available for shutdown.
 
 Length: 333 lines. SHA-256: `e763d8d85352bc2141b41b0391aacfdfdcfb66651eb3817bd96512b24e729c52`.
 
-### Declaration map
+### Declaration map {.unnumbered .unlisted}
 
 This map gives the reading spine of the file. Line numbers refer to the original source and to the numbered listings below.
 
@@ -1115,9 +1023,9 @@ This map gives the reading spine of the file. Line numbers refer to the original
 | 315 | `private func makeError(` |
 | 330 | `private func statusMessage(_ status: ccv_status_t) -> String {` |
 
-### Continuation of the surrounding declaration (lines 1-5)
+### Imports and file preamble {.unnumbered .unlisted}
 
-Original source lines 1-5. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+The file begins by importing `ClassroomCaptionsCore`, `CVoxtralEngine`, `Foundation`, `Synchronization`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
 ```{.swift .numberLines startFrom="1"}
 import ClassroomCaptionsCore
@@ -1128,8 +1036,6 @@ import Synchronization
 ```
 
 ### `enum VoxtralEmbeddedError: LocalizedError`
-
-Original source lines 6-16. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Swift-facing failures for invalid model path, C load/create failure, and stream
 operation failure. Each carries enough bridge text to diagnose configuration
@@ -1151,8 +1057,6 @@ enum VoxtralEmbeddedError: LocalizedError {
 
 ### `final class VoxtralEmbeddedService: @unchecked Sendable`
 
-Original source lines 17-19. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Owns the embedded backend's C handles and serial inference queue. The class is
 `@unchecked Sendable` because opaque pointers are not compiler-verifiable;
 queue confinement guarantees that feed, drain, flush, finish, and destruction
@@ -1165,8 +1069,6 @@ final class VoxtralEmbeddedService: @unchecked Sendable {
 ```
 
 ### `private struct State: @unchecked Sendable`
-
-Original source lines 20-33. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Queue-confined lifecycle record for model/stream handles, continuation,
 activation flags, pending provisional text, counters, and priming state. Keeping
@@ -1191,8 +1093,6 @@ them together lets startup and stop publish coherent transitions.
 
 ### `func events() -> AsyncStream<TranscriptionEvent>`
 
-Original source lines 34-42. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Creates the ordered event stream and stores its continuation under queue
 ownership. Termination removes the output sink without racing C-handle access.
 
@@ -1209,8 +1109,6 @@ ownership. Termination removes the output sink without racing C-handle access.
 ```
 
 ### `func start(…)`
-
-Original source lines 43-120. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 All C construction occurs on the inference queue. Failure unwinds model and
 stream handles before reporting an event. Startup options translate UI
@@ -1300,8 +1198,6 @@ first-use GPU allocation outside live capture.
 
 ### `func sendAudio(_ pcm16MonoData: Data)`
 
-Original source lines 121-147. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 `Data` owns the callback bytes. The inference queue converts and feeds them
 serially, drains complete token pieces, and emits metrics. No second feed can
 enter the mutable C stream concurrently.
@@ -1338,8 +1234,6 @@ enter the mutable C stream concurrently.
 
 ### `func flush(finalizeCaption: Bool) async`
 
-Original source lines 148-172. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Runs bridge flush on the inference queue, drains every available token, emits
 updated metrics, and optionally converts the accumulated provisional caption
 into a finalized event. It keeps the C stream alive for later audio.
@@ -1373,8 +1267,6 @@ into a finalized event. It keeps the C stream alive for later audio.
 ```
 
 ### `func stop() async -> String?`
-
-Original source lines 173-212. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Stop marks the service inactive, finishes the C stream, drains remaining text,
 returns any finalized provisional caption, then destroys stream before model.
@@ -1425,8 +1317,6 @@ ordinary event.
 ```
 
 ### `private func drainText(from stream: OpaquePointer)`
-
-Original source lines 213-261. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Pulls every available token from the engine via ccv_stream_read_text, growing the
 buffer once on BUFFER_TOO_SMALL, and appends each non-empty token to the locked
@@ -1488,8 +1378,6 @@ as a failure event.
 
 ### `private func primeDecoderWithSilence(_ stream: OpaquePointer) throws`
 
-Original source lines 262-278. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Warms the decoder before real audio by feeding startupPrerollSamples of int16
 silence (about 3.2 s) through the engine, then discarding whatever provisional
 tokens that silence produced so they never reach the UI. Throws on a non-OK feed
@@ -1517,8 +1405,6 @@ inference queue.
 ```
 
 ### `private func discardPendingText(from stream: OpaquePointer)`
-
-Original source lines 279-301. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Drains and ignores text emitted by decoder priming so warm-up tokens cannot
 appear as lecture captions.
@@ -1551,8 +1437,6 @@ appear as lecture captions.
 
 ### `private func takeFinalizedProvisional() -> String?`
 
-Original source lines 302-310. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Atomically swaps out the accumulated provisionalText for the empty string under
 the state lock, trims whitespace, and returns it or nil when empty. Used by
 flush(finalizeCaption:) and stop() to convert the running provisional into a
@@ -1572,8 +1456,6 @@ single finalized caption without racing the drain path.
 
 ### `private func emit(_ event: TranscriptionEvent)`
 
-Original source lines 311-314. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Yields a value event through the current continuation; callers invoke it from
 the inference queue so event order matches C-stream order.
 
@@ -1585,8 +1467,6 @@ the inference queue so event order matches C-stream order.
 ```
 
 ### `private func makeError(…)`
-
-Original source lines 315-329. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Combines bridge status and bounded C error buffer into one localized Swift
 failure, preferring the specific bridge message when present.
@@ -1611,8 +1491,6 @@ failure, preferring the specific bridge message when present.
 
 ### `private func statusMessage(_ status: ccv_status_t) -> String`
 
-Original source lines 330-333. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Converts the bridge's borrowed C status-description pointer to a Swift string
 with a stable fallback for an unexpected null.
 
@@ -1631,7 +1509,7 @@ Read this file as one ownership unit. The source is divided at declaration bound
 
 Length: 335 lines. SHA-256: `02042cf991fa5fb9c23762702e8a18d2f5dd00ef99607368c828ad155927d0c1`.
 
-### Declaration map
+### Declaration map {.unnumbered .unlisted}
 
 This map gives the reading spine of the file. Line numbers refer to the original source and to the numbered listings below.
 
@@ -1701,9 +1579,9 @@ This map gives the reading spine of the file. Line numbers refer to the original
 | 333 | `int vox_encoder_kv_cache_preallocate(vox_ctx_t *ctx, int max_pos);` |
 | 335 | `#endif /* VOXTRAL_H */` |
 
-### Continuation of the surrounding declaration (lines 1-6)
+### Header preamble {.unnumbered .unlisted}
 
-Original source lines 1-6. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+This preamble contains comments and preprocessing setup that apply to the complete public header. It introduces no runtime state.
 
 ```{.c .numberLines startFrom="1"}
 /*
@@ -1716,15 +1594,11 @@ Original source lines 1-6. The boundary follows a declaration or a pagination br
 
 ### `#ifndef VOXTRAL_H`
 
-Original source lines 7-7. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 ```{.c .numberLines startFrom="7"}
 #ifndef VOXTRAL_H
 ```
 
 ### `#define VOXTRAL_H`
-
-Original source lines 8-18. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 ```{.c .numberLines startFrom="8"}
 #define VOXTRAL_H
@@ -1742,8 +1616,6 @@ Original source lines 8-18. The boundary follows a declaration or a pagination b
 
 ### `#define VOX_SAMPLE_RATE 16000`
 
-Original source lines 19-19. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 The audio ABI is fixed at 16 kHz; every upstream capture/file path must convert
 to this rate before feeding the model.
 
@@ -1753,8 +1625,6 @@ to this rate before feeding the model.
 
 ### `#define VOX_MEL_BINS 128`
 
-Original source lines 20-20. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Each acoustic frame contains 128 Mel-band values, matching checkpoint training.
 
 ```{.c .numberLines startFrom="20"}
@@ -1762,8 +1632,6 @@ Each acoustic frame contains 128 Mel-band values, matching checkpoint training.
 ```
 
 ### `#define VOX_HOP_LENGTH 160`
-
-Original source lines 21-21. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Successive analysis windows advance 160 samples, giving a 10 ms/100 Hz Mel
 frame clock at 16 kHz.
@@ -1774,8 +1642,6 @@ frame clock at 16 kHz.
 
 ### `#define VOX_WINDOW_SIZE 400`
 
-Original source lines 22-22. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Each spectral window spans 400 samples, or 25 ms, so adjacent frames overlap.
 
 ```{.c .numberLines startFrom="22"}
@@ -1783,8 +1649,6 @@ Each spectral window spans 400 samples, or 25 ms, so adjacent frames overlap.
 ```
 
 ### `#define VOX_FRAME_RATE 12.5f`
-
-Original source lines 23-23. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 The audio-language adapter/decoder receives 12.5 positions per second after all
 front-end downsampling; this is distinct from the 100 Hz Mel clock.
@@ -1794,8 +1658,6 @@ front-end downsampling; this is distinct from the 100 Hz Mel clock.
 ```
 
 ### `#define VOX_LOG_MEL_MAX 1.5f`
-
-Original source lines 24-26. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Checkpoint-specific upper clamp used before log-Mel normalization.
 
@@ -1807,8 +1669,6 @@ Checkpoint-specific upper clamp used before log-Mel normalization.
 
 ### `#define VOX_ENC_DIM 1280`
 
-Original source lines 27-27. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Width of each encoder residual vector and normalization weight.
 
 ```{.c .numberLines startFrom="27"}
@@ -1816,8 +1676,6 @@ Width of each encoder residual vector and normalization weight.
 ```
 
 ### `#define VOX_ENC_LAYERS 32`
-
-Original source lines 28-28. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Number of stacked audio-transformer layers and encoder KV-cache planes.
 
@@ -1827,8 +1685,6 @@ Number of stacked audio-transformer layers and encoder KV-cache planes.
 
 ### `#define VOX_ENC_HEADS 32`
 
-Original source lines 29-29. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Number of encoder query heads.
 
 ```{.c .numberLines startFrom="29"}
@@ -1836,8 +1692,6 @@ Number of encoder query heads.
 ```
 
 ### `#define VOX_ENC_KV_HEADS 32`
-
-Original source lines 30-30. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Encoder key/value head count; here it equals query heads, unlike grouped-query
 attention in the decoder.
@@ -1848,8 +1702,6 @@ attention in the decoder.
 
 ### `#define VOX_ENC_HEAD_DIM 64`
 
-Original source lines 31-31. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Per-head Q/K/V width. Projection width is heads multiplied by this dimension.
 
 ```{.c .numberLines startFrom="31"}
@@ -1857,8 +1709,6 @@ Per-head Q/K/V width. Projection width is heads multiplied by this dimension.
 ```
 
 ### `#define VOX_ENC_HIDDEN 5120`
-
-Original source lines 32-32. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Intermediate width of the encoder's gated feed-forward network.
 
@@ -1868,8 +1718,6 @@ Intermediate width of the encoder's gated feed-forward network.
 
 ### `#define VOX_ENC_WINDOW 750`
 
-Original source lines 33-33. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Maximum retained encoder attention window before rolling-cache compaction.
 
 ```{.c .numberLines startFrom="33"}
@@ -1877,8 +1725,6 @@ Maximum retained encoder attention window before rolling-cache compaction.
 ```
 
 ### `#define VOX_ENC_NORM_EPS 1e-5f`
-
-Original source lines 34-36. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Numerical epsilon added inside encoder RMS normalization.
 
@@ -1889,8 +1735,6 @@ Numerical epsilon added inside encoder RMS normalization.
 ```
 
 ### `#define VOX_DOWNSAMPLE 4`
-
-Original source lines 37-39. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Number of encoder positions grouped by the modality adapter into one decoder
 audio position.
@@ -1903,8 +1747,6 @@ audio position.
 
 ### `#define VOX_DEC_DIM 3072`
 
-Original source lines 40-40. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Decoder residual/token-embedding width.
 
 ```{.c .numberLines startFrom="40"}
@@ -1912,8 +1754,6 @@ Decoder residual/token-embedding width.
 ```
 
 ### `#define VOX_DEC_LAYERS 26`
-
-Original source lines 41-41. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Number of language-transformer layers and decoder cache planes.
 
@@ -1923,8 +1763,6 @@ Number of language-transformer layers and decoder cache planes.
 
 ### `#define VOX_DEC_HEADS 32`
 
-Original source lines 42-42. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Number of decoder query heads.
 
 ```{.c .numberLines startFrom="42"}
@@ -1932,8 +1770,6 @@ Number of decoder query heads.
 ```
 
 ### `#define VOX_DEC_KV_HEADS 8`
-
-Original source lines 43-43. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Eight K/V heads serve 32 query heads, implementing grouped-query attention and
 reducing cache memory.
@@ -1944,8 +1780,6 @@ reducing cache memory.
 
 ### `#define VOX_DEC_HEAD_DIM 128`
 
-Original source lines 44-44. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Per-head decoder attention width.
 
 ```{.c .numberLines startFrom="44"}
@@ -1954,8 +1788,6 @@ Per-head decoder attention width.
 
 ### `#define VOX_DEC_HIDDEN 9216`
 
-Original source lines 45-45. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Intermediate width of the decoder SwiGLU feed-forward network.
 
 ```{.c .numberLines startFrom="45"}
@@ -1963,8 +1795,6 @@ Intermediate width of the decoder SwiGLU feed-forward network.
 ```
 
 ### `#define VOX_DEC_WINDOW 8192`
-
-Original source lines 46-46. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Architectural decoder context limit; the live stream may choose a smaller
 restart threshold for latency.
@@ -1975,8 +1805,6 @@ restart threshold for latency.
 
 ### `#define VOX_DEC_NORM_EPS 1e-5f`
 
-Original source lines 47-47. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Decoder RMSNorm epsilon.
 
 ```{.c .numberLines startFrom="47"}
@@ -1984,8 +1812,6 @@ Decoder RMSNorm epsilon.
 ```
 
 ### `#define VOX_VOCAB_SIZE 131072`
-
-Original source lines 48-48. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Number of decoder output/token-embedding rows, including control tokens.
 
@@ -1995,8 +1821,6 @@ Number of decoder output/token-embedding rows, including control tokens.
 
 ### `#define VOX_ADA_NORM_DIM 32`
 
-Original source lines 49-49. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Bottleneck width of each layer's delay-conditioned adaptive norm MLP.
 
 ```{.c .numberLines startFrom="49"}
@@ -2004,8 +1828,6 @@ Bottleneck width of each layer's delay-conditioned adaptive norm MLP.
 ```
 
 ### `#define VOX_ROPE_THETA 1000000.0f`
-
-Original source lines 50-55. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Base frequency scale for decoder rotary position embeddings.
 
@@ -2019,8 +1841,6 @@ Base frequency scale for decoder rotary position embeddings.
 ```
 
 ### `typedef struct vox_enc_layer_t`
-
-Original source lines 56-82. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 All weights for one audio-transformer layer. Large matrices may be owned FP32
 buffers or borrowed mapped BF16 pointers; comments record exact shapes and the
@@ -2058,8 +1878,6 @@ typedef struct {
 
 ### `typedef struct vox_encoder_t`
 
-Original source lines 83-100. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Owns the two convolutional stem layers, fixed array of transformer layers, and
 final normalization for acoustic encoding.
 
@@ -2085,8 +1903,6 @@ typedef struct {
 ```
 
 ### `typedef struct vox_dec_layer_t`
-
-Original source lines 101-126. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 One language layer's delay-conditioned normalization, grouped-query attention,
 and gated feed-forward weights. Decoder projections have no biases.
@@ -2122,8 +1938,6 @@ typedef struct {
 
 ### `typedef struct vox_decoder_t`
 
-Original source lines 127-142. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Owns shared token embedding/output-projection weights, all decoder layers, and
 the final norm.
 
@@ -2148,8 +1962,6 @@ typedef struct {
 
 ### `typedef struct vox_adapter_t`
 
-Original source lines 143-153. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Two learned projections mapping grouped encoder features into the decoder's
 3,072-dimensional embedding space.
 
@@ -2168,8 +1980,6 @@ typedef struct {
 ```
 
 ### `typedef struct vox_ctx_t`
-
-Original source lines 154-209. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Long-lived model context: immutable weights/mapping, shared GPU resources,
 decoder and encoder rolling caches, delay conditioning, and reusable scratch.
@@ -2236,8 +2046,6 @@ typedef struct {
 
 ### `#define VOX_MAX_ALT 4`
 
-Original source lines 210-216. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Compile-time ceiling for alternative-token diagnostics per decoded position.
 
 ```{.c .numberLines startFrom="210"}
@@ -2252,8 +2060,6 @@ Compile-time ceiling for alternative-token diagnostics per decoded position.
 
 ### `vox_ctx_t *vox_load(const char *model_dir);`
 
-Original source lines 217-219. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Long-lived model context: immutable weights/mapping, shared GPU resources,
 decoder and encoder rolling caches, delay conditioning, and reusable scratch.
 Streams borrow this object; it must outlive them.
@@ -2266,8 +2072,6 @@ vox_ctx_t *vox_load(const char *model_dir);
 
 ### `void vox_free(vox_ctx_t *ctx);`
 
-Original source lines 220-222. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Long-lived model context: immutable weights/mapping, shared GPU resources,
 decoder and encoder rolling caches, delay conditioning, and reusable scratch.
 Streams borrow this object; it must outlive them.
@@ -2279,8 +2083,6 @@ void vox_free(vox_ctx_t *ctx);
 ```
 
 ### `void vox_set_delay(vox_ctx_t *ctx, int delay_ms);`
-
-Original source lines 223-238. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Adds terminal feature padding, processes all remaining stable positions, and
 ends the stream.
@@ -2306,8 +2108,6 @@ void vox_set_delay(vox_ctx_t *ctx, int delay_ms);
 
 ### `typedef struct vox_stream vox_stream_t;`
 
-Original source lines 239-241. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Opaque mutable state for one incremental transcription timeline.
 
 ```{.c .numberLines startFrom="239"}
@@ -2317,8 +2117,6 @@ typedef struct vox_stream vox_stream_t;
 ```
 
 ### `vox_stream_t *vox_stream_init(vox_ctx_t *ctx);`
-
-Original source lines 242-246. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Allocates per-stream front-end, encoder/adapter, decoder, token queue, and
 recovery state while borrowing the model context.
@@ -2333,8 +2131,6 @@ vox_stream_t *vox_stream_init(vox_ctx_t *ctx);
 
 ### `int vox_stream_feed(vox_stream_t *s, const float *samples, int n_samples);`
 
-Original source lines 247-250. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Accepts mono 16 kHz float samples, advances every newly stable stage, and queues
 text pieces without finalizing input.
 
@@ -2346,8 +2142,6 @@ int vox_stream_feed(vox_stream_t *s, const float *samples, int n_samples);
 ```
 
 ### `int vox_stream_finish(vox_stream_t *s);`
-
-Original source lines 251-255. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Adds terminal feature padding, processes all remaining stable positions, and
 ends the stream.
@@ -2362,8 +2156,6 @@ int vox_stream_finish(vox_stream_t *s);
 
 ### `int vox_stream_get(vox_stream_t *s, const char **out_tokens, int max);`
 
-Original source lines 256-258. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Dequeues best-token text pointers into caller storage. Piece memory remains
 stream-owned until free.
 
@@ -2375,8 +2167,6 @@ int vox_stream_get(vox_stream_t *s, const char **out_tokens, int max);
 
 ### `int vox_stream_text_token_count(const vox_stream_t *s);`
 
-Original source lines 259-259. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Returns cumulative generated decoder tokens for throughput diagnostics.
 
 ```{.c .numberLines startFrom="259"}
@@ -2384,8 +2174,6 @@ int vox_stream_text_token_count(const vox_stream_t *s);
 ```
 
 ### `double vox_stream_decoder_milliseconds(const vox_stream_t *s);`
-
-Original source lines 260-265. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Returns cumulative decoder execution time, excluding model load and front-end
 work.
@@ -2401,8 +2189,6 @@ double vox_stream_decoder_milliseconds(const vox_stream_t *s);
 
 ### `void vox_stream_set_alt(vox_stream_t *s, int n_alt, float cutoff);`
 
-Original source lines 266-271. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Configures how many near-best token alternatives to retain and their probability
 distance cutoff.
 
@@ -2416,8 +2202,6 @@ void vox_stream_set_alt(vox_stream_t *s, int n_alt, float cutoff);
 ```
 
 ### `int vox_stream_get_alt(…)`
-
-Original source lines 272-279. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Dequeues positions as fixed groups of best token plus optional alternatives.
 
@@ -2434,8 +2218,6 @@ int vox_stream_get_alt(vox_stream_t *s, const char **out_tokens,
 
 ### `void vox_set_processing_interval(vox_stream_t *s, float seconds);`
 
-Original source lines 280-285. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Converts a seconds policy into the minimum new-Mel threshold between encoder
 runs, trading responsiveness against GPU batching efficiency.
 
@@ -2450,8 +2232,6 @@ void vox_set_processing_interval(vox_stream_t *s, float seconds);
 
 ### `void vox_stream_set_continuous(vox_stream_t *s, int enable);`
 
-Original source lines 286-286. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Enables decoder recovery/restart behavior required for an unbounded lecture.
 
 ```{.c .numberLines startFrom="286"}
@@ -2459,8 +2239,6 @@ void vox_stream_set_continuous(vox_stream_t *s, int enable);
 ```
 
 ### `void vox_stream_set_max_decode_context(vox_stream_t *s, int tokens);`
-
-Original source lines 287-290. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Sets the live restart threshold that bounds decoder attention cost.
 
@@ -2473,8 +2251,6 @@ void vox_stream_set_max_decode_context(vox_stream_t *s, int tokens);
 
 ### `int vox_stream_flush(vox_stream_t *s);`
 
-Original source lines 291-293. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Runs currently buffered stable work regardless of normal batching interval while
 keeping the stream open.
 
@@ -2485,8 +2261,6 @@ int vox_stream_flush(vox_stream_t *s);
 ```
 
 ### `void vox_stream_free(vox_stream_t *s);`
-
-Original source lines 294-300. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Destroys one stream's mutable buffers and token storage; the borrowed model
 remains alive.
@@ -2503,8 +2277,6 @@ void vox_stream_free(vox_stream_t *s);
 
 ### `char *vox_transcribe(vox_ctx_t *ctx, const char *wav_path);`
 
-Original source lines 301-303. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Offline convenience wrapper loading WAV samples and driving the streaming API;
 returns caller-owned text.
 
@@ -2516,8 +2288,6 @@ char *vox_transcribe(vox_ctx_t *ctx, const char *wav_path);
 
 ### `char *vox_transcribe_audio(vox_ctx_t *ctx, const float *samples, int n_samples);`
 
-Original source lines 304-306. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Offline wrapper for an already decoded float waveform.
 
 ```{.c .numberLines startFrom="304"}
@@ -2527,8 +2297,6 @@ char *vox_transcribe_audio(vox_ctx_t *ctx, const float *samples, int n_samples);
 ```
 
 ### `char *vox_transcribe_stdin(vox_ctx_t *ctx);`
-
-Original source lines 307-313. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 CLI wrapper that detects WAV versus raw PCM input and transcribes to EOF.
 
@@ -2544,8 +2312,6 @@ char *vox_transcribe_stdin(vox_ctx_t *ctx);
 
 ### `float *vox_encoder_forward(…)`
 
-Original source lines 314-319. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Full nonincremental acoustic encoder path returning owned embeddings.
 
 ```{.c .numberLines startFrom="314"}
@@ -2559,8 +2325,6 @@ float *vox_encoder_forward(vox_ctx_t *ctx, const float *mel,
 
 ### `float *vox_encoder_forward_incremental(…)`
 
-Original source lines 320-323. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Processes only new post-convolution positions using the rolling encoder cache.
 
 ```{.c .numberLines startFrom="320"}
@@ -2571,8 +2335,6 @@ float *vox_encoder_forward_incremental(vox_ctx_t *ctx, const float *x_new,
 ```
 
 ### `float *vox_adapter_forward(…)`
-
-Original source lines 324-327. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Groups/downsamples encoder rows and projects them into decoder embedding space.
 
@@ -2585,8 +2347,6 @@ float *vox_adapter_forward(vox_ctx_t *ctx, const float *enc_out,
 
 ### `int vox_decoder_forward(vox_ctx_t *ctx, const float *input_embeds, float *logits);`
 
-Original source lines 328-330. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Runs one cached autoregressive step and returns the greedy next token ID.
 
 ```{.c .numberLines startFrom="328"}
@@ -2597,8 +2357,6 @@ int vox_decoder_forward(vox_ctx_t *ctx, const float *input_embeds, float *logits
 
 ### `void vox_decoder_prefill(vox_ctx_t *ctx, const float *input_embeds, int seq_len);`
 
-Original source lines 331-331. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Processes several prompt/audio embeddings in a batch and seeds decoder caches.
 
 ```{.c .numberLines startFrom="331"}
@@ -2606,8 +2364,6 @@ void vox_decoder_prefill(vox_ctx_t *ctx, const float *input_embeds, int seq_len)
 ```
 
 ### `int vox_decoder_kv_cache_preallocate(vox_ctx_t *ctx, int max_seq);`
-
-Original source lines 332-332. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Reserves decoder cache capacity before live generation.
 
@@ -2617,8 +2373,6 @@ int vox_decoder_kv_cache_preallocate(vox_ctx_t *ctx, int max_seq);
 
 ### `int vox_encoder_kv_cache_preallocate(vox_ctx_t *ctx, int max_pos);`
 
-Original source lines 333-334. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Reserves encoder cache capacity before live audio.
 
 ```{.c .numberLines startFrom="333"}
@@ -2627,8 +2381,6 @@ int vox_encoder_kv_cache_preallocate(vox_ctx_t *ctx, int max_pos);
 ```
 
 ### `#endif /* VOXTRAL_H */`
-
-Original source lines 335-335. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 ```{.c .numberLines startFrom="335"}
 #endif /* VOXTRAL_H */
@@ -2652,7 +2404,7 @@ adds terminal padding and drains the final caption.
 
 Length: 1652 lines. SHA-256: `02843d2442c3b8948aefe801c4bc48652a064d8a042d7c25551e4dc7d95fbb79`.
 
-### Declaration map
+### Declaration map {.unnumbered .unlisted}
 
 This map gives the reading spine of the file. Line numbers refer to the original source and to the numbered listings below.
 
@@ -2695,9 +2447,9 @@ This map gives the reading spine of the file. Line numbers refer to the original
 | 1639 | `void vox_stream_set_max_decode_context(vox_stream_t *s, int tokens) {` |
 | 1646 | `void vox_set_delay(vox_ctx_t *ctx, int delay_ms) {` |
 
-### Continuation of the surrounding declaration (lines 1-30)
+### Translation-unit preamble {.unnumbered .unlisted}
 
-Original source lines 1-30. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+This translation-unit preamble selects dependencies, compile-time features, and file-local constants used by the definitions that follow.
 
 ```{.c .numberLines startFrom="1"}
 /*
@@ -2734,8 +2486,6 @@ int vox_monitor = 0;
 
 ### `static void vox_compute_time_embedding(float *out, float t_value)`
 
-Original source lines 31-46. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Builds the decoder timing embedding for a scalar t_value, matching the vLLM
 Mistral time embedding: inverse frequencies decay geometrically over dim/2 bands,
 emb = t * inv_freq, and the output is the concatenation [cos(emb), sin(emb)]
@@ -2762,8 +2512,6 @@ static void vox_compute_time_embedding(float *out, float t_value) {
 ```
 
 ### `static void vox_update_time_conditioning(vox_ctx_t *ctx)`
-
-Original source lines 47-92. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Recomputes t_cond from the current delay_tokens and precomputes, per decoder
 layer, the ada_scale vector ada_up(GELU(ada_down(t_cond))). The ada_scale buffer
@@ -2823,8 +2571,6 @@ extern int vox_decoder_load(vox_decoder_t *dec, safetensors_file_t *sf);
 
 ### `static uint16_t *load_bf16_direct(safetensors_file_t *sf, const char *name)`
 
-Original source lines 93-101. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Resolves an adapter weight tensor by name and returns a borrowed, zero-copy bf16
 pointer into the safetensors mapping (via safetensors_get_bf16_direct), or NULL
 after logging when the tensor is absent. The returned pointer is owned by the
@@ -2843,8 +2589,6 @@ static uint16_t *load_bf16_direct(safetensors_file_t *sf, const char *name) {
 ```
 
 ### `static int vox_adapter_load(vox_adapter_t *adapter, safetensors_file_t *sf)`
-
-Original source lines 102-115. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Resolves the two audio-language projection weight tensors by their safetensors
 names and stores borrowed bf16 pointers into the mapped file (no copy). Returns
@@ -2869,8 +2613,6 @@ static int vox_adapter_load(vox_adapter_t *adapter, safetensors_file_t *sf) {
 ```
 
 ### `vox_ctx_t *vox_load(const char *model_dir)`
-
-Original source lines 116-261. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Model loading opens each component, validates expected tensors, initializes
 Metal, and preallocates caches. Follow every failure label to verify that it
@@ -3027,8 +2769,6 @@ vox_ctx_t *vox_load(const char *model_dir) {
 
 ### `void vox_free(vox_ctx_t *ctx)`
 
-Original source lines 262-387. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Tears down a context: frees the f32 weight buffers converted out of safetensors
 (conv stem, per-layer norms and biases, decoder ada/norm rows), releases KV
 caches (Metal-shared free or plain free per build and the shared flag), the
@@ -3167,8 +2907,6 @@ void vox_free(vox_ctx_t *ctx) {
 
 ### `static void trim_ascii_whitespace(char *s)`
 
-Original source lines 388-399. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Strips leading and trailing ASCII whitespace from a C string in place, memmoving
 the surviving span to the front and re-terminating with a NUL. Null-safe. Used to
 clean the final transcribed text before it is returned to the caller.
@@ -3189,8 +2927,6 @@ static void trim_ascii_whitespace(char *s) {
 ```
 
 ### `static void tok_embed_bf16_to_f32(…)`
-
-Original source lines 400-412. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Expands a single token's embedding row from bf16 to f32 by zero-extending each
 16-bit value into the high half of a 32-bit float and copying into dst. Indexes
@@ -3215,8 +2951,6 @@ static void tok_embed_bf16_to_f32(float *dst, const uint16_t *tok_emb_bf16,
 ```
 
 ### `struct vox_stream`
-
-Original source lines 413-480. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 This structure is the complete mutable streaming state. Fields belong to
 different time domains; prefixes may be compacted while absolute counters
@@ -3295,8 +3029,6 @@ struct vox_stream {
 
 ### `typedef enum stream_tok_class`
 
-Original source lines 481-489. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 The four-way classification a sampled token can take before the stream decides
 what to do with it: TEXT (a non-empty decoded piece), CONTROL (id below the text
 range), INVALID (text-range id that decodes to empty, e.g. Tekken token 1000 =
@@ -3317,8 +3049,6 @@ typedef enum stream_tok_class {
 
 ### `static stream_tok_class_t stream_classify_token(vox_stream_t *s, int token_id)`
 
-Original source lines 490-498. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Classifies a sampled token into EOS, CONTROL (id below the 1000 text range),
 INVALID (text-range id whose decode is NULL or empty), or TEXT. The empty-decode
 case matters because Tekken token 1000 is byte 0x00, which as a C string is
@@ -3338,8 +3068,6 @@ static stream_tok_class_t stream_classify_token(vox_stream_t *s, int token_id) {
 ```
 
 ### `static void stream_enqueue_token(vox_stream_t *s, const char *alts[VOX_MAX_ALT])`
-
-Original source lines 499-537. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Appends one position's alternatives array (VOX_MAX_ALT borrowed string pointers,
 alts[0] best) to the circular token queue, doubling capacity and re-linearizing
@@ -3390,8 +3118,6 @@ static void stream_enqueue_token(vox_stream_t *s, const char *alts[VOX_MAX_ALT])
 ```
 
 ### `static float *stream_conv_stem(…)`
-
-Original source lines 538-664. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Runs new mel frames through the two-layer conv stem incrementally and returns a
 newly-allocated [out_len, 1280] buffer of post-conv positions (caller frees; NULL
@@ -3530,9 +3256,7 @@ static float *stream_conv_stem(vox_stream_t *s, const float *mel_new,
 
 ```
 
-### Continuation of the surrounding declaration (lines 665-718)
-
-Original source lines 665-718. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+### Continuation of `static float *stream_conv_stem(…)` {.unnumbered .unlisted}
 
 ```{.c .numberLines startFrom="665"}
     if (is_first) {
@@ -3593,8 +3317,6 @@ Original source lines 665-718. The boundary follows a declaration or a paginatio
 
 ### `static void stream_adapter_compact(vox_stream_t *s)`
 
-Original source lines 719-734. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Drops adapter tokens the decoder has already consumed by memmove-ing the
 surviving tail to the front of adapter_buf and advancing adapter_pos_offset by
 the consumed count. Keeps physical buffer indices small while gen_pos and
@@ -3621,8 +3343,6 @@ static void stream_adapter_compact(vox_stream_t *s) {
 ```
 
 ### `static void stream_reset_decoder_state(vox_stream_t *s)`
-
-Original source lines 735-753. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Hard-resets only the decoder side: zeroes the decoder KV cache length/offset,
 drops the adapter backlog and its logical offset, rewinds gen_pos, and re-primes
@@ -3653,8 +3373,6 @@ static void stream_reset_decoder_state(vox_stream_t *s) {
 ```
 
 ### `static int stream_reset_full_state(vox_stream_t *s)`
-
-Original source lines 754-783. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Full live-stream recovery: tears down and rebuilds the mel context with the
 standard 32-token silence left-pad, zeroes all conv-stem boundary buffers
@@ -3697,8 +3415,6 @@ static int stream_reset_full_state(vox_stream_t *s) {
 ```
 
 ### `static void stream_run_encoder(vox_stream_t *s)`
-
-Original source lines 784-911. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Only newly stable convolution positions enter the encoder. Produced embeddings
 are appended in absolute order, then grouped by the modality adapter. Buffer
@@ -3837,8 +3553,6 @@ static void stream_run_encoder(vox_stream_t *s) {
 
 ### `static void stream_fill_alts(…)`
 
-Original source lines 912-969. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Fills the alternatives array for one emitted position: alts[0] is the best token's
 decoded piece, and when n_alt > 1 it softmaxes the logits in place and repeatedly
 scans the text-range vocabulary for the next-highest tokens, stopping once the
@@ -3908,8 +3622,6 @@ static void stream_fill_alts(vox_stream_t *s, int best_token,
 ```
 
 ### `static void stream_run_decoder(vox_stream_t *s)`
-
-Original source lines 970-1087. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 The decoder first pre-fills an audio-conditioned prompt, then greedily advances
 tokens. Control-token classification decides caption boundaries and recovery.
@@ -4037,9 +3749,7 @@ static void stream_run_decoder(vox_stream_t *s) {
 
 ```
 
-### Continuation of the surrounding declaration (lines 1088-1190)
-
-Original source lines 1088-1190. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+### Continuation of `static void stream_run_decoder(vox_stream_t *s)` {.unnumbered .unlisted}
 
 ```{.c .numberLines startFrom="1088"}
             s->gen_pos++;
@@ -4149,8 +3859,6 @@ Original source lines 1088-1190. The boundary follows a declaration or a paginat
 
 ### `vox_stream_t *vox_stream_init(vox_ctx_t *ctx)`
 
-Original source lines 1191-1237. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Allocates a zeroed stream, loads the Tekken tokenizer, and initializes the
 incremental mel context with 32 streaming-pad tokens of leading silence. Sets up
 the circular token queue, the decoder scratch, single-best alternative mode, and
@@ -4210,8 +3918,6 @@ vox_stream_t *vox_stream_init(vox_ctx_t *ctx) {
 
 ### `int vox_stream_feed(vox_stream_t *s, const float *samples, int n_samples)`
 
-Original source lines 1238-1248. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Feed appends waveform samples to the incremental Mel context and runs whichever
 downstream stages now have stable work. It does not imply finalization; missing
 right context remains buffered for later audio.
@@ -4231,8 +3937,6 @@ int vox_stream_feed(vox_stream_t *s, const float *samples, int n_samples) {
 ```
 
 ### `int vox_stream_finish(vox_stream_t *s)`
-
-Original source lines 1249-1268. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Finalizes a stream: flushes the delay-window padding (shared with
 vox_stream_flush), marks finished, and closes the mel front end (right reflect
@@ -4265,8 +3969,6 @@ int vox_stream_finish(vox_stream_t *s) {
 
 ### `int vox_stream_get(vox_stream_t *s, const char **out_tokens, int max)`
 
-Original source lines 1269-1278. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Pops up to max best-token strings from the head of the circular queue, returning
 only alts[0] of each position and advancing queue_head. Returns the count
 dequeued (0 when empty). The returned pointers are borrowed from the tokenizer
@@ -4287,8 +3989,6 @@ int vox_stream_get(vox_stream_t *s, const char **out_tokens, int max) {
 
 ### `int vox_stream_text_token_count(const vox_stream_t *s)`
 
-Original source lines 1279-1282. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Returns the running count of emitted text tokens (0 for a NULL stream), a
 diagnostic the app pairs with decoder time to compute the live token rate.
 
@@ -4301,8 +4001,6 @@ int vox_stream_text_token_count(const vox_stream_t *s) {
 
 ### `double vox_stream_decoder_milliseconds(const vox_stream_t *s)`
 
-Original source lines 1283-1286. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Returns the accumulated decoder compute time in milliseconds (0 for a NULL
 stream), paired with the text-token count to report tokens-per-decoder-second.
 
@@ -4314,8 +4012,6 @@ double vox_stream_decoder_milliseconds(const vox_stream_t *s) {
 ```
 
 ### `void vox_stream_set_alt(vox_stream_t *s, int n_alt, float cutoff)`
-
-Original source lines 1287-1296. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Configures alternative-token emission: n_alt (clamped to 1..VOX_MAX_ALT) is how
 many ranked candidates each position keeps, and cutoff (clamped to 0..1) is the
@@ -4336,8 +4032,6 @@ void vox_stream_set_alt(vox_stream_t *s, int n_alt, float cutoff) {
 ```
 
 ### `int vox_stream_get_alt(…)`
-
-Original source lines 1297-1312. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Like vox_stream_get but copies n_alt alternative pointers per position into a
 row-major out_tokens grid (capped at VOX_MAX_ALT), advancing queue_head per
@@ -4364,8 +4058,6 @@ int vox_stream_get_alt(vox_stream_t *s, const char **out_tokens,
 ```
 
 ### `void vox_stream_free(vox_stream_t *s)`
-
-Original source lines 1313-1347. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Optionally prints timing stats, then releases everything the stream owns: mel
 context, tokenizer, adapter buffer, token queue, decoder scratch, and conv-stem
@@ -4413,8 +4105,6 @@ void vox_stream_free(vox_stream_t *s) {
 
 ### `char *vox_transcribe_audio(vox_ctx_t *ctx, const float *samples, int n_samples)`
 
-Original source lines 1348-1380. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Offline convenience wrapper: spins up a stream, feeds the whole sample buffer,
 finishes it, then drains the token queue into a single growing heap string that
 the caller owns. The input samples are borrowed (not freed here), and trailing
@@ -4458,8 +4148,6 @@ char *vox_transcribe_audio(vox_ctx_t *ctx, const float *samples, int n_samples) 
 ```
 
 ### `char *vox_transcribe_stdin(vox_ctx_t *ctx)`
-
-Original source lines 1381-1503. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Reads stdin, peeking the first four bytes to choose a path: a RIFF header buffers
 the whole file and transcribes it offline (parsing fmt/data chunks inline,
@@ -4594,9 +4282,7 @@ char *vox_transcribe_stdin(vox_ctx_t *ctx) {
 
 ```
 
-### Continuation of the surrounding declaration (lines 1504-1581)
-
-Original source lines 1504-1581. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+### Continuation of `char *vox_transcribe_stdin(vox_ctx_t *ctx)` {.unnumbered .unlisted}
 
 ```{.c .numberLines startFrom="1504"}
         const char *tokens[64];
@@ -4681,8 +4367,6 @@ Original source lines 1504-1581. The boundary follows a declaration or a paginat
 
 ### `char *vox_transcribe(vox_ctx_t *ctx, const char *wav_path)`
 
-Original source lines 1582-1597. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 File-path convenience entry: loads a WAV via vox_load_wav, delegates to
 vox_transcribe_audio, frees the decoded samples, and returns the caller-owned text
 (NULL if the file cannot be loaded). The thinnest offline wrapper over the
@@ -4708,8 +4392,6 @@ char *vox_transcribe(vox_ctx_t *ctx, const char *wav_path) {
 ```
 
 ### `int vox_stream_flush(vox_stream_t *s)`
-
-Original source lines 1598-1626. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Flush asks the pipeline to expose work stable at the current boundary without
 destroying the stream. Finish additionally supplies terminal padding and marks
@@ -4750,8 +4432,6 @@ int vox_stream_flush(vox_stream_t *s) {
 
 ### `void vox_set_processing_interval(vox_stream_t *s, float seconds)`
 
-Original source lines 1627-1634. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Sets how many new mel frames must accumulate before the encoder fires, derived
 from seconds at the fixed 100 fps mel rate (sample_rate/hop = 16000/160), with a
 floor of one frame. Larger intervals batch more audio per encoder call for
@@ -4770,8 +4450,6 @@ void vox_set_processing_interval(vox_stream_t *s, float seconds) {
 
 ### `void vox_stream_set_continuous(vox_stream_t *s, int enable)`
 
-Original source lines 1635-1638. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Toggles continuous (live) mode, in which the decoder is periodically restarted
 once its KV cache passes max_decode_context so per-step attention cost stays
 bounded for an unbounded lecture. Off means a single bounded utterance.
@@ -4784,8 +4462,6 @@ void vox_stream_set_continuous(vox_stream_t *s, int enable) {
 ```
 
 ### `void vox_stream_set_max_decode_context(vox_stream_t *s, int tokens)`
-
-Original source lines 1639-1645. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Sets the decoder KV-cache ceiling (clamped to 250..8000 entries) that, on a
 continuous stream, triggers a forced decoder restart to bound per-step attention
@@ -4802,8 +4478,6 @@ void vox_stream_set_max_decode_context(vox_stream_t *s, int tokens) {
 ```
 
 ### `void vox_set_delay(vox_ctx_t *ctx, int delay_ms)`
-
-Original source lines 1646-1652. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Sets the streaming look-ahead delay in milliseconds (clamped 80..2400), converted
 to delay_tokens at 80 ms per token. Because the delay feeds the decoder time

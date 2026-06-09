@@ -89,9 +89,9 @@ boundaries reflected in Chapter 1.
 
 Length: 52 lines. SHA-256: `419b0d7980ec3b8c9921df61ed62d3d79d44c6126c5a1c7dae26770cb3229848`.
 
-### Continuation of the surrounding declaration (lines 1-52)
+### Imports and file preamble {.unnumbered .unlisted}
 
-Original source lines 1-52. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+The file begins by importing `PackageDescription`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
 ```{.swift .numberLines startFrom="1"}
 // swift-tools-version: 6.2
@@ -159,9 +159,9 @@ security declarations, not comments.
 
 Length: 34 lines. SHA-256: `4b6d794e278ffa1ad373afba8a2119c7aac8416760b9735b4aa3df74a6f886f1`.
 
-### Continuation of the surrounding declaration (lines 1-34)
+### File preamble {.unnumbered .unlisted}
 
-Original source lines 1-34. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+This preamble establishes file-level context for the declarations below.
 
 ```{.xml .numberLines startFrom="1"}
 <?xml version="1.0" encoding="UTF-8"?>
@@ -208,7 +208,7 @@ Read this file as one ownership unit. The source is divided at declaration bound
 
 Length: 120 lines. SHA-256: `2cb98fedd7d52283331ab4cd597fc3816d531f67d0c763cd303f3c58d0e2c4e8`.
 
-### Declaration map
+### Declaration map {.unnumbered .unlisted}
 
 This map gives the reading spine of the file. Line numbers refer to the original source and to the numbered listings below.
 
@@ -219,9 +219,9 @@ This map gives the reading spine of the file. Line numbers refer to the original
 | 78 | `def sha256(path):` |
 | 86 | `def main():` |
 
-### Continuation of the surrounding declaration (lines 1-19)
+### Module preamble {.unnumbered .unlisted}
 
-Original source lines 1-19. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+The module preamble imports standard-library dependencies and defines configuration shared by the functions below.
 
 ```{.python .numberLines startFrom="1"}
 #!/usr/bin/env python3
@@ -247,8 +247,6 @@ FILES = (
 
 ### `def default_destination():`
 
-Original source lines 20-30. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Builds the per-user Application Support location expected by the dashboard's
 default model setting. Returning a `Path` keeps path joining platform-aware; no
 directory is created until `main` has parsed any override.
@@ -268,8 +266,6 @@ def default_destination():
 ```
 
 ### `def download(filename, destination):`
-
-Original source lines 31-77. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Downloads one artifact through an adjacent `.partial` file. Existing bytes
 produce an HTTP Range request; if the server does not confirm a content range,
@@ -328,8 +324,6 @@ def download(filename, destination):
 
 ### `def sha256(path):`
 
-Original source lines 78-85. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Streams a file through SHA-256 in eight-MiB chunks, so hashing the checkpoint
 does not duplicate gigabytes in memory. The digest records provenance; it proves
 identity only when compared with a separately trusted expected value.
@@ -346,8 +340,6 @@ def sha256(path):
 ```
 
 ### `def main():`
-
-Original source lines 86-120. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Parses the destination, creates it, downloads only missing or empty required
 files, and writes a manifest of repository, time, byte sizes, and hashes. That
@@ -400,9 +392,9 @@ Read this file as one ownership unit. The source is divided at declaration bound
 
 Length: 26 lines. SHA-256: `fba6673c2c8f818e9084817417e0038e910e847874d52d41ce2159ccfa013d64`.
 
-### Continuation of the surrounding declaration (lines 1-26)
+### Script preamble {.unnumbered .unlisted}
 
-Original source lines 1-26. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+The script preamble selects the interpreter and failure behavior before any build operation runs.
 
 ```{.bash .numberLines startFrom="1"}
 #!/usr/bin/env bash
@@ -441,9 +433,9 @@ Read this file as one ownership unit. The source is divided at declaration bound
 
 Length: 21 lines. SHA-256: `4a83ebbea4e736500b0c1eff49a6b5af1428c72d9c985a069647c7716f3dde0a`.
 
-### Continuation of the surrounding declaration (lines 1-21)
+### Script preamble {.unnumbered .unlisted}
 
-Original source lines 1-21. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+The script preamble selects the interpreter and failure behavior before any build operation runs.
 
 ```{.bash .numberLines startFrom="1"}
 #!/usr/bin/env bash
@@ -477,9 +469,9 @@ Read this file as one ownership unit. The source is divided at declaration bound
 
 Length: 9 lines. SHA-256: `5e0debc599111085ad117f23f8a730aa4322081f71266b10ec735159f845d7da`.
 
-### Continuation of the surrounding declaration (lines 1-9)
+### Script preamble {.unnumbered .unlisted}
 
-Original source lines 1-9. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+The script preamble selects the interpreter and failure behavior before any build operation runs.
 
 ```{.bash .numberLines startFrom="1"}
 #!/bin/sh

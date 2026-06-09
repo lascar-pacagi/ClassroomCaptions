@@ -1311,6 +1311,54 @@ def block_title(path: Path, block: list[str], start: int, end: int) -> str:
     return f"Continuation of the surrounding declaration (lines {start}-{end})"
 
 
+def preamble_title(path: Path) -> str:
+    if path.suffix == ".swift" or path.name == "Package.swift":
+        return "Imports and file preamble"
+    if path.suffix == ".h":
+        return "Header preamble"
+    if path.suffix in {".c", ".m", ".metal"}:
+        return "Translation-unit preamble"
+    if path.suffix == ".py":
+        return "Module preamble"
+    if path.suffix == ".sh":
+        return "Script preamble"
+    return "File preamble"
+
+
+def preamble_guide(path: Path, block: list[str]) -> str:
+    text = "".join(block)
+    if path.suffix == ".swift":
+        modules = re.findall(r"^\s*(?:@preconcurrency\s+)?import\s+(\w+)", text, re.MULTILINE)
+        if modules:
+            rendered = ", ".join(f"`{module}`" for module in modules)
+            return (
+                f"The file begins by importing {rendered}. These imports establish "
+                "the APIs visible to the declarations below; they execute no "
+                "application workflow by themselves."
+            )
+    if path.suffix == ".h":
+        return (
+            "This preamble contains comments and preprocessing setup that apply to "
+            "the complete public header. It introduces no runtime state."
+        )
+    if path.suffix in {".c", ".m", ".metal"}:
+        return (
+            "This translation-unit preamble selects dependencies, compile-time "
+            "features, and file-local constants used by the definitions that follow."
+        )
+    if path.suffix == ".py":
+        return (
+            "The module preamble imports standard-library dependencies and defines "
+            "configuration shared by the functions below."
+        )
+    if path.suffix == ".sh":
+        return (
+            "The script preamble selects the interpreter and failure behavior before "
+            "any build operation runs."
+        )
+    return "This preamble establishes file-level context for the declarations below."
+
+
 def symbol_present(symbol: str, text: str) -> bool:
     # Containment that respects identifier boundaries, so a short symbol such as
     # `vox_load` does not match inside `vox_adapter_load`. Boundaries are applied
@@ -1405,7 +1453,7 @@ def write_shader_section(
     declarations = declaration_map(SHADER_MSL_PATH, msl_lines)
     if declarations:
         output.extend([
-            "### Kernel and function map\n\n",
+            "### Kernel and function map {.unnumbered .unlisted}\n\n",
             "Line numbers refer to the decoded Metal source listed below.\n\n",
             "| Line | Kernel or function |\n",
             "| ---: | --- |\n",
@@ -1416,6 +1464,7 @@ def write_shader_section(
         output.append("\n")
     reconstructed: list[str] = []
     boundaries = declaration_boundaries(SHADER_MSL_PATH, msl_lines)
+    active_declaration: str | None = None
     for index, start in enumerate(boundaries):
         end = (
             boundaries[index + 1] - 1
@@ -1424,11 +1473,23 @@ def write_shader_section(
         )
         block = msl_lines[start - 1:end]
         reconstructed.extend(block)
-        output.append(f"### {block_title(SHADER_MSL_PATH, block, start, end)}\n\n")
-        output.append(
-            f"Decoded Metal source lines {start}-{end}; reproduced exactly from "
-            "the embedded byte array.\n\n"
-        )
+        names = declaration_names(SHADER_MSL_PATH, block)
+        if names:
+            title = block_title(SHADER_MSL_PATH, block, start, end)
+            active_declaration = title
+            output.append(f"### {title}\n\n")
+        elif start == 1:
+            output.append(
+                f"### {preamble_title(SHADER_MSL_PATH)} "
+                "{.unnumbered .unlisted}\n\n"
+            )
+            output.append(preamble_guide(SHADER_MSL_PATH, block) + "\n\n")
+        else:
+            subject = active_declaration or "the preceding declaration"
+            output.append(
+                f"### Continuation of {subject} "
+                "{.unnumbered .unlisted}\n\n"
+            )
         guide = symbol_guide(SHADER_MSL_PATH, block)
         if guide:
             output.append(guide + "\n\n")
@@ -1467,7 +1528,7 @@ def write_file_section(path_text: str) -> tuple[str, bytes]:
     declarations = declaration_map(path, lines)
     if declarations:
         output.extend([
-            "### Declaration map\n\n",
+            "### Declaration map {.unnumbered .unlisted}\n\n",
             "This map gives the reading spine of the file. Line numbers refer to the "
             "original source and to the numbered listings below.\n\n",
             "| Line | Declaration or entry point |\n",
@@ -1479,6 +1540,7 @@ def write_file_section(path_text: str) -> tuple[str, bytes]:
         output.append("\n")
     reconstructed: list[str] = []
     boundaries = declaration_boundaries(path, lines)
+    active_declaration: str | None = None
     for index, start in enumerate(boundaries):
         end = (
             boundaries[index + 1] - 1
@@ -1487,12 +1549,22 @@ def write_file_section(path_text: str) -> tuple[str, bytes]:
         )
         block = lines[start - 1:end]
         reconstructed.extend(block)
-        output.append(f"### {block_title(path, block, start, end)}\n\n")
-        output.append(
-            f"Original source lines {start}-{end}. "
-            "The boundary follows a declaration or a pagination break inside one "
-            "large declaration; the listing remains byte-for-byte source.\n\n"
-        )
+        names = declaration_names(path, block)
+        if names:
+            title = block_title(path, block, start, end)
+            active_declaration = title
+            output.append(f"### {title}\n\n")
+        elif start == 1:
+            output.append(
+                f"### {preamble_title(path)} {{.unnumbered .unlisted}}\n\n"
+            )
+            output.append(preamble_guide(path, block) + "\n\n")
+        else:
+            subject = active_declaration or "the preceding declaration"
+            output.append(
+                f"### Continuation of {subject} "
+                "{.unnumbered .unlisted}\n\n"
+            )
         guide = symbol_guide(path, block)
         if guide:
             output.append(guide + "\n\n")

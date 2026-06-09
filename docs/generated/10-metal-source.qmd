@@ -99,7 +99,7 @@ Read this file as one ownership unit. The source is divided at declaration bound
 
 Length: 264 lines. SHA-256: `bd5f423fae75ab00035ad1c9c544be1eac4116df6597b3c09cf1c273c53f0494`.
 
-### Declaration map
+### Declaration map {.unnumbered .unlisted}
 
 This map gives the reading spine of the file. Line numbers refer to the original source and to the numbered listings below.
 
@@ -140,9 +140,9 @@ This map gives the reading spine of the file. Line numbers refer to the original
 | 262 | `#endif` |
 | 264 | `#endif /* VOXTRAL_METAL_H */` |
 
-### Continuation of the surrounding declaration (lines 1-8)
+### Header preamble {.unnumbered .unlisted}
 
-Original source lines 1-8. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+This preamble contains comments and preprocessing setup that apply to the complete public header. It introduces no runtime state.
 
 ```{.c .numberLines startFrom="1"}
 /*
@@ -157,15 +157,11 @@ Original source lines 1-8. The boundary follows a declaration or a pagination br
 
 ### `#ifndef VOXTRAL_METAL_H`
 
-Original source lines 9-9. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 ```{.c .numberLines startFrom="9"}
 #ifndef VOXTRAL_METAL_H
 ```
 
 ### `#define VOXTRAL_METAL_H`
-
-Original source lines 10-14. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 ```{.c .numberLines startFrom="10"}
 #define VOXTRAL_METAL_H
@@ -177,16 +173,12 @@ Original source lines 10-14. The boundary follows a declaration or a pagination 
 
 ### `#ifdef __cplusplus`
 
-Original source lines 15-16. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 ```{.c .numberLines startFrom="15"}
 #ifdef __cplusplus
 extern "C" {
 ```
 
 ### `#endif`
-
-Original source lines 17-19. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 ```{.c .numberLines startFrom="17"}
 #endif
@@ -195,8 +187,6 @@ Original source lines 17-19. The boundary follows a declaration or a pagination 
 ```
 
 ### `int vox_metal_init(void);`
-
-Original source lines 20-22. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Creates the global device, command queue, shader library, pipelines, and caches.
 Zero means callers must retain a CPU/fallback path.
@@ -209,8 +199,6 @@ int vox_metal_init(void);
 
 ### `int vox_metal_available(void);`
 
-Original source lines 23-25. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Reports whether initialization completed; it performs no allocation or dispatch.
 
 ```{.c .numberLines startFrom="23"}
@@ -220,8 +208,6 @@ int vox_metal_available(void);
 ```
 
 ### `void vox_metal_shutdown(void);`
-
-Original source lines 26-37. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Releases pipelines, MPS operation caches, converted/merged weights, activation
 pool, persistent decoder storage, queue, and device.
@@ -243,8 +229,6 @@ void vox_metal_shutdown(void);
 
 ### `void vox_metal_sgemm_bf16(…)`
 
-Original source lines 38-46. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Multiplies float activations by transposed BF16 checkpoint weights. Weights are
 converted and cached as FP16 GPU buffers; output remains float.
 
@@ -261,8 +245,6 @@ void vox_metal_sgemm_bf16(int M, int N, int K,
 ```
 
 ### `void vox_metal_sgemm(…)`
-
-Original source lines 47-58. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Float dense product against row-major transposed weights through Metal/MPS.
 
@@ -283,8 +265,6 @@ void vox_metal_sgemm(int M, int N, int K,
 
 ### `void vox_metal_fused_qkv_bf16(…)`
 
-Original source lines 59-69. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Encodes Q, K, and V projections in one command buffer with shared input.
 
 ```{.c .numberLines startFrom="59"}
@@ -302,8 +282,6 @@ void vox_metal_fused_qkv_bf16(int M, int K,
 ```
 
 ### `void vox_metal_fused_norm_qkv_bf16(…)`
-
-Original source lines 70-85. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Adds RMS normalization before fused Q/K/V projection while intermediates remain
 on GPU.
@@ -328,8 +306,6 @@ void vox_metal_fused_norm_qkv_bf16(int M, int K,
 ```
 
 ### `void vox_metal_fused_ffn_bf16(…)`
-
-Original source lines 86-103. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Runs gate/up projections, SiLU product, and down projection without CPU
 round-trips for hidden activations.
@@ -356,8 +332,6 @@ void vox_metal_fused_ffn_bf16(int M, int dim, int hidden,
 ```
 
 ### `void vox_metal_fused_wo_ffn_bf16(…)`
-
-Original source lines 104-123. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Fuses attention output projection, residual, conditioned norm, SwiGLU, and the
 second residual.
@@ -387,8 +361,6 @@ void vox_metal_fused_wo_ffn_bf16(int M, int dim, int q_dim, int hidden,
 
 ### `void vox_metal_batched_attention(…)`
 
-Original source lines 124-135. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Computes all masked/windowed heads with strided matrix views, including mapping
 many query heads onto fewer K/V heads.
 
@@ -409,8 +381,6 @@ void vox_metal_batched_attention(float *out,
 
 ### `void vox_metal_encoder_attention(…)`
 
-Original source lines 136-147. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Encoder-specialized single-dispatch attention with the same tensor contract.
 
 ```{.c .numberLines startFrom="136"}
@@ -429,8 +399,6 @@ void vox_metal_encoder_attention(float *out,
 ```
 
 ### `int vox_metal_fused_logits_bf16(…)`
-
-Original source lines 148-160. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Applies final norm, vocabulary projection, and argmax on GPU; logits output is
 optional.
@@ -453,8 +421,6 @@ int vox_metal_fused_logits_bf16(int dim, int vocab_size,
 
 ### `void vox_metal_decoder_start(const float *x, int dim);`
 
-Original source lines 161-163. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Uploads one residual vector into persistent GPU storage before the layer loop.
 
 ```{.c .numberLines startFrom="161"}
@@ -465,8 +431,6 @@ void vox_metal_decoder_start(const float *x, int dim);
 
 ### `void vox_metal_decoder_end(void);`
 
-Original source lines 164-166. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Ends persistent-x mode after one token step.
 
 ```{.c .numberLines startFrom="164"}
@@ -476,8 +440,6 @@ void vox_metal_decoder_end(void);
 ```
 
 ### `void vox_metal_decoder_norm_qkv(…)`
-
-Original source lines 167-175. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Runs first-layer normalization and Q/K/V projection from persistent x.
 
@@ -494,8 +456,6 @@ void vox_metal_decoder_norm_qkv(int K,
 ```
 
 ### `void vox_metal_decoder_wo_ffn_next_qkv(…)`
-
-Original source lines 176-191. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Fuses one layer's output/feed-forward updates with the next layer's norm and
 Q/K/V, removing an inter-layer command-buffer boundary.
@@ -521,8 +481,6 @@ void vox_metal_decoder_wo_ffn_next_qkv(int dim, int q_dim, int hidden,
 
 ### `int vox_metal_decoder_wo_ffn_logits(…)`
 
-Original source lines 192-208. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Final-layer fusion ending with vocabulary projection and selected token.
 
 ```{.c .numberLines startFrom="192"}
@@ -547,8 +505,6 @@ int vox_metal_decoder_wo_ffn_logits(int dim, int q_dim, int hidden, int vocab_si
 
 ### `void *vox_metal_shared_alloc(size_t size);`
 
-Original source lines 209-209. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Allocates CPU/GPU-visible cache storage, falling back to zeroed heap memory when
 Metal is unavailable.
 
@@ -557,8 +513,6 @@ void *vox_metal_shared_alloc(size_t size);
 ```
 
 ### `void vox_metal_shared_free(void *ptr);`
-
-Original source lines 210-218. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Allocates CPU/GPU-visible cache storage, falling back to zeroed heap memory when
 Metal is unavailable.
@@ -577,8 +531,6 @@ void vox_metal_shared_free(void *ptr);
 
 ### `int vox_metal_decoder_full_step(void *ctx, const float *rope_freqs, float *logits);`
 
-Original source lines 219-224. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Encodes all decoder layers, RoPE, cache writes, attention, logits, and argmax in
 one command buffer.
 
@@ -593,8 +545,6 @@ int vox_metal_decoder_full_step(void *ctx, const float *rope_freqs, float *logit
 
 ### `void vox_metal_warmup_bf16(const uint16_t *bf16_weights, size_t num_elements);`
 
-Original source lines 225-227. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Preconverts one BF16 weight to eliminate first-use latency.
 
 ```{.c .numberLines startFrom="225"}
@@ -604,8 +554,6 @@ void vox_metal_warmup_bf16(const uint16_t *bf16_weights, size_t num_elements);
 ```
 
 ### `void vox_metal_warmup_decoder_ops(void *ctx);`
-
-Original source lines 228-230. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Preconstructs shape-specific MPS operations and decoder weight caches.
 
@@ -617,8 +565,6 @@ void vox_metal_warmup_decoder_ops(void *ctx);
 
 ### `void vox_metal_warmup_merged_2(…)`
 
-Original source lines 231-232. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Caches a two-matrix merged BF16 layout used by fused kernels.
 
 ```{.c .numberLines startFrom="231"}
@@ -627,8 +573,6 @@ void vox_metal_warmup_merged_2(const uint16_t *a, size_t a_n,
 ```
 
 ### `void vox_metal_warmup_merged_3(…)`
-
-Original source lines 233-244. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Caches a three-matrix merged BF16 layout.
 
@@ -649,8 +593,6 @@ void vox_metal_warmup_merged_3(const uint16_t *a, size_t a_n,
 
 ### `int vox_metal_encoder_full_step(…)`
 
-Original source lines 245-253. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Runs every encoder transformer layer plus final norm for one new chunk while
 updating shared rolling caches.
 
@@ -668,8 +610,6 @@ int vox_metal_encoder_full_step(void *ctx, float *x, int new_len,
 
 ### `void vox_metal_decoder_prefill_step(…)`
 
-Original source lines 254-257. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Processes a multi-position prompt/audio prefix through all decoder layers and
 updates cache length.
 
@@ -682,8 +622,6 @@ void vox_metal_decoder_prefill_step(void *ctx, float *x, int seq_len,
 
 ### `size_t vox_metal_memory_used(void);`
 
-Original source lines 258-259. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Returns memory tracked by Metal caches/allocations for diagnostics, not total
 process resident memory.
 
@@ -694,8 +632,6 @@ size_t vox_metal_memory_used(void);
 
 ### `#ifdef __cplusplus`
 
-Original source lines 260-261. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 ```{.c .numberLines startFrom="260"}
 #ifdef __cplusplus
 }
@@ -703,16 +639,12 @@ Original source lines 260-261. The boundary follows a declaration or a paginatio
 
 ### `#endif`
 
-Original source lines 262-263. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 ```{.c .numberLines startFrom="262"}
 #endif
 
 ```
 
 ### `#endif /* VOXTRAL_METAL_H */`
-
-Original source lines 264-264. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 ```{.c .numberLines startFrom="264"}
 #endif /* VOXTRAL_METAL_H */
@@ -738,7 +670,7 @@ context pointers.
 
 Length: 3844 lines. SHA-256: `fd6853a77a1e2b376dd4a2404def5a03ef9bae0b85fba733e6ed94a6f384cc39`.
 
-### Declaration map
+### Declaration map {.unnumbered .unlisted}
 
 This map gives the reading spine of the file. Line numbers refer to the original source and to the numbered listings below.
 
@@ -793,9 +725,9 @@ This map gives the reading spine of the file. Line numbers refer to the original
 | 3636 | `void vox_metal_warmup_decoder_ops(void *ctx_ptr) {` |
 | 3832 | `size_t vox_metal_memory_used(void) {` |
 
-### Continuation of the surrounding declaration (lines 1-78)
+### Translation-unit preamble {.unnumbered .unlisted}
 
-Original source lines 1-78. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+This translation-unit preamble selects dependencies, compile-time features, and file-local constants used by the definitions that follow.
 
 ```{.objective-c .numberLines startFrom="1"}
 /*
@@ -880,8 +812,6 @@ static int g_shared_count = 0;
 
 ### `static inline uint16_t bf16_to_f16(uint16_t bf16)`
 
-Original source lines 79-100. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Converts one bfloat16 weight to IEEE half precision by rebiasing the exponent
 from bias 127 to bias 15 and shifting the 7-bit mantissa left by 3 to fill f16's
 10-bit field. Zero/subnormal bf16 exponents collapse to signed zero, 0xFF maps to
@@ -915,8 +845,6 @@ static inline uint16_t bf16_to_f16(uint16_t bf16) {
 
 ### `typedef struct f16_cache_entry_t`
 
-Original source lines 101-110. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 One BF16-to-FP16 cache record keyed by the source CPU pointer and retaining the
 converted `MTLBuffer`. Element count documents the cached extent.
 
@@ -934,8 +862,6 @@ static pthread_mutex_t g_f16_cache_mutex = PTHREAD_MUTEX_INITIALIZER;
 ```
 
 ### `static id<MTLBuffer> get_cached_bf16_as_f16_buffer(const uint16_t *weights, size_t num_elements)`
-
-Original source lines 111-148. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Returns a shared-storage MTLBuffer of f16 weights for a given bf16 CPU pointer,
 converting once via bf16_to_f16 and caching the result keyed by the source
@@ -986,8 +912,6 @@ static id<MTLBuffer> get_cached_bf16_as_f16_buffer(const uint16_t *weights, size
 
 ### `static void clear_f16_cache(void)`
 
-Original source lines 149-164. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Under the cache mutex, releases every converted weight buffer, clears keys, and
 resets the count during global shutdown.
 
@@ -1012,8 +936,6 @@ static void clear_f16_cache(void) {
 
 ### `typedef struct merged_cache_entry_t`
 
-Original source lines 165-175. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Caches one concatenated FP16 weight buffer by its source pointer tuple for fused
 matrix operations.
 
@@ -1032,8 +954,6 @@ static int g_merged_count = 0;
 ```
 
 ### `static id<MTLBuffer> get_merged_f16_2(…)`
-
-Original source lines 176-203. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Concatenates two bf16 weight matrices into one contiguous f16 buffer so a fused
 matmul can produce both outputs in a single MPS call. It resolves each half
@@ -1072,8 +992,6 @@ static id<MTLBuffer> get_merged_f16_2(const uint16_t *bf16_a, size_t a_elems,
 ```
 
 ### `static id<MTLBuffer> get_merged_f16_3(…)`
-
-Original source lines 204-235. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Like get_merged_f16_2 but concatenates three bf16 matrices (e.g. Wq, Wk, Wv) into
 one f16 buffer for a single merged QKV matmul. The cache key only stores key1 and
@@ -1117,8 +1035,6 @@ static id<MTLBuffer> get_merged_f16_3(const uint16_t *bf16_a, size_t a_elems,
 
 ### `static void clear_merged_cache(void)`
 
-Original source lines 236-250. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Drops all merged buffers and keys. Access is serialized by the runtime's
 inference ownership around initialization/shutdown.
 
@@ -1142,8 +1058,6 @@ static void clear_merged_cache(void) {
 
 ### `typedef struct weight_cache_entry_t`
 
-Original source lines 251-260. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Cache record for immutable FP32 norms/biases copied into shared Metal buffers;
 size joins pointer identity in the key.
 
@@ -1161,8 +1075,6 @@ static pthread_mutex_t g_cache_mutex = PTHREAD_MUTEX_INITIALIZER;
 ```
 
 ### `static id<MTLBuffer> get_cached_weight_buffer(const float *weights, size_t size)`
-
-Original source lines 261-292. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Caches f32 buffers (norm weights, biases, ada_scale) keyed by CPU pointer and
 byte size, uploaded once in StorageModeShared. Cache hits require both pointer and
@@ -1207,8 +1119,6 @@ static id<MTLBuffer> get_cached_weight_buffer(const float *weights, size_t size)
 
 ### `static void clear_weight_cache(void)`
 
-Original source lines 293-308. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Mutex-protected release of cached FP32 GPU buffers.
 
 ```{.objective-c .numberLines startFrom="293"}
@@ -1232,8 +1142,6 @@ static void clear_weight_cache(void) {
 
 ### `typedef struct pool_buffer_t`
 
-Original source lines 309-318. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 One reusable activation allocation with capacity and checkout flag. Buffers are
 rounded up to reduce repeated allocation for nearby tensor sizes.
 
@@ -1251,8 +1159,6 @@ static pthread_mutex_t g_pool_mutex = PTHREAD_MUTEX_INITIALIZER;
 ```
 
 ### `static id<MTLBuffer> pool_get_buffer(size_t size)`
-
-Original source lines 319-354. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Hands out a reusable shared activation buffer of at least the requested size,
 scanning for a free pool slot whose capacity fits before allocating. New
@@ -1301,8 +1207,6 @@ static id<MTLBuffer> pool_get_buffer(size_t size) {
 
 ### `static void pool_release_buffer(id<MTLBuffer> buffer)`
 
-Original source lines 355-366. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Marks a pooled activation buffer free again by finding it by identity and
 clearing its in_use flag; the buffer stays allocated for later reuse. This is a
 fixed-slot free-list: release does not deallocate, it just returns the slab to
@@ -1324,8 +1228,6 @@ static void pool_release_buffer(id<MTLBuffer> buffer) {
 ```
 
 ### `static void clear_activation_pool(void)`
-
-Original source lines 367-385. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Releases pooled activations and resets capacity/use metadata at shutdown.
 
@@ -1352,8 +1254,6 @@ static pthread_mutex_t g_matmul_op_mutex = PTHREAD_MUTEX_INITIALIZER;
 ```
 
 ### `static MPSMatrixMultiplication *get_cached_matmul_op(…)`
-
-Original source lines 386-414. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Returns a cached MPSMatrixMultiplication keyed by a string of (transposeLeft,
 transposeRight, resultRows, resultColumns, interiorColumns, alpha, beta), creating
@@ -1395,8 +1295,6 @@ static MPSMatrixMultiplication *get_cached_matmul_op(BOOL transposeLeft, BOOL tr
 
 ### `static void clear_matmul_op_cache(void)`
 
-Original source lines 415-424. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Drops the dictionary of shape/configuration-specific
 `MPSMatrixMultiplication` objects under its mutex.
 
@@ -1414,8 +1312,6 @@ static void clear_matmul_op_cache(void) {
 ```
 
 ### `static int init_shaders(void)`
-
-Original source lines 425-561. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Compiles the embedded Metal source (decoded from the voxtral_shaders_metal byte
 array via an NSUTF8 string) into one MTLLibrary with fast math enabled, then
@@ -1564,8 +1460,6 @@ static int init_shaders(void) {
 
 ### `int vox_metal_init(void)`
 
-Original source lines 562-592. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Creates the system default MTLDevice and command queue, requiring at least Apple
 GPU family 6 (rejecting older GPUs), then calls init_shaders. Sets g_initialized
 only on success so vox_metal_available and every kernel entry can early-out when
@@ -1607,8 +1501,6 @@ int vox_metal_init(void) {
 
 ### `int vox_metal_available(void)`
 
-Original source lines 593-596. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Returns the global initialization flag used by C fallback selection.
 
 ```{.objective-c .numberLines startFrom="593"}
@@ -1619,8 +1511,6 @@ int vox_metal_available(void) {
 ```
 
 ### `void vox_metal_shutdown(void)`
-
-Original source lines 597-660. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Tears down all GPU state: clears the f16, merged, f32-weight, activation-pool, and
 matmul-op caches, nils every pipeline and the persistent decoder x buffer,
@@ -1695,8 +1585,6 @@ void vox_metal_shutdown(void) {
 ```
 
 ### `void vox_metal_sgemm_bf16(…)`
-
-Original source lines 661-739. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Computes C[M,N] = A[M,K] @ B[N,K]^T with f32 A and bf16 B by fetching B's cached
 f16 buffer, copying A into a pooled buffer, and running one cached
@@ -1788,8 +1676,6 @@ void vox_metal_sgemm_bf16(int M, int N, int K,
 
 ### `void vox_metal_sgemm(…)`
 
-Original source lines 740-809. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Copies float activation input into pooled shared storage, reuses a cached float
 weight buffer and shape-specific MPS operation, waits for completion, then
 copies float output back and releases activations.
@@ -1868,8 +1754,6 @@ void vox_metal_sgemm(int M, int N, int K,
 ```
 
 ### `void vox_metal_fused_norm_qkv_bf16(…)`
-
-Original source lines 810-953. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Fuses RMSNorm and the three QKV projections into one command buffer: a rms_norm
 compute dispatch (one threadgroup per row, 256 threads) writes x_norm, then three
@@ -2026,8 +1910,6 @@ void vox_metal_fused_norm_qkv_bf16(int M, int K,
 
 ### `void vox_metal_fused_qkv_bf16(…)`
 
-Original source lines 954-1095. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Reuses three converted weight buffers and one uploaded input, encodes three MPS
 products into one command buffer, then downloads Q/K/V and returns all scratch
 buffers to the pool.
@@ -2178,8 +2060,6 @@ void vox_metal_fused_qkv_bf16(int M, int K,
 ```
 
 ### `void vox_metal_fused_ffn_bf16(…)`
-
-Original source lines 1096-1253. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Runs the full SwiGLU FFN in one command buffer: gate = input @ w1^T and up =
 input @ w3^T (two MPS matmuls), then silu(gate) and gate *= up as compute
@@ -2349,8 +2229,6 @@ void vox_metal_fused_ffn_bf16(int M, int dim, int hidden,
 
 ### `int vox_metal_fused_logits_bf16(…)`
 
-Original source lines 1254-1363. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Final-token head in one command buffer: rms_norm(x), then logits = x_norm @
 tok_emb^T (vocab x dim f16 weights), then the argmax_f32 kernel writes the best
 token id into a 4-byte buffer. Returns the argmax after commit/wait and only
@@ -2471,8 +2349,6 @@ int vox_metal_fused_logits_bf16(int dim, int vocab_size,
 ```
 
 ### `void vox_metal_fused_wo_ffn_bf16(…)`
-
-Original source lines 1364-1483. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Allocates the complete residual/normalization/hidden scratch set, encodes output
 projection through the second residual in one command buffer, copies updated x
@@ -2601,9 +2477,7 @@ void vox_metal_fused_wo_ffn_bf16(int M, int dim, int q_dim, int hidden,
 
 ```
 
-### Continuation of the surrounding declaration (lines 1484-1617)
-
-Original source lines 1484-1617. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+### Continuation of `void vox_metal_fused_wo_ffn_bf16(…)` {.unnumbered .unlisted}
 
 ```{.objective-c .numberLines startFrom="1484"}
         /* Step 5: gate = x_norm @ w1^T */
@@ -2744,8 +2618,6 @@ Original source lines 1484-1617. The boundary follows a declaration or a paginat
 
 ### `void vox_metal_decoder_start(const float *x, int dim)`
 
-Original source lines 1618-1627. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Uploads the initial decoder hidden state x into the persistent g_dec_x shared
 buffer, reallocating it only if too small so it survives across tokens. This
 buffer is the heart of the persistent-x decoder path: subsequent per-layer
@@ -2766,8 +2638,6 @@ void vox_metal_decoder_start(const float *x, int dim) {
 
 ### `void vox_metal_decoder_end(void)`
 
-Original source lines 1628-1635. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Intentionally keeps persistent `g_dec_x` allocated for reuse across tokens; end
 closes the logical step, while shutdown owns actual release.
 
@@ -2783,8 +2653,6 @@ void vox_metal_decoder_end(void) {
 ```
 
 ### `static void encode_wo_ffn_steps(…)`
-
-Original source lines 1636-1738. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Helper that appends the wo+FFN block for one layer onto an already-open command
 buffer, reading attn_out and updating g_dec_x in place. It prefers fused custom
@@ -2898,9 +2766,7 @@ static void encode_wo_ffn_steps(id<MTLCommandBuffer> cmdBuffer,
 
 ```
 
-### Continuation of the surrounding declaration (lines 1739-1858)
-
-Original source lines 1739-1858. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+### Continuation of `static void encode_wo_ffn_steps(…)` {.unnumbered .unlisted}
 
 ```{.objective-c .numberLines startFrom="1739"}
     /* Step 5+6+7+8: FFN gate in one kernel (fallback to old path if unavailable). */
@@ -3027,8 +2893,6 @@ Original source lines 1739-1858. The boundary follows a declaration or a paginat
 
 ### `static void encode_norm_qkv_steps(…)`
 
-Original source lines 1859-1915. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Helper that appends rms_norm(g_dec_x) followed by a single merged QKV matmul onto
 an open command buffer. The three weight matrices are concatenated via
 get_merged_f16_3 so one MPSMatrixMultiplication yields Q, K, V contiguously; the
@@ -3096,8 +2960,6 @@ static void encode_norm_qkv_steps(id<MTLCommandBuffer> cmdBuffer,
 
 ### `void vox_metal_decoder_norm_qkv(…)`
 
-Original source lines 1916-1954. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Allocates normalized/QKV scratch, encodes the shared helper from persistent x,
 waits once, splits the contiguous QKV result into caller arrays, then returns
 scratch to the pool.
@@ -3145,8 +3007,6 @@ void vox_metal_decoder_norm_qkv(int K,
 ```
 
 ### `void vox_metal_decoder_wo_ffn_next_qkv(…)`
-
-Original source lines 1955-2028. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Fuses one layer's wo+FFN with the next layer's norm+QKV into a single command
 buffer, the key cross-layer fusion that halves command buffers per token. It calls
@@ -3231,8 +3091,6 @@ void vox_metal_decoder_wo_ffn_next_qkv(int dim, int q_dim, int hidden,
 ```
 
 ### `int vox_metal_decoder_wo_ffn_logits(…)`
-
-Original source lines 2029-2167. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Encodes the final persistent-x layer transition, final normalization,
 vocabulary projection, and argmax; downloads four-byte token identity and
@@ -3381,8 +3239,6 @@ int vox_metal_decoder_wo_ffn_logits(int dim, int q_dim, int hidden, int vocab_si
 ```
 
 ### `void vox_metal_batched_attention(…)`
-
-Original source lines 2168-2334. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Classic three-stage attention in one command buffer using MPS matmuls: per-head
 strided QK^T into a scores buffer, one causal_softmax compute dispatch over all
@@ -3561,8 +3417,6 @@ void vox_metal_batched_attention(float *out,
 
 ### `void vox_metal_encoder_attention(…)`
 
-Original source lines 2335-2404. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Uploads Q/K/V, dispatches one tiled compute grid across all encoder heads and
 query blocks, downloads output after one completion wait, and releases scratch.
 
@@ -3641,8 +3495,6 @@ void vox_metal_encoder_attention(float *out,
 
 ### `void *vox_metal_shared_alloc(size_t size)`
 
-Original source lines 2405-2417. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Allocates zeroed memory backed by a shared-storage MTLBuffer and records the
 (ptr, buffer) pair so GPU kernels can later look up the buffer by its CPU pointer
 via find_shared_buffer; this is how the KV cache becomes addressable from both
@@ -3667,8 +3519,6 @@ void *vox_metal_shared_alloc(size_t size) {
 
 ### `void vox_metal_shared_free(void *ptr)`
 
-Original source lines 2418-2429. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Finds a tracked shared pointer, releases its Metal buffer, and fills the removed
 slot from the final table entry; unknown pointers use ordinary `free` because
 they came from fallback allocation.
@@ -3689,8 +3539,6 @@ void vox_metal_shared_free(void *ptr) {
 ```
 
 ### `static id<MTLBuffer> find_shared_buffer(void *ptr)`
-
-Original source lines 2430-2442. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Linear-scans the shared-allocation table to recover the MTLBuffer that backs a
 given CPU pointer, returning nil if untracked. Used by the monolithic
@@ -3714,8 +3562,6 @@ static id<MTLBuffer> find_shared_buffer(void *ptr) {
 ```
 
 ### `int vox_metal_decoder_full_step(void *ctx_ptr, const float *rope_freqs, float *logits_out)`
-
-Original source lines 2443-2570. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Runs an entire decode token, all 26 layers plus the logits head, in ONE command
 buffer over the persistent g_dec_x buffer. Per layer it appends the previous
@@ -3857,9 +3703,7 @@ int vox_metal_decoder_full_step(void *ctx_ptr, const float *rope_freqs, float *l
 
 ```
 
-### Continuation of the surrounding declaration (lines 2571-2716)
-
-Original source lines 2571-2716. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+### Continuation of `int vox_metal_decoder_full_step(void *ctx_ptr, const float *rope_freqs, float *logits_out)` {.unnumbered .unlisted}
 
 ```{.objective-c .numberLines startFrom="2571"}
                 /* Write K to KV cache (from bufQKV at off_k) */
@@ -4012,8 +3856,6 @@ Original source lines 2571-2716. The boundary follows a declaration or a paginat
 
 ### `int vox_metal_encoder_full_step(…)`
 
-Original source lines 2717-2843. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Processes new_len positions through all 32 encoder layers in one command buffer,
 operating on a pooled bufX uploaded once. Per layer: rms_norm, one merged QKV
 matmul, then a compute encoder doing strided bias-add, batched strided RoPE,
@@ -4151,9 +3993,7 @@ int vox_metal_encoder_full_step(void *ctx_ptr, float *x, int new_len,
 
 ```
 
-### Continuation of the surrounding declaration (lines 2844-2962)
-
-Original source lines 2844-2962. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+### Continuation of `int vox_metal_encoder_full_step(…)` {.unnumbered .unlisted}
 
 ```{.objective-c .numberLines startFrom="2844"}
                 /* Q slice += wq_bias */
@@ -4277,9 +4117,7 @@ Original source lines 2844-2962. The boundary follows a declaration or a paginat
 
 ```
 
-### Continuation of the surrounding declaration (lines 2963-3090)
-
-Original source lines 2963-3090. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+### Continuation of `int vox_metal_encoder_full_step(…)` {.unnumbered .unlisted}
 
 ```{.objective-c .numberLines startFrom="2963"}
             /* Step 4: wo projection */
@@ -4412,9 +4250,7 @@ Original source lines 2963-3090. The boundary follows a declaration or a paginat
 
 ```
 
-### Continuation of the surrounding declaration (lines 3091-3203)
-
-Original source lines 3091-3203. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+### Continuation of `int vox_metal_encoder_full_step(…)` {.unnumbered .unlisted}
 
 ```{.objective-c .numberLines startFrom="3091"}
                 /* ffn_out = gate @ w2^T (strided read: rowBytes = hidden*2) */
@@ -4533,8 +4369,6 @@ Original source lines 3091-3203. The boundary follows a declaration or a paginat
 ```
 
 ### `void vox_metal_decoder_prefill_step(…)`
-
-Original source lines 3204-3330. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Prefill path for M>1 decode tokens: like the encoder full step but with decoder
 dims (head_dim=128, GQA 32/8) and 26 layers, reusing the
@@ -4672,9 +4506,7 @@ void vox_metal_decoder_prefill_step(void *ctx_ptr, float *x, int seq_len,
 
 ```
 
-### Continuation of the surrounding declaration (lines 3331-3460)
-
-Original source lines 3331-3460. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+### Continuation of `void vox_metal_decoder_prefill_step(…)` {.unnumbered .unlisted}
 
 ```{.objective-c .numberLines startFrom="3331"}
                 /* Batched RoPE on packed Q slice */
@@ -4809,9 +4641,7 @@ Original source lines 3331-3460. The boundary follows a declaration or a paginat
 
 ```
 
-### Continuation of the surrounding declaration (lines 3461-3617)
-
-Original source lines 3461-3617. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+### Continuation of `void vox_metal_decoder_prefill_step(…)` {.unnumbered .unlisted}
 
 ```{.objective-c .numberLines startFrom="3461"}
                 /* x += proj_out */
@@ -4975,8 +4805,6 @@ Original source lines 3461-3617. The boundary follows a declaration or a paginat
 
 ### `void vox_metal_warmup_bf16(const uint16_t *bf16_weights, size_t num_elements)`
 
-Original source lines 3618-3622. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Forces one conversion-cache lookup during model preparation, turning live
 first-use work into startup work.
 
@@ -4989,8 +4817,6 @@ void vox_metal_warmup_bf16(const uint16_t *bf16_weights, size_t num_elements) {
 ```
 
 ### `void vox_metal_warmup_merged_2(…)`
-
-Original source lines 3623-3628. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Materializes one two-source merged FP16 buffer before decoding begins.
 
@@ -5005,8 +4831,6 @@ void vox_metal_warmup_merged_2(const uint16_t *a, size_t a_n,
 
 ### `void vox_metal_warmup_merged_3(…)`
 
-Original source lines 3629-3635. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Materializes one three-source merged FP16 buffer before live use.
 
 ```{.objective-c .numberLines startFrom="3629"}
@@ -5020,8 +4844,6 @@ void vox_metal_warmup_merged_3(const uint16_t *a, size_t a_n,
 ```
 
 ### `void vox_metal_warmup_decoder_ops(void *ctx_ptr)`
-
-Original source lines 3636-3765. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Comprehensive load-time warmup: pre-creates the cached MPSMatrixMultiplication
 operators for the decode, encoder, and prefill shapes, pre-uploads all f32
@@ -5162,9 +4984,7 @@ void vox_metal_warmup_decoder_ops(void *ctx_ptr) {
 
 ```
 
-### Continuation of the surrounding declaration (lines 3766-3831)
-
-Original source lines 3766-3831. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+### Continuation of `void vox_metal_warmup_decoder_ops(void *ctx_ptr)` {.unnumbered .unlisted}
 
 ```{.objective-c .numberLines startFrom="3766"}
             id<MTLBuffer> dwQKV = get_merged_f16_3(
@@ -5237,8 +5057,6 @@ Original source lines 3766-3831. The boundary follows a declaration or a paginat
 
 ### `size_t vox_metal_memory_used(void)`
 
-Original source lines 3832-3844. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Reports the total bytes held by the GPU weight caches by summing num_elements*2
 across the f16 cache and size across the f32 weight cache, each under its own
 mutex. It deliberately ignores the activation pool and merged cache, so it
@@ -5276,7 +5094,7 @@ Length: 3680 lines of byte array. Header SHA-256: `f6a2d65afb570048d29fc01355d6f
 
 The repository checks the shader library in as the array `voxtral_shaders_metal[]` (44122 bytes). Those bytes are valid UTF-8 Metal Shading Language. Printing the hexadecimal array would be unreadable, so this chapter decodes it back to the exact source the compiler embedded and lists it in full below, split per kernel. The decoded text is byte-for-byte identical to the embedded array (decoded SHA-256: `88a69ba84f36e8180cf5f30c114877829f45db8c4a7578ac5f30960c3f90f43d`); the generator reconstructs the array from the listed blocks and checks every byte.
 
-### Kernel and function map
+### Kernel and function map {.unnumbered .unlisted}
 
 Line numbers refer to the decoded Metal source listed below.
 
@@ -5313,9 +5131,9 @@ Line numbers refer to the decoded Metal source listed below.
 | 1154 | `kernel void decoder_w2_residual(` |
 | 1201 | `kernel void decoder_wo_residual(` |
 
-### Continuation of the surrounding declaration (lines 1-15)
+### Translation-unit preamble {.unnumbered .unlisted}
 
-Decoded Metal source lines 1-15; reproduced exactly from the embedded byte array.
+This translation-unit preamble selects dependencies, compile-time features, and file-local constants used by the definitions that follow.
 
 ```{.cpp .numberLines startFrom="1"}
 /*
@@ -5336,8 +5154,6 @@ using namespace metal;
 ```
 
 ### `kernel void rms_norm(…)`
-
-Decoded Metal source lines 16-56; reproduced exactly from the embedded byte array.
 
 Computes out = x * rsqrt(mean(x^2)+eps) * weight with one threadgroup per row.
 Each thread strides over the hidden dimension accumulating a partial sum of
@@ -5391,8 +5207,6 @@ kernel void rms_norm(
 
 ### `kernel void silu(…)`
 
-Decoded Metal source lines 57-71; reproduced exactly from the embedded byte array.
-
 In-place SiLU activation x = x/(1+exp(-x)), one thread per element with a gid < n
 bounds guard so an over-dispatched grid leaves the tail untouched. Plain
 elementwise map over a flat buffer.
@@ -5416,8 +5230,6 @@ kernel void silu(
 ```
 
 ### `kernel void gelu(…)`
-
-Decoded Metal source lines 72-88; reproduced exactly from the embedded byte array.
 
 In-place tanh-approximation GELU, one thread per element with a gid < n guard.
 Uses the standard 0.5*x*(1+tanh(sqrt(2/pi)*(x+0.044715*x^3))) form with the
@@ -5445,8 +5257,6 @@ kernel void gelu(
 
 ### `kernel void add_inplace(…)`
 
-Decoded Metal source lines 89-97; reproduced exactly from the embedded byte array.
-
 Elementwise a[i] += b[i] over n elements, one thread per index with a bounds
 guard. Used between MPS matmuls to fold residual adds without a CPU round-trip.
 
@@ -5463,8 +5273,6 @@ kernel void add_inplace(
 ```
 
 ### `kernel void mul_inplace(…)`
-
-Decoded Metal source lines 98-107; reproduced exactly from the embedded byte array.
 
 Elementwise a[i] *= b[i] over n elements, one thread per index with a bounds
 guard. Used to apply the SwiGLU gate*up product on the GPU.
@@ -5483,8 +5291,6 @@ kernel void mul_inplace(
 ```
 
 ### `kernel void ada_scale_mul(…)`
-
-Decoded Metal source lines 108-122; reproduced exactly from the embedded byte array.
 
 Adaptive-RMSNorm conditioning: x[i] *= (1 + scale[i % stride]), so a per-channel
 scale vector of length stride is broadcast across rows. One thread per element
@@ -5509,8 +5315,6 @@ kernel void ada_scale_mul(
 ```
 
 ### `kernel void argmax_f32(…)`
-
-Decoded Metal source lines 123-166; reproduced exactly from the embedded byte array.
 
 Single-threadgroup argmax over a float array. Each lane scans a strided slice
 tracking its local best value and index into parallel shared arrays, then a
@@ -5565,8 +5369,6 @@ kernel void argmax_f32(
 ```
 
 ### `kernel void causal_softmax(…)`
-
-Decoded Metal source lines 167-229; reproduced exactly from the embedded byte array.
 
 Numerically stable masked softmax over attention scores, one threadgroup per
 (query, head) flattened as group_id = head*seq_q + qi. Phase 1 masks each key
@@ -5642,8 +5444,6 @@ kernel void causal_softmax(
 
 ### `kernel void rope_apply(…)`
 
-Decoded Metal source lines 230-259; reproduced exactly from the embedded byte array.
-
 Applies rotary position embedding in place to one position's [n_heads, head_dim]
 vector, one thread per (head, half-dim) pair. Each thread rotates the adjacent
 pair at indices 2i, 2i+1 by the (cos,sin) read from freqs. Threads beyond
@@ -5684,8 +5484,6 @@ kernel void rope_apply(
 
 ### `kernel void kv_cache_copy(…)`
 
-Decoded Metal source lines 260-271; reproduced exactly from the embedded byte array.
-
 Writes kv_dim freshly projected f32 K (or V) values into the large cache buffer at
 float_offset+gid, one thread per element with a gid < kv_dim guard. The host
 computes float_offset from layer, position, and kv_dim so each token lands at its
@@ -5707,8 +5505,6 @@ kernel void kv_cache_copy(
 ```
 
 ### `kernel void kv_cache_copy_f16(…)`
-
-Decoded Metal source lines 272-291; reproduced exactly from the embedded byte array.
 
 Same as kv_cache_copy but narrows each f32 value to half on store into an f16
 cache, halving KV memory bandwidth and footprint. Bounds-guarded by kv_dim.
@@ -5737,8 +5533,6 @@ kernel void kv_cache_copy_f16(
 ```
 
 ### `kernel void decoder_attention(…)`
-
-Decoded Metal source lines 292-371; reproduced exactly from the embedded byte array.
 
 Single-token (seq_q=1) attention, one threadgroup of 32 threads (one SIMD group)
 per query head, with head_dim=128 so each lane owns 4 dims. It walks keys in
@@ -5831,8 +5625,6 @@ kernel void decoder_attention(
 ```
 
 ### `kernel void decoder_attention_f16(…)`
-
-Decoded Metal source lines 372-459; reproduced exactly from the embedded byte array.
 
 Identical online-softmax single-token attention to decoder_attention but reads the
 K and V caches as half and converts to float in the dot product and V accumulation.
@@ -5930,8 +5722,6 @@ kernel void decoder_attention_f16(
 ```
 
 ### `kernel void encoder_attention(…)`
-
-Decoded Metal source lines 460-570; reproduced exactly from the embedded byte array.
 
 Q-tiled batched attention: one threadgroup per (head, query-block of ATTN_BQ=8
 queries). Each thread holds one head_dim element of all 8 queries; per key it
@@ -6055,8 +5845,6 @@ kernel void encoder_attention(
 
 ### `kernel void encoder_attention_kv_f16(…)`
 
-Decoded Metal source lines 571-672; reproduced exactly from the embedded byte array.
-
 Same Q-tiled batched attention as encoder_attention but with half-precision K and
 V (converted to float on load); Q and output stay f32. Used for the f16 KV-cache
 encoder/prefill path.
@@ -6167,8 +5955,6 @@ kernel void encoder_attention_kv_f16(
 ```
 
 ### `kernel void encoder_attention_qstrided(…)`
-
-Decoded Metal source lines 673-776; reproduced exactly from the embedded byte array.
 
 Q-tiled batched attention variant that reads Q from a strided/offset layout, so Q
 can be a column slice of a wider packed QKV buffer while output is written to its
@@ -6284,8 +6070,6 @@ kernel void encoder_attention_qstrided(
 ```
 
 ### `kernel void encoder_attention_kv_f16_qstrided(…)`
-
-Decoded Metal source lines 777-885; reproduced exactly from the embedded byte array.
 
 Encoder attention variant reading strided Q projections and FP16 cached K/V.
 The grid tiles query rows per head and converts half cache values during float
@@ -6405,8 +6189,6 @@ kernel void encoder_attention_kv_f16_qstrided(
 
 ### `kernel void bias_add(…)`
 
-Decoded Metal source lines 886-897; reproduced exactly from the embedded byte array.
-
 Adds a per-column bias to a row-major [seq_len, dim] tensor as data[gid] +=
 bias[gid % dim], one thread per element with a bounds guard. The modulo broadcasts
 the dim-length bias across all rows.
@@ -6427,8 +6209,6 @@ kernel void bias_add(
 ```
 
 ### `kernel void bias_add_strided(…)`
-
-Decoded Metal source lines 898-918; reproduced exactly from the embedded byte array.
 
 Bias-add restricted to a column slice of a wider row stride: thread gid maps to
 (row, col) within chunk_cols and writes data[row*row_stride + col_offset + col] +=
@@ -6460,8 +6240,6 @@ kernel void bias_add_strided(
 ```
 
 ### `kernel void batched_rope_apply(…)`
-
-Decoded Metal source lines 919-947; reproduced exactly from the embedded byte array.
 
 Applies RoPE to a whole [seq_len, n_heads, head_dim] batch, one thread per
 (position, head, half-dim) triple decoded from a flat gid. Per-position (cos,sin)
@@ -6501,8 +6279,6 @@ kernel void batched_rope_apply(
 ```
 
 ### `kernel void batched_rope_apply_strided(…)`
-
-Decoded Metal source lines 948-983; reproduced exactly from the embedded byte array.
 
 Batched RoPE that targets a column slice of a strided buffer: the element base
 becomes pos*row_stride + col_offset + head*head_dim, so Q or K can be rotated in
@@ -6550,8 +6326,6 @@ kernel void batched_rope_apply_strided(
 
 ### `kernel void batched_kv_cache_copy(…)`
 
-Decoded Metal source lines 984-995; reproduced exactly from the embedded byte array.
-
 Copies a contiguous [seq_len, kv_dim] block of new K or V into the cache at
 cache_offset+gid, one thread per element over total with a guard. The host
 computes cache_offset from layer and starting position.
@@ -6573,8 +6347,6 @@ kernel void batched_kv_cache_copy(
 
 ### `kernel void batched_kv_cache_copy_f16(…)`
 
-Decoded Metal source lines 996-1007; reproduced exactly from the embedded byte array.
-
 Copies contiguous batched K/V float projections into FP16 cache rows at the
 specified start position, one thread per scalar.
 
@@ -6594,8 +6366,6 @@ kernel void batched_kv_cache_copy_f16(
 ```
 
 ### `kernel void batched_kv_cache_copy_strided(…)`
-
-Decoded Metal source lines 1008-1023; reproduced exactly from the embedded byte array.
 
 Gathers a column slice from a strided source (the K or V slice of a packed QKV
 buffer) into a contiguous cache region: thread gid maps to (row, col) within
@@ -6623,8 +6393,6 @@ kernel void batched_kv_cache_copy_strided(
 ```
 
 ### `kernel void batched_kv_cache_copy_strided_f16(…)`
-
-Decoded Metal source lines 1024-1046; reproduced exactly from the embedded byte array.
 
 Same float-to-FP16 cache write when K and V occupy slices of a larger merged QKV
 row; explicit source strides/offsets avoid deinterleaving on CPU.
@@ -6656,8 +6424,6 @@ kernel void batched_kv_cache_copy_strided_f16(
 ```
 
 ### `kernel void deinterleave(…)`
-
-Decoded Metal source lines 1047-1068; reproduced exactly from the embedded byte array.
 
 Extracts one contiguous column slice [M, chunk_cols] from a wider [M, src_stride]
 source: thread gid maps to (row, col) and copies src[row*src_stride + col_offset +
@@ -6691,8 +6457,6 @@ kernel void deinterleave(
 
 ### `kernel void silu_mul_merged(…)`
 
-Decoded Metal source lines 1069-1090; reproduced exactly from the embedded byte array.
-
 Fused SwiGLU activation over a merged [M, hidden*2] row where columns [0:hidden)
 are the gate and [hidden:2*hidden) the up projection. Each thread computes silu on
 its gate element and multiplies by the matching up element, writing back into the
@@ -6724,8 +6488,6 @@ kernel void silu_mul_merged(
 ```
 
 ### `kernel void decoder_ffn_gate(…)`
-
-Decoded Metal source lines 1091-1153; reproduced exactly from the embedded byte array.
 
 M=1 fused FFN gate: one threadgroup per output channel row computes both
 dot(x, w1[row]) and dot(x, w3[row]) from the merged w1/w3 buffer. Threads
@@ -6801,8 +6563,6 @@ kernel void decoder_ffn_gate(
 
 ### `kernel void decoder_w2_residual(…)`
 
-Decoded Metal source lines 1154-1200; reproduced exactly from the embedded byte array.
-
 M=1 fused down-projection with residual: one threadgroup per output dim row
 computes dot(gate[0:hidden], w2[row]) via cooperative float4/half4 loads and a
 SIMD-plus-threadgroup reduction, then lane 0 does x[row] += dot. Folds the w2
@@ -6859,8 +6619,6 @@ kernel void decoder_w2_residual(
 ```
 
 ### `kernel void decoder_wo_residual(…)`
-
-Decoded Metal source lines 1201-1241; reproduced exactly from the embedded byte array.
 
 M=1 fused attention output projection with residual: one threadgroup per dim row
 computes dot(attn[0:q_dim], wo[row]) using cooperative loads and a reduction, then

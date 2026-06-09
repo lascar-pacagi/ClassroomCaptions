@@ -114,7 +114,7 @@ for allocation, shape validation, and fallback.
 
 Length: 674 lines. SHA-256: `1079cd6842572e6b0c94ed96010a1078afbdd78d181a0188a1972a5c376fb07f`.
 
-### Declaration map
+### Declaration map {.unnumbered .unlisted}
 
 This map gives the reading spine of the file. Line numbers refer to the original source and to the numbered listings below.
 
@@ -137,9 +137,9 @@ This map gives the reading spine of the file. Line numbers refer to the original
 | 452 | `float *vox_encoder_forward_incremental(vox_ctx_t *ctx, const float *x_new,` |
 | 642 | `float *vox_adapter_forward(vox_ctx_t *ctx, const float *enc_out,` |
 
-### Continuation of the surrounding declaration (lines 1-31)
+### Translation-unit preamble {.unnumbered .unlisted}
 
-Original source lines 1-31. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+This translation-unit preamble selects dependencies, compile-time features, and file-local constants used by the definitions that follow.
 
 ```{.c .numberLines startFrom="1"}
 /*
@@ -177,8 +177,6 @@ Original source lines 1-31. The boundary follows a declaration or a pagination b
 
 ### `static float *load_f32(safetensors_file_t *sf, const char *name)`
 
-Original source lines 32-40. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Materializes a named encoder tensor as owned float storage when computation
 cannot use the mapped BF16 bytes directly.
 
@@ -196,8 +194,6 @@ static float *load_f32(safetensors_file_t *sf, const char *name) {
 
 ### `static uint16_t *load_bf16_direct(safetensors_file_t *sf, const char *name)`
 
-Original source lines 41-49. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Returns a borrowed mapped BF16 weight pointer, avoiding a multi-gigabyte
 conversion and tying encoder lifetime to the open safetensors file.
 
@@ -214,8 +210,6 @@ static uint16_t *load_bf16_direct(safetensors_file_t *sf, const char *name) {
 ```
 
 ### `int vox_encoder_load(vox_encoder_t *enc, safetensors_file_t *sf)`
-
-Original source lines 50-123. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Loads the 32-layer audio encoder: the conv stem and all per-layer biases/norms
 are f32, while the attention and FFN matmul weights are mmap'd bf16. Mirrors the
@@ -301,8 +295,6 @@ int vox_encoder_load(vox_encoder_t *enc, safetensors_file_t *sf) {
 
 ### `static void gelu_inplace(float *x, int n)`
 
-Original source lines 124-127. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Applies the encoder's GELU activation over a contiguous float vector.
 
 ```{.c .numberLines startFrom="124"}
@@ -313,8 +305,6 @@ static void gelu_inplace(float *x, int n) {
 ```
 
 ### `static int causal_conv1d_out_len(int length, int kernel_size, int stride)`
-
-Original source lines 128-134. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Computes the number of stable strided causal-convolution outputs available for a
 given input length, kernel, and stride.
@@ -330,8 +320,6 @@ static int causal_conv1d_out_len(int length, int kernel_size, int stride) {
 ```
 
 ### `float *vox_encoder_forward(…)`
-
-Original source lines 135-252. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Full audio-encoder pass: transposes mel[frames,128] to channel-major, runs the
 two causal conv1d+GELU stem layers (the second strided by 2), then 32
@@ -460,9 +448,7 @@ float *vox_encoder_forward(vox_ctx_t *ctx, const float *mel,
 
 ```
 
-### Continuation of the surrounding declaration (lines 253-319)
-
-Original source lines 253-319. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+### Continuation of `float *vox_encoder_forward(…)` {.unnumbered .unlisted}
 
 ```{.c .numberLines startFrom="253"}
         /* Output projection + residual */
@@ -536,8 +522,6 @@ Original source lines 253-319. The boundary follows a declaration or a paginatio
 
 ### `static float *enc_kv_cache_k_at(vox_ctx_t *ctx, int layer, int pos)`
 
-Original source lines 320-323. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Addresses one encoder key-cache row from layer and local cache position.
 
 ```{.c .numberLines startFrom="320"}
@@ -549,8 +533,6 @@ static float *enc_kv_cache_k_at(vox_ctx_t *ctx, int layer, int pos) {
 
 ### `static float *enc_kv_cache_v_at(vox_ctx_t *ctx, int layer, int pos)`
 
-Original source lines 324-327. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Addresses the matching value-cache row.
 
 ```{.c .numberLines startFrom="324"}
@@ -561,8 +543,6 @@ static float *enc_kv_cache_v_at(vox_ctx_t *ctx, int layer, int pos) {
 ```
 
 ### `int vox_encoder_kv_cache_preallocate(vox_ctx_t *ctx, int max_pos)`
-
-Original source lines 328-349. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Allocates encoder caches to a known maximum before live audio, moving allocation
 latency out of the first classroom utterance.
@@ -593,8 +573,6 @@ int vox_encoder_kv_cache_preallocate(vox_ctx_t *ctx, int max_pos) {
 ```
 
 ### `static int enc_kv_cache_grow(vox_ctx_t *ctx, int required)`
-
-Original source lines 350-387. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Grows the encoder's incremental K/V cache by doubling enc_kv_cache_max and
 re-packing existing rows across the new per-layer stride. Refuses to grow
@@ -644,8 +622,6 @@ static int enc_kv_cache_grow(vox_ctx_t *ctx, int required) {
 
 ### `static void enc_kv_cache_compact(vox_ctx_t *ctx)`
 
-Original source lines 388-407. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Sliding-window eviction for the encoder cache: keeps the last VOX_ENC_WINDOW rows
 per layer via memmove to position 0 and bumps enc_kv_pos_offset by the discarded
 count, leaving baked-in RoPE valid. Mirrors the decoder's kv_cache_compact but
@@ -676,8 +652,6 @@ static void enc_kv_cache_compact(vox_ctx_t *ctx) {
 
 ### `static int enc_realloc_float(float **ptr, size_t elems)`
 
-Original source lines 408-414. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Overflow-aware helper for growing float scratch arrays while preserving existing
 contents.
 
@@ -693,8 +667,6 @@ static int enc_realloc_float(float **ptr, size_t elems) {
 
 ### `static int enc_realloc_int(int **ptr, size_t elems)`
 
-Original source lines 415-422. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Equivalent growth helper for absolute-position arrays.
 
 ```{.c .numberLines startFrom="415"}
@@ -709,8 +681,6 @@ static int enc_realloc_int(int **ptr, size_t elems) {
 ```
 
 ### `static int enc_inc_ensure_buffers(vox_ctx_t *ctx, int new_len)`
-
-Original source lines 423-451. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Ensures every incremental encoder scratch/output/position buffer can hold the
 next chunk as one transaction; failure prevents partial inference.
@@ -748,8 +718,6 @@ static int enc_inc_ensure_buffers(vox_ctx_t *ctx, int new_len) {
 ```
 
 ### `float *vox_encoder_forward_incremental(…)`
-
-Original source lines 452-580. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Streaming encoder step: compacts/grows the KV cache for new_len incoming frames,
 runs RoPE at logical positions enc_kv_pos_offset+cache_len, projects Q/K/V only
@@ -890,9 +858,7 @@ float *vox_encoder_forward_incremental(vox_ctx_t *ctx, const float *x_new,
 
 ```
 
-### Continuation of the surrounding declaration (lines 581-641)
-
-Original source lines 581-641. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+### Continuation of `float *vox_encoder_forward_incremental(…)` {.unnumbered .unlisted}
 
 ```{.c .numberLines startFrom="581"}
         /* Output projection + residual */
@@ -960,8 +926,6 @@ Original source lines 581-641. The boundary follows a declaration or a paginatio
 
 ### `float *vox_adapter_forward(…)`
 
-Original source lines 642-674. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Bridges encoder to decoder: downsamples 4x by concatenating every group of 4
 encoder frames into one 5120-d vector, then applies Linear(5120->3072) -> GELU ->
 Linear(3072->3072) with bf16 weights to produce decoder-dimension embeddings.
@@ -1018,7 +982,7 @@ the corresponding logical base would silently corrupt attention.
 
 Length: 706 lines. SHA-256: `d1a66eec98966a7dacfe20574fefb7575a2d814a76580af0f9d781596e13ae1a`.
 
-### Declaration map
+### Declaration map {.unnumbered .unlisted}
 
 This map gives the reading spine of the file. Line numbers refer to the original source and to the numbered listings below.
 
@@ -1042,9 +1006,9 @@ This map gives the reading spine of the file. Line numbers refer to the original
 | 565 | `static void ensure_dec_buffers(vox_ctx_t *ctx) {` |
 | 586 | `int vox_decoder_forward(vox_ctx_t *ctx, const float *input_embeds, float *logits) {` |
 
-### Continuation of the surrounding declaration (lines 1-30)
+### Translation-unit preamble {.unnumbered .unlisted}
 
-Original source lines 1-30. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+This translation-unit preamble selects dependencies, compile-time features, and file-local constants used by the definitions that follow.
 
 ```{.c .numberLines startFrom="1"}
 /*
@@ -1081,8 +1045,6 @@ Original source lines 1-30. The boundary follows a declaration or a pagination b
 
 ### `static float *load_f32(safetensors_file_t *sf, const char *name)`
 
-Original source lines 31-39. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Finds a named tensor and materializes an owned FP32 copy for decoder fields that
 require float storage. Missing or incompatible weights fail model load.
 
@@ -1100,8 +1062,6 @@ static float *load_f32(safetensors_file_t *sf, const char *name) {
 
 ### `static uint16_t *load_bf16_direct(safetensors_file_t *sf, const char *name)`
 
-Original source lines 40-48. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Finds a named BF16 tensor and stores a zero-copy pointer into the safetensors
 mapping. Mapping lifetime therefore dominates decoder lifetime.
 
@@ -1118,8 +1078,6 @@ static uint16_t *load_bf16_direct(safetensors_file_t *sf, const char *name) {
 ```
 
 ### `int vox_decoder_load(vox_decoder_t *dec, safetensors_file_t *sf)`
-
-Original source lines 49-113. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Loads all 26 decoder layers from the safetensors file: large matmul weights
 (wq/wk/wv/wo, FFN w1/w2/w3, and the tied token embeddings) are kept as mmap'd
@@ -1197,8 +1155,6 @@ int vox_decoder_load(vox_decoder_t *dec, safetensors_file_t *sf) {
 
 ### `static inline float f16_to_f32(uint16_t h)`
 
-Original source lines 114-142. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Scalar IEEE half-to-single widening used when materializing an fp16 KV cache into
 fp32, handling subnormals, inf/NaN (exp==0x1F), and the 127-15 exponent rebias.
 This is true fp16, distinct from the bf16 widening (shift-left-16) used for
@@ -1238,8 +1194,6 @@ static inline float f16_to_f32(uint16_t h) {
 
 ### `static int kv_cache_is_allocated(const vox_ctx_t *ctx)`
 
-Original source lines 143-150. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Checks that the decoder's selected cache representation and required layer
 pointers exist before generation begins.
 
@@ -1256,8 +1210,6 @@ static int kv_cache_is_allocated(const vox_ctx_t *ctx) {
 
 ### `static float *kv_cache_k_at(vox_ctx_t *ctx, int layer, int pos)`
 
-Original source lines 151-155. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Computes the FP32 key-cache row address for one layer and logical position.
 
 ```{.c .numberLines startFrom="151"}
@@ -1269,8 +1221,6 @@ static float *kv_cache_k_at(vox_ctx_t *ctx, int layer, int pos) {
 ```
 
 ### `static float *kv_cache_v_at(vox_ctx_t *ctx, int layer, int pos)`
-
-Original source lines 156-160. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Computes the FP32 value-cache row address using the same capacity/stride layout.
 
@@ -1284,8 +1234,6 @@ static float *kv_cache_v_at(vox_ctx_t *ctx, int layer, int pos) {
 
 ### `static uint16_t *kv_cache_k_f16_at(vox_ctx_t *ctx, int layer, int pos)`
 
-Original source lines 161-165. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Returns the FP16 key row when compact cache storage is active.
 
 ```{.c .numberLines startFrom="161"}
@@ -1298,8 +1246,6 @@ static uint16_t *kv_cache_k_f16_at(vox_ctx_t *ctx, int layer, int pos) {
 
 ### `static uint16_t *kv_cache_v_f16_at(vox_ctx_t *ctx, int layer, int pos)`
 
-Original source lines 166-170. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Returns the corresponding FP16 value row.
 
 ```{.c .numberLines startFrom="166"}
@@ -1311,8 +1257,6 @@ static uint16_t *kv_cache_v_f16_at(vox_ctx_t *ctx, int layer, int pos) {
 ```
 
 ### `static int kv_cache_init(vox_ctx_t *ctx, int max_seq)`
-
-Original source lines 171-207. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Allocates the per-layer K and V caches sized VOX_DEC_LAYERS * max_seq * (8*128)
 elements, choosing fp16 vs fp32 storage and Metal-shared vs calloc memory based
@@ -1361,8 +1305,6 @@ static int kv_cache_init(vox_ctx_t *ctx, int max_seq) {
 
 ### `int vox_decoder_kv_cache_preallocate(vox_ctx_t *ctx, int max_seq)`
 
-Original source lines 208-213. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Idempotent wrapper that allocates the KV cache at max_seq only if not already
 present, so the caller can reserve capacity up front and avoid mid-stream grow
 copies. Returns 0 when the cache already exists.
@@ -1377,8 +1319,6 @@ int vox_decoder_kv_cache_preallocate(vox_ctx_t *ctx, int max_seq) {
 ```
 
 ### `static int kv_cache_grow(vox_ctx_t *ctx, int required)`
-
-Original source lines 214-316. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Doubles kv_cache_max until it covers the requirement, allocates fresh K/V buffers
 (fp16 or fp32, shared or heap to match the current mode), and copies the first
@@ -1494,8 +1434,6 @@ static int kv_cache_grow(vox_ctx_t *ctx, int required) {
 
 ### `static void kv_cache_compact(vox_ctx_t *ctx)`
 
-Original source lines 317-349. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Sliding-window eviction: when length exceeds VOX_DEC_WINDOW it memmoves the last
 VOX_DEC_WINDOW K/V rows of each layer down to position 0 and advances
 kv_pos_offset by the number discarded. Because RoPE is already baked into the
@@ -1539,8 +1477,6 @@ static void kv_cache_compact(vox_ctx_t *ctx) {
 ```
 
 ### `static int kv_cache_switch_to_fp32(vox_ctx_t *ctx)`
-
-Original source lines 350-409. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 One-way conversion from an fp16 KV cache to fp32: allocates new f32 K/V buffers,
 widens the first kv_cache_len rows of every layer via f16_to_f32, frees the fp16
@@ -1611,8 +1547,6 @@ static int kv_cache_switch_to_fp32(vox_ctx_t *ctx) {
 ```
 
 ### `void vox_decoder_prefill(vox_ctx_t *ctx, const float *input_embeds, int seq_len)`
-
-Original source lines 410-564. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Prefill processes multiple prompt positions and writes their per-layer KV
 entries. It amortizes setup compared with token-by-token forward execution.
@@ -1778,8 +1712,6 @@ void vox_decoder_prefill(vox_ctx_t *ctx, const float *input_embeds, int seq_len)
 
 ### `static void ensure_dec_buffers(vox_ctx_t *ctx)`
 
-Original source lines 565-585. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Lazily allocates the persistent single-token scratch (x, x_norm, q/k/v, attn_out,
 proj_out, gate/up, ffn_out, rope_freqs) sized for one position and caches them on
 ctx, so per-token generation reuses them instead of malloc/free each step.
@@ -1809,8 +1741,6 @@ static void ensure_dec_buffers(vox_ctx_t *ctx) {
 ```
 
 ### `int vox_decoder_forward(vox_ctx_t *ctx, const float *input_embeds, float *logits)`
-
-Original source lines 586-706. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Forward computes one autoregressive step from the new embedding and existing
 cache, writes the new K/V rows, performs the greedy argmax internally, and
@@ -1949,7 +1879,7 @@ Read this file as one ownership unit. The source is divided at declaration bound
 
 Length: 165 lines. SHA-256: `342cfec4a28d68e28e62206900aa781ea69df6f9cd04c6644ef83106a16004bc`.
 
-### Declaration map
+### Declaration map {.unnumbered .unlisted}
 
 This map gives the reading spine of the file. Line numbers refer to the original source and to the numbered listings below.
 
@@ -1982,9 +1912,9 @@ This map gives the reading spine of the file. Line numbers refer to the original
 | 163 | `extern int vox_monitor;` |
 | 165 | `#endif /* VOXTRAL_KERNELS_H */` |
 
-### Continuation of the surrounding declaration (lines 1-7)
+### Header preamble {.unnumbered .unlisted}
 
-Original source lines 1-7. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+This preamble contains comments and preprocessing setup that apply to the complete public header. It introduces no runtime state.
 
 ```{.c .numberLines startFrom="1"}
 /*
@@ -1998,15 +1928,11 @@ Original source lines 1-7. The boundary follows a declaration or a pagination br
 
 ### `#ifndef VOXTRAL_KERNELS_H`
 
-Original source lines 8-8. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 ```{.c .numberLines startFrom="8"}
 #ifndef VOXTRAL_KERNELS_H
 ```
 
 ### `#define VOXTRAL_KERNELS_H`
-
-Original source lines 9-17. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 ```{.c .numberLines startFrom="9"}
 #define VOXTRAL_KERNELS_H
@@ -2022,8 +1948,6 @@ Original source lines 9-17. The boundary follows a declaration or a pagination b
 
 ### `void vox_add_inplace(float *a, const float *b, int n);`
 
-Original source lines 18-18. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Elementwise residual primitive `a[i] += b[i]`, modifying only `a`. Equal length
 and non-overlapping storage are caller obligations.
 
@@ -2033,8 +1957,6 @@ void vox_add_inplace(float *a, const float *b, int n);
 
 ### `void vox_mul_inplace(float *a, const float *b, int n);`
 
-Original source lines 19-19. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Elementwise gate/product primitive `a[i] *= b[i]`.
 
 ```{.c .numberLines startFrom="19"}
@@ -2042,8 +1964,6 @@ void vox_mul_inplace(float *a, const float *b, int n);
 ```
 
 ### `void vox_axpy(float *a, float scale, const float *b, int n);`
-
-Original source lines 20-20. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 BLAS-style operation `a += scale * b`, used for scaled residual accumulation.
 
@@ -2053,8 +1973,6 @@ void vox_axpy(float *a, float scale, const float *b, int n);
 
 ### `void vox_scale(float *x, float s, int n);`
 
-Original source lines 21-21. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Multiplies one vector in place by a scalar.
 
 ```{.c .numberLines startFrom="21"}
@@ -2062,8 +1980,6 @@ void vox_scale(float *x, float s, int n);
 ```
 
 ### `void vox_copy(float *dst, const float *src, int n);`
-
-Original source lines 22-31. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Copies `n` float elements from source to destination with the implementation's
 defined overlap assumptions.
@@ -2083,8 +1999,6 @@ void vox_copy(float *dst, const float *src, int n);
 
 ### `void vox_matmul(float *C, const float *A, const float *B, int M, int K, int N);`
 
-Original source lines 32-37. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Computes row-major `C[M,N] = A[M,K] * B[K,N]`.
 
 ```{.c .numberLines startFrom="32"}
@@ -2097,8 +2011,6 @@ void vox_matmul(float *C, const float *A, const float *B, int M, int K, int N);
 ```
 
 ### `void vox_matmul_t(float *C, const float *A, const float *B, int M, int K, int N);`
-
-Original source lines 38-43. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Computes with the stored right matrix interpreted as transposed, matching the
 row-major checkpoint weight layout without materializing a transpose.
@@ -2114,8 +2026,6 @@ void vox_matmul_t(float *C, const float *A, const float *B, int M, int K, int N)
 
 ### `void vox_linear(…)`
 
-Original source lines 44-46. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Applies a dense projection and optional bias over one or more input rows.
 
 ```{.c .numberLines startFrom="44"}
@@ -2125,8 +2035,6 @@ void vox_linear(float *y, const float *x, const float *W, const float *b,
 ```
 
 ### `void vox_linear_nobias(…)`
-
-Original source lines 47-53. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Dense projection variant for architecture layers whose checkpoint has no bias.
 
@@ -2142,8 +2050,6 @@ void vox_linear_nobias(float *y, const float *x, const float *W,
 
 ### `void vox_linear_nobias_bf16(…)`
 
-Original source lines 54-60. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Projects with BF16 stored weights while accumulating/outputting float.
 
 ```{.c .numberLines startFrom="54"}
@@ -2158,8 +2064,6 @@ void vox_linear_nobias_bf16(float *y, const float *x, const uint16_t *W_bf16,
 
 ### `void vox_linear_bf16(…)`
 
-Original source lines 61-67. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 BF16-weight projection plus float bias.
 
 ```{.c .numberLines startFrom="61"}
@@ -2173,8 +2077,6 @@ void vox_linear_bf16(float *y, const float *x, const uint16_t *W_bf16,
 ```
 
 ### `void vox_matmul_t_bf16(…)`
-
-Original source lines 68-81. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Batched matrix product against transposed BF16 weights with float accumulation.
 
@@ -2197,8 +2099,6 @@ void vox_matmul_t_bf16(float *C, const float *A, const uint16_t *B_bf16,
 
 ### `void vox_conv1d(…)`
 
-Original source lines 82-90. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 General one-dimensional convolution over sequence/channel tensors.
 
 ```{.c .numberLines startFrom="82"}
@@ -2214,8 +2114,6 @@ void vox_conv1d(float *out, const float *in, const float *weight, const float *b
 ```
 
 ### `void vox_causal_conv1d(…)`
-
-Original source lines 91-102. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Causal convolution whose output position never reads future input positions.
 
@@ -2236,8 +2134,6 @@ void vox_causal_conv1d(float *out, const float *in, const float *weight, const f
 
 ### `void vox_rms_norm(…)`
 
-Original source lines 103-110. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 RMS normalization with learned weight and epsilon, without mean subtraction.
 
 ```{.c .numberLines startFrom="103"}
@@ -2253,8 +2149,6 @@ void vox_rms_norm(float *out, const float *x, const float *weight,
 
 ### `void vox_silu(float *x, int n);`
 
-Original source lines 111-113. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 In-place Sigmoid Linear Unit activation.
 
 ```{.c .numberLines startFrom="111"}
@@ -2265,8 +2159,6 @@ void vox_silu(float *x, int n);
 
 ### `void vox_gelu(float *x, int n);`
 
-Original source lines 114-116. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 In-place Gaussian Error Linear Unit approximation used by encoder layers.
 
 ```{.c .numberLines startFrom="114"}
@@ -2276,8 +2168,6 @@ void vox_gelu(float *x, int n);
 ```
 
 ### `void vox_softmax(float *x, int rows, int cols);`
-
-Original source lines 117-137. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Normalizes each row with a max-subtracted exponential for numerical stability.
 
@@ -2307,8 +2197,6 @@ void vox_softmax(float *x, int rows, int cols);
 
 ### `void vox_causal_attention(…)`
 
-Original source lines 138-151. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Reference causal attention over Q/K/V with head geometry and position limits
 supplied explicitly by the caller.
 
@@ -2331,8 +2219,6 @@ void vox_causal_attention(float *out, const float *Q, const float *K, const floa
 
 ### `void vox_compute_rope_freqs(float *freqs, const int *pos, int seq, int dim, float theta);`
 
-Original source lines 152-158. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Builds sine/cosine rotary frequencies from absolute positions and theta.
 
 ```{.c .numberLines startFrom="152"}
@@ -2347,8 +2233,6 @@ void vox_compute_rope_freqs(float *freqs, const int *pos, int seq, int dim, floa
 
 ### `void vox_apply_rope(float *x, const float *freqs, int seq, int heads, int head_dim);`
 
-Original source lines 159-161. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Applies interleaved GPT-J-style rotary pairs to every head in place.
 
 ```{.c .numberLines startFrom="159"}
@@ -2359,15 +2243,11 @@ void vox_apply_rope(float *x, const float *freqs, int seq, int heads, int head_d
 
 ### `extern int vox_verbose;`
 
-Original source lines 162-162. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 ```{.c .numberLines startFrom="162"}
 extern int vox_verbose;
 ```
 
 ### `extern int vox_monitor;`
-
-Original source lines 163-164. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 ```{.c .numberLines startFrom="163"}
 extern int vox_monitor;
@@ -2375,8 +2255,6 @@ extern int vox_monitor;
 ```
 
 ### `#endif /* VOXTRAL_KERNELS_H */`
-
-Original source lines 165-165. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 ```{.c .numberLines startFrom="165"}
 #endif /* VOXTRAL_KERNELS_H */
@@ -2397,7 +2275,7 @@ upper 16 bits of IEEE-754 float representation; it is not IEEE half precision.
 
 Length: 526 lines. SHA-256: `d8d4d2925fc2ee7206cc44d12802328478b47425670255d2d56e4ac689701132`.
 
-### Declaration map
+### Declaration map {.unnumbered .unlisted}
 
 This map gives the reading spine of the file. Line numbers refer to the original source and to the numbered listings below.
 
@@ -2428,9 +2306,9 @@ This map gives the reading spine of the file. Line numbers refer to the original
 | 488 | `void vox_compute_rope_freqs(float *freqs, const int *pos, int seq, int dim, float theta) {` |
 | 502 | `void vox_apply_rope(float *x, const float *freqs, int seq, int heads, int head_dim) {` |
 
-### Continuation of the surrounding declaration (lines 1-29)
+### Translation-unit preamble {.unnumbered .unlisted}
 
-Original source lines 1-29. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+This translation-unit preamble selects dependencies, compile-time features, and file-local constants used by the definitions that follow.
 
 ```{.c .numberLines startFrom="1"}
 /*
@@ -2466,8 +2344,6 @@ Original source lines 1-29. The boundary follows a declaration or a pagination b
 
 ### `void vox_add_inplace(float *a, const float *b, int n)`
 
-Original source lines 30-33. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Scalar elementwise residual addition; Accelerate may vectorize larger composite
 paths, but this loop defines exact aliasing and arithmetic semantics.
 
@@ -2480,8 +2356,6 @@ void vox_add_inplace(float *a, const float *b, int n) {
 
 ### `void vox_mul_inplace(float *a, const float *b, int n)`
 
-Original source lines 34-37. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Scalar elementwise multiplication used by gated feed-forward activations.
 
 ```{.c .numberLines startFrom="34"}
@@ -2492,8 +2366,6 @@ void vox_mul_inplace(float *a, const float *b, int n) {
 ```
 
 ### `void vox_axpy(float *a, float scale, const float *b, int n)`
-
-Original source lines 38-41. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Adds a scaled vector into another, matching the classic AXPY operation.
 
@@ -2506,8 +2378,6 @@ void vox_axpy(float *a, float scale, const float *b, int n) {
 
 ### `void vox_scale(float *x, float s, int n)`
 
-Original source lines 42-45. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Scales one float vector in place.
 
 ```{.c .numberLines startFrom="42"}
@@ -2518,8 +2388,6 @@ void vox_scale(float *x, float s, int n) {
 ```
 
 ### `void vox_copy(float *dst, const float *src, int n)`
-
-Original source lines 46-53. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Copies one float vector into distinct destination storage.
 
@@ -2535,8 +2403,6 @@ void vox_copy(float *dst, const float *src, int n) {
 ```
 
 ### `void vox_matmul(float *C, const float *A, const float *B, int M, int K, int N)`
-
-Original source lines 54-70. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Dense row-major C[M,N] = A[M,K] @ B[K,N], dispatching to cblas_sgemm when
 USE_BLAS is set and otherwise running the naive triple loop. B is laid out [K,N]
@@ -2565,8 +2431,6 @@ void vox_matmul(float *C, const float *A, const float *B, int M, int K, int N) {
 
 ### `void vox_matmul_t(float *C, const float *A, const float *B, int M, int K, int N)`
 
-Original source lines 71-87. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Computes C[M,N] = A[M,K] @ B[N,K]^T, i.e. B is stored row-major with each output
 column as a contiguous K-length row, which matches PyTorch nn.Linear weight
 layout. Both A and B rows are streamed contiguously in the inner loop, so this is
@@ -2593,8 +2457,6 @@ void vox_matmul_t(float *C, const float *A, const float *B, int M, int K, int N)
 ```
 
 ### `void vox_linear(…)`
-
-Original source lines 88-117. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Affine projection y[seq,out] = x[seq,in] @ W^T + b, where W is [out,in] row-major
 (PyTorch convention) and bias is optional. BLAS path uses CblasTrans on W then
@@ -2636,8 +2498,6 @@ void vox_linear(float *y, const float *x, const float *W, const float *b,
 
 ### `void vox_linear_nobias(…)`
 
-Original source lines 118-123. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Dispatches a no-bias dense layer through the float matrix multiplication path.
 
 ```{.c .numberLines startFrom="118"}
@@ -2650,8 +2510,6 @@ void vox_linear_nobias(float *y, const float *x, const float *W,
 ```
 
 ### `static void bf16_to_f32_buf(float *dst, const uint16_t *src, size_t n)`
-
-Original source lines 124-133. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Expands a BF16 array into caller-provided float storage for fallback kernels.
 
@@ -2669,8 +2527,6 @@ static size_t bf16_scratch_cap = 0;
 ```
 
 ### `static float *bf16_get_scratch(size_t n)`
-
-Original source lines 134-153. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Grows and reuses a process-global conversion scratch buffer. It reduces
 allocation churn but assumes serialized kernel use by the inference runtime.
@@ -2699,8 +2555,6 @@ static float *bf16_get_scratch(size_t n) {
 ```
 
 ### `static void bf16_matvec_fused(…)`
-
-Original source lines 154-196. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Single-row (seq=1) matvec y[out] = W_bf16[out,in] @ x[in] + bias that reads bf16
 weights and widens them to f32 in-register, avoiding the double memory pass of
@@ -2757,8 +2611,6 @@ static void bf16_matvec_fused(float *y, const float *x, const uint16_t *W_bf16,
 
 ### `void vox_linear_nobias_bf16(…)`
 
-Original source lines 197-215. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Bias-free linear with bf16 weights: dispatches to Metal if available, uses the
 fused bf16 matvec for seq_len==1, and otherwise expands W into the shared
 bf16_scratch f32 buffer before calling the f32 vox_linear_nobias. The scratch
@@ -2787,8 +2639,6 @@ void vox_linear_nobias_bf16(float *y, const float *x, const uint16_t *W_bf16,
 ```
 
 ### `void vox_linear_bf16(…)`
-
-Original source lines 216-241. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Same dispatch as the nobias variant but threads the optional bias through:
 Metal/seq==1 paths add it inline, the multi-row path passes it to vox_linear
@@ -2824,8 +2674,6 @@ void vox_linear_bf16(float *y, const float *x, const uint16_t *W_bf16,
 ```
 
 ### `void vox_matmul_t_bf16(…)`
-
-Original source lines 242-269. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 bf16-weight version of vox_matmul_t computing C[M,N] = A[M,K] @ B_bf16[N,K]^T.
 For M==1 it uses the fused matvec directly; for M>1 it widens B into the shared
@@ -2865,8 +2713,6 @@ void vox_matmul_t_bf16(float *C, const float *A, const uint16_t *B_bf16,
 
 ### `void vox_conv1d(…)`
 
-Original source lines 270-292. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Direct 1D convolution with explicit symmetric padding: out length is
 (length + 2*padding - kernel_size)/stride + 1, weights are [out_ch, in_ch, k] and
 both in and out are channel-major [C, L]. Out-of-range taps are skipped rather
@@ -2899,8 +2745,6 @@ void vox_conv1d(float *out, const float *in, const float *weight, const float *b
 ```
 
 ### `void vox_causal_conv1d(…)`
-
-Original source lines 293-345. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Causal (left-padded) conv1d matching vLLM's WhisperCausalConv1d, with
 padding_total = kernel_size - stride applied entirely on the left. It builds an
@@ -2966,8 +2810,6 @@ void vox_causal_conv1d(float *out, const float *in, const float *weight, const f
 
 ### `void vox_rms_norm(…)`
 
-Original source lines 346-368. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Per-row RMSNorm over [seq,hidden]: divides each row by sqrt(mean(x^2)+eps) then
 scales elementwise by the learned weight vector. eps is added inside the sqrt (to
 the mean-square), not to the rms, and there is no mean-subtraction or bias since
@@ -3001,8 +2843,6 @@ void vox_rms_norm(float *out, const float *x, const float *weight,
 
 ### `void vox_silu(float *x, int n)`
 
-Original source lines 369-375. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 In-place SiLU/swish activation x = x * sigmoid(x) over n elements, computed as
 x/(1+exp(-x)). Used as the gate nonlinearity in the SwiGLU FFNs of both encoder
 and decoder.
@@ -3018,8 +2858,6 @@ void vox_silu(float *x, int n) {
 ```
 
 ### `void vox_gelu(float *x, int n)`
-
-Original source lines 376-385. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 In-place tanh-approximation GELU: 0.5*x*(1+tanh(sqrt(2/pi)*(x+0.044715*x^3))),
 with the sqrt(2/pi) constant hardcoded. This is the activation for the conv-stem
@@ -3039,8 +2877,6 @@ void vox_gelu(float *x, int n) {
 ```
 
 ### `void vox_softmax(float *x, int rows, int cols)`
-
-Original source lines 386-411. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Numerically-stable row-wise softmax over an [rows,cols] matrix, done in place:
 subtract the per-row max before exp, then divide by the row sum. The standalone
@@ -3077,8 +2913,6 @@ void vox_softmax(float *x, int rows, int cols) {
 ```
 
 ### `void vox_causal_attention(…)`
-
-Original source lines 412-487. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Single-pass GQA attention producing out[seq_q, n_heads*head_dim] from Q and the
 cached K/V laid out [seq_k, n_kv_heads*head_dim]. Each query head h maps to KV
@@ -3168,8 +3002,6 @@ void vox_causal_attention(float *out, const float *Q, const float *K, const floa
 
 ### `void vox_compute_rope_freqs(float *freqs, const int *pos, int seq, int dim, float theta)`
 
-Original source lines 488-501. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Precomputes interleaved cos/sin RoPE coefficients into freqs[seq, head_dim/2, 2]
 for the given integer positions, with per-dimension frequency 1/theta^(2d/dim).
 Storing both cos and sin once per position lets vox_apply_rope stay branch-free.
@@ -3192,8 +3024,6 @@ void vox_compute_rope_freqs(float *freqs, const int *pos, int seq, int dim, floa
 ```
 
 ### `void vox_apply_rope(float *x, const float *freqs, int seq, int heads, int head_dim)`
-
-Original source lines 502-526. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Applies rotary embedding in place to x[seq, heads*head_dim] using the cos/sin
 pairs from vox_compute_rope_freqs. It rotates adjacent element pairs

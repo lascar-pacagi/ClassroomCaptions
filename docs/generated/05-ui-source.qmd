@@ -99,7 +99,7 @@ bearer URL visually; it does not add encryption or authentication.
 
 Length: 975 lines. SHA-256: `ef9502c8f3a153eb3d8a74e98555d7b383b7f491a57f183b055992c162f93eb3`.
 
-### Declaration map
+### Declaration map {.unnumbered .unlisted}
 
 This map gives the reading spine of the file. Line numbers refer to the original source and to the numbered listings below.
 
@@ -110,9 +110,9 @@ This map gives the reading spine of the file. Line numbers refer to the original
 | 491 | `private func formatMemory(_ bytes: UInt64) -> String {` |
 | 968 | `private func correctionBadge(for state: CaptionCorrectionState) -> some View {` |
 
-### Continuation of the surrounding declaration (lines 1-5)
+### Imports and file preamble {.unnumbered .unlisted}
 
-Original source lines 1-5. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+The file begins by importing `AppKit`, `ClassroomCaptionsCore`, `CoreImage`, `SwiftUI`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
 ```{.swift .numberLines startFrom="1"}
 import AppKit
@@ -123,8 +123,6 @@ import SwiftUI
 ```
 
 ### `struct DashboardView: View`
-
-Original source lines 6-120. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 The single SwiftUI dashboard, driven by an `@Bindable` `ClassroomAppModel`.
 Its `body` is a `NavigationSplitView` whose detail column stacks every settings
@@ -251,9 +249,7 @@ struct DashboardView: View {
 
 ```
 
-### Continuation of the surrounding declaration (lines 121-251)
-
-Original source lines 121-251. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+### Continuation of `struct DashboardView: View` {.unnumbered .unlisted}
 
 ```{.swift .numberLines startFrom="121"}
     private var iphoneSharing: some View {
@@ -389,9 +385,7 @@ Original source lines 121-251. The boundary follows a declaration or a paginatio
 
 ```
 
-### Continuation of the surrounding declaration (lines 252-362)
-
-Original source lines 252-362. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+### Continuation of `struct DashboardView: View` {.unnumbered .unlisted}
 
 ```{.swift .numberLines startFrom="252"}
                     if let url = model.studentQuestionURL {
@@ -508,8 +502,6 @@ Original source lines 252-362. The boundary follows a declaration or a paginatio
 ```
 
 ### `private func pairingQRCode(for url: URL) -> NSImage?`
-
-Original source lines 363-490. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Formats Gemma's resident footprint, but when the byte count is still nil it
 distinguishes "Detecting..." (server ready, identity not yet resolved) from
@@ -649,8 +641,6 @@ zero before the MLX process is found.
 
 ### `private func formatMemory(_ bytes: UInt64) -> String`
 
-Original source lines 491-619. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 The Gemma correction group: a Standard/Science mode picker, a previous-captions
 context stepper, and server/model/endpoint fields (disabled during an active or
 starting session). Shows readiness, queue depth, and last latency, and either
@@ -789,9 +779,7 @@ as quoted data and answer-like output is rejected.
 
 ```
 
-### Continuation of the surrounding declaration (lines 620-742)
-
-Original source lines 620-742. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+### Continuation of `private func formatMemory(_ bytes: UInt64) -> String` {.unnumbered .unlisted}
 
 ```{.swift .numberLines startFrom="620"}
                 Text(
@@ -919,9 +907,7 @@ Original source lines 620-742. The boundary follows a declaration or a paginatio
 
 ```
 
-### Continuation of the surrounding declaration (lines 743-858)
-
-Original source lines 743-858. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+### Continuation of `private func formatMemory(_ bytes: UInt64) -> String` {.unnumbered .unlisted}
 
 ```{.swift .numberLines startFrom="743"}
                 if let microphoneError = model.microphoneError {
@@ -1042,9 +1028,7 @@ Original source lines 743-858. The boundary follows a declaration or a paginatio
 
 ```
 
-### Continuation of the surrounding declaration (lines 859-967)
-
-Original source lines 859-967. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+### Continuation of `private func formatMemory(_ bytes: UInt64) -> String` {.unnumbered .unlisted}
 
 ```{.swift .numberLines startFrom="859"}
                 GridRow {
@@ -1160,8 +1144,6 @@ Original source lines 859-967. The boundary follows a declaration or a paginatio
 
 ### `private func correctionBadge(for state: CaptionCorrectionState) -> some View`
 
-Original source lines 968-975. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Renders the domain correction state as a compact capsule beside each recent
 caption. It is intentionally presentation-only: tapping or displaying the badge
 cannot mutate correction state.
@@ -1194,7 +1176,7 @@ truncated with an ellipsis.
 
 Length: 480 lines. SHA-256: `540455cc58f6ac0d492f1510d3de2fcc2612003adea8a85793fb0c161700b8ea`.
 
-### Declaration map
+### Declaration map {.unnumbered .unlisted}
 
 This map gives the reading spine of the file. Line numbers refer to the original source and to the numbered listings below.
 
@@ -1230,9 +1212,9 @@ This map gives the reading spine of the file. Line numbers refer to the original
 | 444 | `private func scrollToBottom(_ proxy: ScrollViewProxy) {` |
 | 476 | `private extension NSScreen {` |
 
-### Continuation of the surrounding declaration (lines 1-3)
+### Imports and file preamble {.unnumbered .unlisted}
 
-Original source lines 1-3. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+The file begins by importing `AppKit`, `SwiftUI`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
 ```{.swift .numberLines startFrom="1"}
 import AppKit
@@ -1241,8 +1223,6 @@ import SwiftUI
 ```
 
 ### `private final class OverlayInteractionView: NSView`
-
-Original source lines 4-4. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 A borderless `NSView` overlaid on the caption panel that owns only the move and
 resize gestures. It is non-opaque and reports drag translations via `onDrag`
@@ -1255,8 +1235,6 @@ private final class OverlayInteractionView: NSView {
 ```
 
 ### `enum Interaction`
-
-Original source lines 5-17. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Two gesture meanings share one transparent AppKit view. Capturing the choice at
 mouse-down prevents a drag from switching between move and resize as the pointer
@@ -1280,8 +1258,6 @@ crosses handle boundaries.
 
 ### `override func hitTest(_ point: NSPoint) -> NSView?`
 
-Original source lines 18-23. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 The click-through gate: returns self only when the point lands in the 42pt-tall
 top move strip or the 48x48 lower-right resize corner, and nil everywhere else.
 Returning nil lets the event pass to whatever is behind the overlay, so the
@@ -1299,8 +1275,6 @@ transparent to the mouse despite covering screen area.
 
 ### `override func acceptsFirstMouse(for event: NSEvent?) -> Bool`
 
-Original source lines 24-27. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Returns true so a drag on a handle works even when the overlay window is not the
 key/active window -- essential because the panel is a non-activating floater
 that never takes focus from the presenter's foreground app.
@@ -1313,8 +1287,6 @@ that never takes focus from the presenter's foreground app.
 ```
 
 ### `override func resetCursorRects()`
-
-Original source lines 28-39. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Registers an open-hand cursor over the top move strip and a crosshair over the
 resize corner. AppKit calls this when geometry changes, so cursor hit regions
@@ -1337,8 +1309,6 @@ track the current panel size.
 
 ### `override func mouseDown(with event: NSEvent)`
 
-Original source lines 40-49. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Classifies the gesture by testing whether the down point is inside the resize
 corner (`.resize`) versus anywhere else in the handle area (`.move`), records
 the absolute mouse location as the drag origin, and switches to the closed-hand
@@ -1359,8 +1329,6 @@ subsequent `mouseDragged` translation is measured from.
 ```
 
 ### `override func mouseDragged(with event: NSEvent)`
-
-Original source lines 50-61. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Computes the cumulative translation from `mouseDownLocation` to the current
 absolute mouse location and forwards it through `onDrag` with the active
@@ -1384,8 +1352,6 @@ which is why the controller re-derives the frame from a cached start frame.
 
 ### `override func mouseUp(with event: NSEvent)`
 
-Original source lines 62-68. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Ends the gesture, asks AppKit to recompute cursors, and notifies the controller
 to discard its cached start frame and persist final geometry.
 
@@ -1400,8 +1366,6 @@ to discard its cached start frame and persist final geometry.
 ```
 
 ### `final class CaptionOverlayController: NSObject, NSWindowDelegate`
-
-Original source lines 69-85. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 MainActor controller owning the floating caption `NSPanel`, the SwiftUI
 `NSHostingView`, and the `OverlayInteractionView`, plus the selected display and
@@ -1430,8 +1394,6 @@ final class CaptionOverlayController: NSObject, NSWindowDelegate {
 ```
 
 ### `override init()`
-
-Original source lines 86-146. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Builds the borderless non-activating panel (clear background, floating level,
 joins all spaces, survives full-screen and deactivation) and composes a
@@ -1506,8 +1468,6 @@ on top by Auto Layout. Wires the interaction view's `onDrag` to
 
 ### `func show(…)`
 
-Original source lines 147-173. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Updates the hosting view's root with the new lines, provisional text, question,
 pending count, and font size, then decides placement: on a display change it
 restores that display's saved frame, otherwise if the panel was hidden it
@@ -1546,8 +1506,6 @@ orders the panel front without activating.
 
 ### `func hide()`
 
-Original source lines 174-178. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Persists the last frame before ordering the nonactivating panel out. Hiding does
 not destroy the window or SwiftUI tree, so later show is fast and restores
 geometry.
@@ -1561,8 +1519,6 @@ geometry.
 ```
 
 ### `func resetFrame(on screen: NSScreen)`
-
-Original source lines 179-184. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Selects the target display, removes only that display's saved frame, and applies
 the computed default. Other projector/laptop geometry remains remembered.
@@ -1578,8 +1534,6 @@ the computed default. Other projector/laptop geometry remains remembered.
 
 ### `func windowDidMove(_ notification: Notification)`
 
-Original source lines 185-188. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Window-delegate callback that persists user-driven movement. Programmatic frame
 changes are filtered by `isApplyingFrame` inside `persistFrame`.
 
@@ -1592,8 +1546,6 @@ changes are filtered by `isApplyingFrame` inside `persistFrame`.
 
 ### `func windowDidResize(_ notification: Notification)`
 
-Original source lines 189-192. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Persists user-driven size changes through the same guarded path as movement.
 
 ```{.swift .numberLines startFrom="189"}
@@ -1604,8 +1556,6 @@ Persists user-driven size changes through the same guarded path as movement.
 ```
 
 ### `private func movePanel(by translation: CGSize)`
-
-Original source lines 193-205. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Applies a move drag: caches the frame at gesture start (so the absolute
 translation maps to a stable origin), offsets that origin by the translation,
@@ -1629,8 +1579,6 @@ are preserved; only the origin moves.
 ```
 
 ### `private func resizePanel(by translation: CGSize)`
-
-Original source lines 206-229. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Applies a resize drag from the lower-right corner: anchors the top edge
 (`start.maxY`) so the box grows downward and rightward, clamps new width/height
@@ -1667,8 +1615,6 @@ translation.height` because the corner is at the bottom.
 
 ### `private func finishInteraction()`
 
-Original source lines 230-238. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Clears the gesture's cached origin so the next drag starts from the then-current
 frame, and commits geometry to preferences once rather than on a stale origin.
 
@@ -1685,8 +1631,6 @@ frame, and commits geometry to preferences once rather than on a stale origin.
 ```
 
 ### `private func restoredFrame(on screen: NSScreen) -> NSRect`
-
-Original source lines 239-247. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Reads the selected display's serialized `NSRect`, falls back to first-run
 geometry when absent, and always clamps old preferences to the display's current
@@ -1706,8 +1650,6 @@ visible bounds.
 
 ### `private func persistFrame()`
 
-Original source lines 248-255. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Writes the panel's current frame to UserDefaults under the selected display's
 geometry key, but only when not mid-`applyFrame` and a display is selected. The
 `isApplyingFrame` guard is what prevents the delegate's move/resize callbacks
@@ -1726,8 +1668,6 @@ from re-saving frames the controller just set programmatically.
 
 ### `private func geometryKey(for displayID: CGDirectDisplayID) -> String`
 
-Original source lines 256-259. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Namespaces persisted rectangles by stable Core Graphics display ID, allowing
 different laptop/projector layouts to retain independent overlay positions.
 
@@ -1739,8 +1679,6 @@ different laptop/projector layouts to retain independent overlay positions.
 ```
 
 ### `private func applyFrame(_ frame: NSRect, on screen: NSScreen)`
-
-Original source lines 260-269. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Sets the panel frame while holding `isApplyingFrame` true so the resulting
 `windowDidMove`/`windowDidResize` delegate calls do not persist. It also clamps
@@ -1761,8 +1699,6 @@ user can never drag the box larger than the screen allows.
 ```
 
 ### `static func defaultFrame(on screen: NSScreen) -> NSRect`
-
-Original source lines 270-281. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Computes the first-run overlay rect: width clamped to 600-1200pt (or screen
 width minus margins), a fixed 220pt height, horizontally centered and seated
@@ -1785,8 +1721,6 @@ returns to.
 ```
 
 ### `static func clamped(_ frame: NSRect, to visibleFrame: NSRect) -> NSRect`
-
-Original source lines 282-301. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 The universal frame constraint: shrinks width/height to fit the visible frame
 minus margins (never below the minimum size, itself capped to available space),
@@ -1818,8 +1752,6 @@ can leave the panel partly off a display.
 ```
 
 ### `struct CaptionOverlayView: View`
-
-Original source lines 302-388. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Pure SwiftUI rendering of finalized lines, provisional text, question card,
 pending badge, and handles. Inputs are immutable values supplied by the
@@ -1917,8 +1849,6 @@ struct CaptionOverlayView: View {
 
 ### `private func captionText(_ text: String) -> some View`
 
-Original source lines 389-396. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Creates unrestricted multiline caption text with vertical intrinsic sizing.
 `fixedSize(horizontal:false, vertical:true)` prevents the old ellipsis behavior
 while still wrapping to panel width.
@@ -1935,8 +1865,6 @@ while still wrapping to panel width.
 ```
 
 ### `private func questionCard(_ question: String) -> some View`
-
-Original source lines 397-443. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Places the presented question in a visually distinct, independently scrollable
 orange card capped at 130 points, so a long question cannot push live captions
@@ -1994,8 +1922,6 @@ out of the overlay.
 
 ### `private func scrollToBottom(_ proxy: ScrollViewProxy)`
 
-Original source lines 444-475. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Scrolls the caption list to the bottom anchor on the next main-queue tick. The
 `DispatchQueue.main.async` defer lets SwiftUI finish applying the new lines
 before scrolling, so the newest caption is reliably in view rather than
@@ -2037,8 +1963,6 @@ scrolling against stale layout. Called on appear and on every content change.
 ```
 
 ### `private extension NSScreen`
-
-Original source lines 476-480. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Extracts the stable numeric display ID from AppKit's device-description
 dictionary for geometry persistence.

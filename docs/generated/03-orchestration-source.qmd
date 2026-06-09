@@ -137,7 +137,7 @@ long-lived owner graph rather than as an ordinary view.
 
 Length: 31 lines. SHA-256: `dcde1d8e9c8894ec65aa1a3e84310678863077d36eea20b2478af5a9a3185338`.
 
-### Declaration map
+### Declaration map {.unnumbered .unlisted}
 
 This map gives the reading spine of the file. Line numbers refer to the original source and to the numbered listings below.
 
@@ -145,9 +145,9 @@ This map gives the reading spine of the file. Line numbers refer to the original
 | ---: | --- |
 | 4 | `struct ClassroomCaptionsApp: App {` |
 
-### Continuation of the surrounding declaration (lines 1-2)
+### Imports and file preamble {.unnumbered .unlisted}
 
-Original source lines 1-2. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+The file begins by importing `SwiftUI`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
 ```{.swift .numberLines startFrom="1"}
 import SwiftUI
@@ -155,8 +155,6 @@ import SwiftUI
 ```
 
 ### `struct ClassroomCaptionsApp: App`
-
-Original source lines 3-31. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 The process composition root selected by `@main`. `@State` keeps one observable
 model alive while SwiftUI reconstructs view values. The window and menu-bar
@@ -220,7 +218,7 @@ so control phrases do not become lecture captions.
 
 Length: 1342 lines. SHA-256: `4c7a3cd004f9a48fd9b8c63072d941fb0b5677e9ffaa287b86c5c1af938b1007`.
 
-### Declaration map
+### Declaration map {.unnumbered .unlisted}
 
 This map gives the reading spine of the file. Line numbers refer to the original source and to the numbered listings below.
 
@@ -281,9 +279,9 @@ This map gives the reading spine of the file. Line numbers refer to the original
 | 1330 | `private extension NSScreen {` |
 | 1336 | `private extension Duration {` |
 
-### Continuation of the surrounding declaration (lines 1-6)
+### Imports and file preamble {.unnumbered .unlisted}
 
-Original source lines 1-6. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+The file begins by importing `AppKit`, `ClassroomCaptionsCore`, `Foundation`, `Observation`, `Synchronization`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
 ```{.swift .numberLines startFrom="1"}
 import AppKit
@@ -295,8 +293,6 @@ import Synchronization
 ```
 
 ### `struct DisplayChoice: Identifiable, Equatable`
-
-Original source lines 7-12. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 A stable UI projection of one `NSScreen`: Core Graphics display ID for
 persistence, localized name for selection, and global desktop frame for
@@ -312,8 +308,6 @@ struct DisplayChoice: Identifiable, Equatable {
 ```
 
 ### `enum TranscriptionBackend: String, CaseIterable, Identifiable`
-
-Original source lines 13-26. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 The user-selectable implementation choice. String raw values persist cleanly,
 `CaseIterable` drives the picker, and `Identifiable` uses the enum value itself.
@@ -338,8 +332,6 @@ enum TranscriptionBackend: String, CaseIterable, Identifiable {
 
 ### `struct ClassroomQuestion: Identifiable, Equatable`
 
-Original source lines 27-32. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Main-actor representation of an accepted anonymous question. It preserves server
 identity and timestamp for queue ordering but intentionally has no source
 address, ticket, or student identity.
@@ -354,8 +346,6 @@ struct ClassroomQuestion: Identifiable, Equatable {
 ```
 
 ### `final class ClassroomAppModel`
-
-Original source lines 33-128. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Main-actor observable coordinator for all user-visible state and cross-service
 workflows. `@Observable` drives SwiftUI invalidation; `@MainActor` is the actual
@@ -461,9 +451,7 @@ final class ClassroomAppModel {
             UserDefaults.standard.set(
 ```
 
-### Continuation of the surrounding declaration (lines 129-235)
-
-Original source lines 129-235. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+### Continuation of `final class ClassroomAppModel` {.unnumbered .unlisted}
 
 ```{.swift .numberLines startFrom="129"}
                 captionFontSize,
@@ -577,8 +565,6 @@ Original source lines 129-235. The boundary follows a declaration or a paginatio
 
 ### `private struct PendingCorrection`
 
-Original source lines 236-306. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Minimal FIFO work item: immutable segment identity plus the correction mode
 latched when queued. The worker re-reads caption/context by UUID, avoiding a
 second mutable copy of the segment.
@@ -659,8 +645,6 @@ second mutable copy of the segment.
 
 ### `init()`
 
-Original source lines 307-345. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Construction creates services once and installs value-returning callbacks.
 Callbacks that originate off the main actor re-enter it explicitly before
 touching observable state. The initializer also loads persisted settings, but
@@ -710,8 +694,6 @@ does not start microphone or model resources.
 
 ### `func refreshDisplays()`
 
-Original source lines 346-360. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Rebuilds display choices from current AppKit screens, repairs a missing/stale
 selection, and reprojects the overlay. This handles projector connection and
 desktop rearrangement without retaining obsolete screen objects.
@@ -736,8 +718,6 @@ desktop rearrangement without retaining obsolete screen objects.
 
 ### `func toggleSession()`
 
-Original source lines 361-364. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 UI convenience that selects start versus stop from derived lifecycle state.
 The full methods still enforce transition guards, so duplicate button/menu
 events remain harmless.
@@ -750,8 +730,6 @@ events remain harmless.
 ```
 
 ### `func startSession()`
-
-Original source lines 365-416. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Start is deliberately staged. It validates and latches settings, starts optional
 archive/correction preparation, and asks Voxtral to initialize. The domain
@@ -817,8 +795,6 @@ startup from consuming the first spoken audio without decoding it.
 
 ### `func pauseOrResume()`
 
-Original source lines 417-432. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Toggles between listening and paused on the value-type session: pausing gates
 audio input off via the `audioInputEnabled` mutex and flushes buffered audio so
 no half-utterance leaks across the pause, while resuming re-enables input. Each
@@ -845,8 +821,6 @@ refreshes the overlay. No-ops in any other phase.
 ```
 
 ### `func stopSession()`
-
-Original source lines 433-508. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Stop first closes the capture gate, cancels the periodic commit and silence-flush
 tasks, then stops microphone callbacks, flushes and drains Voxtral, accepts the
@@ -935,8 +909,6 @@ the last words survive.
 
 ### `func submitManualCaption()`
 
-Original source lines 509-523. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Development/accessibility fallback that finalizes typed text through the same
 domain and Gemma queue as speech. Empty/invalid input is rejected by the
 timeline; accepted text clears the editor and refreshes presentation.
@@ -961,8 +933,6 @@ timeline; accepted text clears the editor and refreshes presentation.
 
 ### `func previewProvisionalCaption()`
 
-Original source lines 524-530. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Projects typed text into the replaceable provisional slot without appending
 history, allowing overlay behavior to be tested without microphone/model input.
 
@@ -977,8 +947,6 @@ history, allowing overlay behavior to be tested without microphone/model input.
 ```
 
 ### `func clearSession()`
-
-Original source lines 531-571. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Tears down a finished session: stops capture, gates audio off, cancels the
 commit, silence-flush, and correction-worker tasks, drops pending corrections,
@@ -1032,8 +1000,6 @@ session is active or transitioning.
 
 ### `func revealLastSessionArchive()`
 
-Original source lines 572-576. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Asks Finder to reveal the last completed archive URL. It has no filesystem
 mutation and no effect before a successful finalize publishes a URL.
 
@@ -1046,8 +1012,6 @@ mutation and no effect before a successful finalize publishes a URL.
 ```
 
 ### `func refreshMicrophones()`
-
-Original source lines 577-586. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Re-enumerates current input devices, preserves a still-valid stable UID, and
 otherwise falls back to the system default or first device. This repairs state
@@ -1067,8 +1031,6 @@ after USB/Bluetooth hardware changes.
 ```
 
 ### `private func observeTranscriptionEvents()`
-
-Original source lines 587-609. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Cancels old observers, creates one task per backend stream, and filters events by
 the backend latched for the active session. A late event from an inactive
@@ -1101,8 +1063,6 @@ service therefore cannot mutate the current transcript.
 ```
 
 ### `private func handleVoxtralEvent(_ event: TranscriptionEvent)`
-
-Original source lines 610-671. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 This method is the reducer from backend events to domain transitions.
 Provisional and finalized text pass through spoken-command interception before
@@ -1175,8 +1135,6 @@ failure events are interpreted in light of whether stop was expected.
 ```
 
 ### `private func startMicrophoneAfterVoxtralConnection() async`
-
-Original source lines 672-761. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 This asynchronous handoff checks that the original start attempt is still
 current before opening hardware. The callback creates owned PCM data, updates
@@ -1278,8 +1236,6 @@ only while the capture gate remains open.
 
 ### `private func restartCommitTask()`
 
-Original source lines 762-773. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Runs the remote backend's periodic commit loop with a 100 ms lower bound.
 Cancellation is checked before and after sleeping so stop does not send a late
 commit into a replacement session.
@@ -1300,8 +1256,6 @@ commit into a replacement session.
 ```
 
 ### `private func noteEmbeddedVoiceActivity(level: Double)`
-
-Original source lines 774-786. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Implements silence-based commit for the embedded backend: any audio frame above
 the 0.06 level threshold (re)arms a 900ms timer, and if no louder frame arrives
@@ -1327,8 +1281,6 @@ on still-listening and still-embedded before flushing.
 
 ### `private func discardBufferedAudioAtPause()`
 
-Original source lines 787-799. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Creates a caption boundary before pause: embedded Voxtral is flushed and
 finalized asynchronously; the WebSocket buffer is committed. This prevents
 pre-pause audio from merging with speech after resume.
@@ -1351,8 +1303,6 @@ pre-pause audio from merging with speech after resume.
 
 ### `private func recordFirstCaptionLatencyIfNeeded()`
 
-Original source lines 800-804. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Records exactly the first visible-caption delay relative to microphone listening
 start. Later provisional revisions leave the metric unchanged.
 
@@ -1365,8 +1315,6 @@ start. Later provisional revisions leave the metric unchanged.
 ```
 
 ### `func correctionSettingChanged()`
-
-Original source lines 805-816. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Enabling correction clears prior error and begins warm-up. Disabling outside an
 active session cancels warm-up and stops an owned Gemma process; active-session
@@ -1389,8 +1337,6 @@ work is not torn down midway through its latched workflow.
 
 ### `func shutdown()`
 
-Original source lines 817-824. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 App-teardown hook that cancels the warmup, correction-worker, and diagnostics
 tasks and stops both the caption (iPhone sharing) server and the Gemma server.
 Releases the external processes and network listeners the model owns.
@@ -1407,8 +1353,6 @@ Releases the external processes and network listeners the model owns.
 ```
 
 ### `func toggleIPhoneSharing()`
-
-Original source lines 825-836. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Starts or stops the local caption web server. Stopping also disables question
 submissions first; starting clears any stale pairing URL, sets status to
@@ -1432,8 +1376,6 @@ snapshot so a phone that connects sees content right away.
 
 ### `func toggleStudentQuestions()`
 
-Original source lines 837-848. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Enables or disables anonymous student question submissions on the caption
 server, but refuses (setting a `.failed` status) unless iPhone sharing is
 already active, since questions ride the same server.
@@ -1455,8 +1397,6 @@ already active, since questions ride the same server.
 
 ### `func presentNextStudentQuestion()`
 
-Original source lines 849-855. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Pops the oldest pending question into `presentedStudentQuestion` (or nil if the
 queue is empty) and refreshes the overlay, forcing it visible only when a
 question was actually presented. The popped question leaves the pending queue.
@@ -1473,8 +1413,6 @@ question was actually presented. The popped question leaves the pending queue.
 
 ### `func dismissPresentedStudentQuestion()`
 
-Original source lines 856-860. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Clears only the question currently shown to the professor; pending questions
 remain queued for later presentation.
 
@@ -1488,8 +1426,6 @@ remain queued for later presentation.
 
 ### `func clearPendingStudentQuestions()`
 
-Original source lines 861-865. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Drops the not-yet-presented queue and refreshes the pending indicator without
 altering the question currently open in the overlay.
 
@@ -1502,8 +1438,6 @@ altering the question currently open in the overlay.
 ```
 
 ### `func diagnosticsSettingChanged()`
-
-Original source lines 866-888. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Starts or stops the 1Hz diagnostics poller. When on it samples the app footprint
 immediately, resolves the Gemma process identity, then loops every second
@@ -1537,8 +1471,6 @@ off it cancels the task.
 ```
 
 ### `private func warmCorrectionServer()`
-
-Original source lines 889-912. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Pre-launches the Gemma MLX server in the background so the first correction is
 not stalled by cold start. Guards on correction being enabled and no warmup
@@ -1575,8 +1507,6 @@ resolves its process identity, and clears errors; failures surface in
 
 ### `private func enqueueCorrection(_ segment: CaptionSegment)`
 
-Original source lines 913-929. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Appends a segment to the pending-correction queue keyed by its UUID and current
 mode, but only if the segment is `queued`, and rejects with `failCorrection`
 when the queue already holds 8 entries (back-pressure so a slow Gemma cannot
@@ -1605,8 +1535,6 @@ worker.
 
 ### `private func startCorrectionWorkerIfNeeded()`
 
-Original source lines 930-943. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 At most one worker drains the FIFO. The explicit queue bounds memory and makes
 Gemma latency predictable on a large local model. New segments can be appended
 while the worker is active without launching parallel generations.
@@ -1629,8 +1557,6 @@ while the worker is active without launching parallel generations.
 ```
 
 ### `private func correctSegment(…)`
-
-Original source lines 944-1009. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Correction snapshots context and configuration, marks the segment as
 `correcting`, measures latency and token usage, then applies only validator-
@@ -1708,8 +1634,6 @@ approved output to the matching UUID. Every thrown path delegates to
 
 ### `private func failCorrection(segmentID: UUID, message: String)`
 
-Original source lines 1010-1016. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Marks a segment's correction failed with a message on the value-type session,
 writes it back, and refreshes the overlay. The session's own `failCorrection`
 preserves the segment's `rawText`, so a failed correction falls back to the
@@ -1726,8 +1650,6 @@ uncorrected caption rather than losing it.
 ```
 
 ### `private func waitForCorrections() async`
-
-Original source lines 1017-1037. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Blocks the stop sequence until the correction worker drains or a 60-second
 deadline passes; on timeout it cancels the worker, fails every still-pending
@@ -1761,8 +1683,6 @@ forever on a stuck server.
 
 ### `private func gemmaConfiguration(…)`
 
-Original source lines 1038-1051. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Validates and returns the Gemma server triple (executable, model path,
 endpoint), throwing `invalidEndpoint` unless the endpoint is http on
 127.0.0.1/localhost with an explicit port. This is a hard loopback-only guard so
@@ -1787,8 +1707,6 @@ a correction request can never be aimed at a remote host.
 
 ### `func toggleOverlay()`
 
-Original source lines 1052-1059. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Manual visibility control. Showing regenerates current content and display
 selection rather than merely ordering a possibly stale panel forward.
 
@@ -1804,8 +1722,6 @@ selection rather than merely ordering a possibly stale panel forward.
 ```
 
 ### `private func resetLiveDiagnostics()`
-
-Original source lines 1060-1072. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Clears per-session token, latency, transformation, and Gemma counters while
 optionally resampling current app memory. It does not unload either model.
@@ -1828,8 +1744,6 @@ optionally resampling current app memory. It does not unload either model.
 
 ### `private func updateGemmaProcessIdentity(endpoint: URL)`
 
-Original source lines 1073-1081. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Finds the owned or externally listening Gemma PID and samples its resident
 memory. Failure remains `nil`, distinct from a false zero-byte footprint.
 
@@ -1846,8 +1760,6 @@ memory. Failure remains `nil`, distinct from a false zero-byte footprint.
 ```
 
 ### `private func consumeOverlayVoiceCommand(…)`
-
-Original source lines 1082-1150. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Potential command prefixes are held back while provisional recognition is
 incomplete. Completed commands are removed from the caption text and applied
@@ -1928,8 +1840,6 @@ appearing as lecture content.
 
 ### `private func applyOverlayVoiceCommand(…)`
 
-Original source lines 1151-1189. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Executes a recognized spoken overlay command. Show/hide directly drive the
 overlay; clear records that the overlay should resume after the next caption,
 sets a minimum-visible sequence so already-shown lines stay hidden, marks a
@@ -1981,8 +1891,6 @@ methods.
 
 ### `private func requestCaptionBoundaryForOverlayClear()`
 
-Original source lines 1190-1202. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 When clear is spoken during provisional text, forces the active backend to end
 that caption. The pending-clear flag then prevents old provisional content from
 immediately reappearing.
@@ -2005,8 +1913,6 @@ immediately reappearing.
 
 ### `private func resumeOverlayAfterClearIfNeeded(hasNewCaption: Bool)`
 
-Original source lines 1203-1212. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Waits for a genuinely new caption after the forced boundary, then restores
 visibility only if the overlay was visible before clear. Until finalization
 completes it refreshes in the hidden/filtered state.
@@ -2026,8 +1932,6 @@ completes it refreshes in the hidden/filtered state.
 
 ### `private func resetOverlayClearState()`
 
-Original source lines 1213-1219. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Atomically resets sequence filtering, boundary wait, remembered visibility, and
 provisional command-count state at new/cleared session boundaries.
 
@@ -2042,8 +1946,6 @@ provisional command-count state at new/cleared session boundaries.
 ```
 
 ### `func resetOverlayFrame()`
-
-Original source lines 1220-1229. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Resolves the selected screen, removes its persisted geometry, applies the
 controller's default frame, and makes the result visible for immediate feedback.
@@ -2062,8 +1964,6 @@ controller's default frame, and makes the result visible for immediate feedback.
 ```
 
 ### `func refreshOverlay(forceVisible: Bool = false)`
-
-Original source lines 1230-1260. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 The overlay receives a projection: recent finalized display text, provisional
 text, question state, visual settings, and diagnostics. The controller owns
@@ -2105,8 +2005,6 @@ window lifetime; the model supplies values and intent.
 
 ### `private func handleIPhoneSharingStatus(_ status: LocalCaptionServerStatus)`
 
-Original source lines 1261-1275. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Reduces server lifecycle values into dashboard URLs. Ready/connected states
 publish the current snapshot; nonready states clear stale capability URLs, and
 a full stop also resets question status.
@@ -2131,8 +2029,6 @@ a full stop also resets question status.
 
 ### `private func handleStudentQuestionStatus(…)`
 
-Original source lines 1276-1287. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Maintains the independently rotatable student URL: only `.ready` exposes it,
 while stopped and failed states remove stale capabilities from the dashboard.
 
@@ -2152,8 +2048,6 @@ while stopped and failed states remove stale capabilities from the dashboard.
 ```
 
 ### `private func receiveStudentQuestion(…)`
-
-Original source lines 1288-1299. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Appends an inbound `SubmittedClassroomQuestion` to the pending queue (capped at
 100 to bound memory against spam) and refreshes the overlay so the pending badge
@@ -2175,8 +2069,6 @@ updates. Runs on the main actor via the server's question callback.
 ```
 
 ### `private func publishRemoteCaptions(…)`
-
-Original source lines 1300-1329. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Builds and pushes a `RemoteCaptionSnapshot` to connected phones, bumping a
 monotonic revision (wrapping add) each call so clients can detect staleness.
@@ -2219,8 +2111,6 @@ when iPhone sharing is inactive.
 
 ### `private extension NSScreen`
 
-Original source lines 1330-1335. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Bridges AppKit's loosely typed device-description dictionary to the stable
 `CGDirectDisplayID` used for selection and per-display geometry keys.
 
@@ -2234,8 +2124,6 @@ private extension NSScreen {
 ```
 
 ### `private extension Duration`
-
-Original source lines 1336-1342. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Converts Swift's seconds/attoseconds representation to Foundation
 `TimeInterval` seconds for latency metrics.
@@ -2261,7 +2149,7 @@ as zero: zero would falsely mean the process consumes no memory.
 
 Length: 28 lines. SHA-256: `b829d47d0975d9fbcd08af89b32a34694e67768e4e00cb6491cdb906b5c28465`.
 
-### Declaration map
+### Declaration map {.unnumbered .unlisted}
 
 This map gives the reading spine of the file. Line numbers refer to the original source and to the numbered listings below.
 
@@ -2272,9 +2160,9 @@ This map gives the reading spine of the file. Line numbers refer to the original
 | 9 | `static func physicalFootprintBytes(processID: pid_t) -> UInt64? {` |
 | 13 | `private static func residentSizeBytes(processID: pid_t) -> UInt64? {` |
 
-### Continuation of the surrounding declaration (lines 1-3)
+### Imports and file preamble {.unnumbered .unlisted}
 
-Original source lines 1-3. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+The file begins by importing `Darwin`, `Foundation`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
 ```{.swift .numberLines startFrom="1"}
 import Darwin
@@ -2283,8 +2171,6 @@ import Foundation
 ```
 
 ### `enum ProcessMemory`
-
-Original source lines 4-4. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 A stateless namespace for reading a process's resident memory via the Darwin
 `proc_pidinfo` API. The diagnostics panel uses it to report both the app's own
@@ -2295,8 +2181,6 @@ enum ProcessMemory {
 ```
 
 ### `static func physicalFootprintBytes() -> UInt64?`
-
-Original source lines 5-8. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Convenience overload sampling the current process ID through the same Darwin
 implementation used for Gemma.
@@ -2310,8 +2194,6 @@ implementation used for Gemma.
 
 ### `static func physicalFootprintBytes(processID: pid_t) -> UInt64?`
 
-Original source lines 9-12. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Public PID overload that delegates to resident-size measurement and preserves
 failure as `nil`.
 
@@ -2323,8 +2205,6 @@ failure as `nil`.
 ```
 
 ### `private static func residentSizeBytes(processID: pid_t) -> UInt64?`
-
-Original source lines 13-28. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Calls `proc_pidinfo(PROC_PIDTASKINFO)` into a `proc_taskinfo` struct and returns
 its `pti_resident_size`, or nil if the call does not return the exact expected

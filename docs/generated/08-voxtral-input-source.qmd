@@ -86,7 +86,7 @@ Read this file as one ownership unit. The source is divided at declaration bound
 
 Length: 71 lines. SHA-256: `189ab9b53209e2f118c26e441058444451c2d36d38e95d268b3b1b57d7fa64f5`.
 
-### Declaration map
+### Declaration map {.unnumbered .unlisted}
 
 This map gives the reading spine of the file. Line numbers refer to the original source and to the numbered listings below.
 
@@ -109,9 +109,9 @@ This map gives the reading spine of the file. Line numbers refer to the original
 | 69 | `void vox_mel_free(vox_mel_ctx_t *ctx);` |
 | 71 | `#endif /* VOXTRAL_AUDIO_H */` |
 
-### Continuation of the surrounding declaration (lines 1-4)
+### Header preamble {.unnumbered .unlisted}
 
-Original source lines 1-4. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+This preamble contains comments and preprocessing setup that apply to the complete public header. It introduces no runtime state.
 
 ```{.c .numberLines startFrom="1"}
 /*
@@ -122,15 +122,11 @@ Original source lines 1-4. The boundary follows a declaration or a pagination br
 
 ### `#ifndef VOXTRAL_AUDIO_H`
 
-Original source lines 5-5. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 ```{.c .numberLines startFrom="5"}
 #ifndef VOXTRAL_AUDIO_H
 ```
 
 ### `#define VOXTRAL_AUDIO_H`
-
-Original source lines 6-11. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 ```{.c .numberLines startFrom="6"}
 #define VOXTRAL_AUDIO_H
@@ -143,8 +139,6 @@ Original source lines 6-11. The boundary follows a declaration or a pagination b
 
 ### `extern int vox_verbose_audio;`
 
-Original source lines 12-17. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 ```{.c .numberLines startFrom="12"}
 extern int vox_verbose_audio;
 
@@ -155,8 +149,6 @@ extern int vox_verbose_audio;
 ```
 
 ### `float *vox_load_wav(const char *path, int *out_n_samples);`
-
-Original source lines 18-21. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Loads a supported WAV and returns newly allocated normalized float samples;
 `out_n_samples` receives the length. The caller frees the buffer. File I/O is
@@ -170,8 +162,6 @@ float *vox_load_wav(const char *path, int *out_n_samples);
 ```
 
 ### `float *vox_parse_wav_buffer(const uint8_t *data, size_t size, int *out_n_samples);`
-
-Original source lines 22-26. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Parses a bounded RIFF/WAVE byte range and returns owned 16 kHz mono float
 samples. Unsupported channel, rate, encoding, or bit-depth combinations are
@@ -187,8 +177,6 @@ float *vox_parse_wav_buffer(const uint8_t *data, size_t size, int *out_n_samples
 
 ### `float *vox_read_pcm_stdin(int *out_n_samples);`
 
-Original source lines 27-33. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Reads raw little-endian signed PCM16 mono from standard input and returns an
 owned float array. This supports command-line tools; the GUI uses Core Audio.
 
@@ -203,8 +191,6 @@ float *vox_read_pcm_stdin(int *out_n_samples);
 ```
 
 ### `float *vox_mel_spectrogram(const float *samples, int n_samples, int *out_frames);`
-
-Original source lines 34-40. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 One-shot front end returning an owned row-major `[frames, 128]` log-Mel matrix.
 Streaming callers use `vox_mel_ctx_t`; this function defines equivalent batch
@@ -222,8 +208,6 @@ float *vox_mel_spectrogram(const float *samples, int n_samples, int *out_frames)
 
 ### `typedef struct vox_mel_ctx vox_mel_ctx_t;`
 
-Original source lines 41-45. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Opaque incremental feature state. It hides retained waveform tails, Mel rows,
 FFT/filter workspaces, absolute offsets, and finish state so callers cannot
 violate compaction invariants.
@@ -238,8 +222,6 @@ typedef struct vox_mel_ctx vox_mel_ctx_t;
 
 ### `vox_mel_ctx_t *vox_mel_ctx_init(int left_pad_samples);`
 
-Original source lines 46-49. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Allocates incremental state and inserts the requested left padding before real
 audio. That padding reproduces the model's trained boundary condition and is not
 counted as classroom speech.
@@ -252,8 +234,6 @@ vox_mel_ctx_t *vox_mel_ctx_init(int left_pad_samples);
 ```
 
 ### `int vox_mel_feed(vox_mel_ctx_t *ctx, const float *samples, int n_samples);`
-
-Original source lines 50-54. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Copies waveform samples into context storage and computes every newly complete
 analysis window. Success means input was accepted; zero new stable frames is a
@@ -269,8 +249,6 @@ int vox_mel_feed(vox_mel_ctx_t *ctx, const float *samples, int n_samples);
 
 ### `int vox_mel_finish(vox_mel_ctx_t *ctx, int right_pad_samples);`
 
-Original source lines 55-57. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Adds terminal right padding exactly once and computes the final windows. It
 establishes end-of-input, so feeding later samples would violate the context
 lifecycle.
@@ -282,8 +260,6 @@ int vox_mel_finish(vox_mel_ctx_t *ctx, int right_pad_samples);
 ```
 
 ### `float *vox_mel_data(vox_mel_ctx_t *ctx, int *out_n_frames);`
-
-Original source lines 58-61. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Returns a borrowed pointer to current contiguous Mel rows and writes their local
 count. Feed, discard, or free may invalidate the pointer.
@@ -297,8 +273,6 @@ float *vox_mel_data(vox_mel_ctx_t *ctx, int *out_n_frames);
 
 ### `int vox_mel_frame_offset(vox_mel_ctx_t *ctx);`
 
-Original source lines 62-65. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Returns the absolute frame represented by local row zero after compaction.
 Downstream code adds this offset so array movement never resets model position.
 
@@ -310,8 +284,6 @@ int vox_mel_frame_offset(vox_mel_ctx_t *ctx);
 ```
 
 ### `void vox_mel_discard_before(vox_mel_ctx_t *ctx, int keep_from_frame);`
-
-Original source lines 66-68. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Discards rows older than an absolute boundary, moves the retained suffix, and
 advances the frame offset. This bounds memory without changing retained rows'
@@ -325,8 +297,6 @@ void vox_mel_discard_before(vox_mel_ctx_t *ctx, int keep_from_frame);
 
 ### `void vox_mel_free(vox_mel_ctx_t *ctx);`
 
-Original source lines 69-70. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Releases all incremental waveform, feature, FFT, filter, and context storage.
 Every borrowed Mel pointer becomes invalid.
 
@@ -336,8 +306,6 @@ void vox_mel_free(vox_mel_ctx_t *ctx);
 ```
 
 ### `#endif /* VOXTRAL_AUDIO_H */`
-
-Original source lines 71-71. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 ```{.c .numberLines startFrom="71"}
 #endif /* VOXTRAL_AUDIO_H */
@@ -359,7 +327,7 @@ off-by-one mistakes between retained sample indices and absolute frame indices.
 
 Length: 672 lines. SHA-256: `aa356f3835fb23b6337ab9b7b186ce621c00b2923f019acdb9a28a745b1ec0c7`.
 
-### Declaration map
+### Declaration map {.unnumbered .unlisted}
 
 This map gives the reading spine of the file. Line numbers refer to the original source and to the numbered listings below.
 
@@ -385,9 +353,9 @@ This map gives the reading spine of the file. Line numbers refer to the original
 | 645 | `void vox_mel_discard_before(vox_mel_ctx_t *ctx, int keep_from_frame) {` |
 | 664 | `void vox_mel_free(vox_mel_ctx_t *ctx) {` |
 
-### Continuation of the surrounding declaration (lines 1-43)
+### Translation-unit preamble {.unnumbered .unlisted}
 
-Original source lines 1-43. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+This translation-unit preamble selects dependencies, compile-time features, and file-local constants used by the definitions that follow.
 
 ```{.c .numberLines startFrom="1"}
 /*
@@ -437,8 +405,6 @@ Original source lines 1-43. The boundary follows a declaration or a pagination b
 
 ### `static uint16_t read_u16(const uint8_t *p) { return p[0] | (p[1] << 8); }`
 
-Original source lines 44-44. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Decodes a little-endian 16-bit WAV field byte by byte, avoiding alignment and
 host-endianness assumptions. The parser checks bounds before calling it.
 
@@ -447,8 +413,6 @@ static uint16_t read_u16(const uint8_t *p) { return p[0] | (p[1] << 8); }
 ```
 
 ### `static uint32_t read_u32(const uint8_t *p) { return p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24); }`
-
-Original source lines 45-48. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Decodes a little-endian 32-bit RIFF field without casting an unaligned pointer.
 
@@ -460,8 +424,6 @@ static uint32_t read_u32(const uint8_t *p) { return p[0] | (p[1] << 8) | (p[2] <
 ```
 
 ### `float *vox_parse_wav_buffer(const uint8_t *data, size_t file_size, int *out_n_samples)`
-
-Original source lines 49-142. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 The parser walks RIFF chunks rather than assuming a fixed header layout. Every
 chunk length is bounds-checked, odd-byte padding is respected, and only the
@@ -566,8 +528,6 @@ float *vox_parse_wav_buffer(const uint8_t *data, size_t file_size, int *out_n_sa
 
 ### `float *vox_load_wav(const char *path, int *out_n_samples)`
 
-Original source lines 143-167. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Reads the file into owned memory, delegates all chunk and format validation to
 `vox_parse_wav_buffer`, then frees file bytes. Returned samples have independent
 ownership.
@@ -601,8 +561,6 @@ float *vox_load_wav(const char *path, int *out_n_samples) {
 ```
 
 ### `float *vox_read_pcm_stdin(int *out_n_samples)`
-
-Original source lines 168-222. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Grows a byte buffer while reading stdin, ignores an incomplete trailing byte,
 and converts complete `int16_t` values to float. Its input format is the fixed
@@ -668,8 +626,6 @@ float *vox_read_pcm_stdin(int *out_n_samples) {
 
 ### `static float hertz_to_mel(float freq)`
 
-Original source lines 223-234. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Maps physical frequency to the Mel coordinate used for filter placement.
 Changing this formula changes the checkpoint's expected feature distribution.
 
@@ -689,8 +645,6 @@ static float hertz_to_mel(float freq) {
 ```
 
 ### `static float mel_to_hertz(float mels)`
-
-Original source lines 235-247. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Inverts the selected Mel mapping so evenly spaced Mel band edges can be mapped
 back to FFT-bin frequencies.
@@ -712,8 +666,6 @@ static float mel_to_hertz(float mels) {
 ```
 
 ### `static float *build_mel_filters(void)`
-
-Original source lines 248-293. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Constructs the [128, 201] Slaney triangular mel filter bank as a caller-owned
 array. FFT bin centers span 0..8000 Hz; band edges are placed uniformly in mel
@@ -771,8 +723,6 @@ int vox_verbose_audio = 0;
 ```
 
 ### `float *vox_mel_spectrogram(const float *samples, int n_samples, int *out_frames)`
-
-Original source lines 294-404. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Computes a full [n_frames, 128] log-mel spectrogram in one shot, matching vLLM:
 center reflect-pad by n_fft/2, periodic Hann window, a direct DFT per frame over
@@ -896,8 +846,6 @@ float *vox_mel_spectrogram(const float *samples, int n_samples, int *out_frames)
 
 ### `struct vox_mel_ctx`
 
-Original source lines 405-431. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 State for incremental mel: precomputed filter bank, DFT cos/sin tables, and Hann
 window built once; a growing padded sample ring tracked by sample_offset; and a
 growing mel buffer tracked by mel_frame_offset. The two global offsets let old
@@ -936,8 +884,6 @@ struct vox_mel_ctx {
 
 ### `static void mel_compact_samples(vox_mel_ctx_t *ctx)`
 
-Original source lines 432-453. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Drops waveform samples that can no longer contribute to any future window,
 retains the unresolved tail, and advances its absolute sample origin. Compaction
 waits for enough progress to amortize the memory move.
@@ -968,8 +914,6 @@ static void mel_compact_samples(vox_mel_ctx_t *ctx) {
 ```
 
 ### `static int mel_compute_available(vox_mel_ctx_t *ctx)`
-
-Original source lines 454-514. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Drains every mel frame whose full window currently fits in the buffered samples,
 appending rows to the growing mel array and bumping n_mel_frames. Each frame
@@ -1043,8 +987,6 @@ static int mel_compute_available(vox_mel_ctx_t *ctx) {
 
 ### `vox_mel_ctx_t *vox_mel_ctx_init(int left_pad_samples)`
 
-Original source lines 515-559. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Constructs the filterbank, DFT tables, Hann window, dynamic buffers, and optional
 left padding. Failure unwinds partial allocations so null never represents a
 half-usable context.
@@ -1099,8 +1041,6 @@ vox_mel_ctx_t *vox_mel_ctx_init(int left_pad_samples) {
 
 ### `int vox_mel_feed(vox_mel_ctx_t *ctx, const float *samples, int n_samples)`
 
-Original source lines 560-583. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Feed appends samples, computes every newly complete analysis window, and keeps
 the unresolved waveform tail. Absolute frame offset is separate from the
 current compacted array index.
@@ -1133,8 +1073,6 @@ int vox_mel_feed(vox_mel_ctx_t *ctx, const float *samples, int n_samples) {
 ```
 
 ### `int vox_mel_finish(vox_mel_ctx_t *ctx, int right_pad_samples)`
-
-Original source lines 584-634. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Finalizes the incremental front end: appends optional trailing zeros, then 200
 samples of right reflect padding from the last real sample (mirroring
@@ -1197,8 +1135,6 @@ int vox_mel_finish(vox_mel_ctx_t *ctx, int right_pad_samples) {
 
 ### `float *vox_mel_data(vox_mel_ctx_t *ctx, int *out_n_frames)`
 
-Original source lines 635-640. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Publishes the context's internal row-major feature storage without copying.
 Callers consume it before the next mutation.
 
@@ -1213,8 +1149,6 @@ float *vox_mel_data(vox_mel_ctx_t *ctx, int *out_n_frames) {
 
 ### `int vox_mel_frame_offset(vox_mel_ctx_t *ctx)`
 
-Original source lines 641-644. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Returns the global frame index of mel[0], i.e. how many frames have already been
 discarded from the front. Callers add this to a local row index to recover an
 absolute mel position that survives compaction.
@@ -1227,8 +1161,6 @@ int vox_mel_frame_offset(vox_mel_ctx_t *ctx) {
 ```
 
 ### `void vox_mel_discard_before(vox_mel_ctx_t *ctx, int keep_from_frame)`
-
-Original source lines 645-663. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Converts an absolute keep position to a local row, moves the suffix, reduces the
 stored count, and advances `mel_frame_offset`. Boundaries already discarded are
@@ -1258,8 +1190,6 @@ void vox_mel_discard_before(vox_mel_ctx_t *ctx, int keep_from_frame) {
 
 ### `void vox_mel_free(vox_mel_ctx_t *ctx)`
 
-Original source lines 664-672. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Null-safe destruction of every allocation and Accelerate setup owned by the
 incremental front end.
 
@@ -1283,7 +1213,7 @@ Read this file as one ownership unit. The source is divided at declaration bound
 
 Length: 36 lines. SHA-256: `e6aba2f7e0cc7205c86c4c558522f00ee31c2dc853bf7f2ddae7dcd149d3556e`.
 
-### Declaration map
+### Declaration map {.unnumbered .unlisted}
 
 This map gives the reading spine of the file. Line numbers refer to the original source and to the numbered listings below.
 
@@ -1299,9 +1229,9 @@ This map gives the reading spine of the file. Line numbers refer to the original
 | 34 | `int vox_tokenizer_vocab_size(vox_tokenizer_t *tok);` |
 | 36 | `#endif /* VOXTRAL_TOKENIZER_H */` |
 
-### Continuation of the surrounding declaration (lines 1-7)
+### Header preamble {.unnumbered .unlisted}
 
-Original source lines 1-7. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+This preamble contains comments and preprocessing setup that apply to the complete public header. It introduces no runtime state.
 
 ```{.c .numberLines startFrom="1"}
 /*
@@ -1315,15 +1245,11 @@ Original source lines 1-7. The boundary follows a declaration or a pagination br
 
 ### `#ifndef VOXTRAL_TOKENIZER_H`
 
-Original source lines 8-8. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 ```{.c .numberLines startFrom="8"}
 #ifndef VOXTRAL_TOKENIZER_H
 ```
 
 ### `#define VOXTRAL_TOKENIZER_H`
-
-Original source lines 9-12. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 ```{.c .numberLines startFrom="9"}
 #define VOXTRAL_TOKENIZER_H
@@ -1333,8 +1259,6 @@ Original source lines 9-12. The boundary follows a declaration or a pagination b
 ```
 
 ### `typedef struct vox_tokenizer vox_tokenizer_t;`
-
-Original source lines 13-15. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Opaque tokenizer ownership boundary. The JSON schema and byte-piece table stay
 private while callers receive a small decode/query API.
@@ -1347,8 +1271,6 @@ typedef struct vox_tokenizer vox_tokenizer_t;
 
 ### `vox_tokenizer_t *vox_tokenizer_load(const char *path);`
 
-Original source lines 16-18. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Parses Tekken JSON into owned ID-to-byte-piece tables or returns null. The
 tokenizer must outlive every borrowed piece returned by single-token decode.
 
@@ -1359,8 +1281,6 @@ vox_tokenizer_t *vox_tokenizer_load(const char *path);
 ```
 
 ### `void vox_tokenizer_free(vox_tokenizer_t *tok);`
-
-Original source lines 19-22. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Releases all decoded pieces, metadata arrays, and the tokenizer object.
 
@@ -1373,8 +1293,6 @@ void vox_tokenizer_free(vox_tokenizer_t *tok);
 
 ### `const char *vox_tokenizer_decode(vox_tokenizer_t *tok, int token_id);`
 
-Original source lines 23-26. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Returns a borrowed byte piece for one valid ID. A piece may split a UTF-8 scalar,
 so consumers concatenate bytes before treating output as displayable Unicode.
 
@@ -1386,8 +1304,6 @@ const char *vox_tokenizer_decode(vox_tokenizer_t *tok, int token_id);
 ```
 
 ### `char *vox_tokenizer_decode_seq(vox_tokenizer_t *tok, const int *tokens, int n_tokens);`
-
-Original source lines 27-33. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Concatenates token pieces into one newly allocated NUL-terminated byte string.
 The caller frees the result.
@@ -1404,8 +1320,6 @@ int vox_tokenizer_eos(vox_tokenizer_t *tok);  /* End of sequence */
 
 ### `int vox_tokenizer_vocab_size(vox_tokenizer_t *tok);`
 
-Original source lines 34-35. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Returns the loaded ID-table extent for range checks, not a word count.
 
 ```{.c .numberLines startFrom="34"}
@@ -1414,8 +1328,6 @@ int vox_tokenizer_vocab_size(vox_tokenizer_t *tok);
 ```
 
 ### `#endif /* VOXTRAL_TOKENIZER_H */`
-
-Original source lines 36-36. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 ```{.c .numberLines startFrom="36"}
 #endif /* VOXTRAL_TOKENIZER_H */
@@ -1432,7 +1344,7 @@ complete displayed character. Control token IDs are model protocol, not text.
 
 Length: 392 lines. SHA-256: `953ee88a675d7c4225acf7e204032849c3932335fa52143474a4ba0f1cc19098`.
 
-### Declaration map
+### Declaration map {.unnumbered .unlisted}
 
 This map gives the reading spine of the file. Line numbers refer to the original source and to the numbered listings below.
 
@@ -1452,9 +1364,9 @@ This map gives the reading spine of the file. Line numbers refer to the original
 | 385 | `int vox_tokenizer_eos(vox_tokenizer_t *tok) {` |
 | 389 | `int vox_tokenizer_vocab_size(vox_tokenizer_t *tok) {` |
 
-### Continuation of the surrounding declaration (lines 1-28)
+### Translation-unit preamble {.unnumbered .unlisted}
 
-Original source lines 1-28. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+This translation-unit preamble selects dependencies, compile-time features, and file-local constants used by the definitions that follow.
 
 ```{.c .numberLines startFrom="1"}
 /*
@@ -1488,8 +1400,6 @@ extern int vox_verbose;
 ```
 
 ### `struct vox_tokenizer`
-
-Original source lines 29-60. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Holds two owned string tables: vocab (regular pieces, indexed by rank) and
 special (control tokens), each a decoded UTF-8 byte string. bos_id and eos_id are
@@ -1532,8 +1442,6 @@ static const int b64_table[256] = {
 
 ### `static int b64_decode(const char *in, char *out, int max_out)`
 
-Original source lines 61-87. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Minimal base64 decoder over a 256-entry lookup table: accumulates 6-bit groups
 and emits bytes into out, stopping at '=' padding and skipping any non-alphabet
 character. Used to turn each vocab entry's token_bytes field into raw token
@@ -1571,8 +1479,6 @@ static int b64_decode(const char *in, char *out, int max_out) {
 
 ### `static void skip_ws(const char **p)`
 
-Original source lines 88-91. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Advances the schema-specific JSON cursor over ASCII whitespace.
 
 ```{.c .numberLines startFrom="88"}
@@ -1583,8 +1489,6 @@ static void skip_ws(const char **p) {
 ```
 
 ### `static int parse_str(const char **p, char *out, int max_len)`
-
-Original source lines 92-139. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Parses a bounded JSON string with required escapes into caller storage and
 rejects malformed or oversized values.
@@ -1642,8 +1546,6 @@ static int parse_str(const char **p, char *out, int max_len) {
 
 ### `static long parse_long(const char **p)`
 
-Original source lines 140-151. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Consumes one signed decimal integer and advances the cursor; semantic token-ID
 ranges are checked by the caller.
 
@@ -1663,8 +1565,6 @@ static long parse_long(const char **p) {
 ```
 
 ### `static void skip_value(const char **p)`
-
-Original source lines 152-185. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Skips unneeded JSON scalars or balanced arrays/objects, allowing new metadata
 fields without allocating a complete JSON tree.
@@ -1707,8 +1607,6 @@ static void skip_value(const char **p) {
 ```
 
 ### `vox_tokenizer_t *vox_tokenizer_load(const char *path)`
-
-Original source lines 186-330. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Loads tekken.json fully into memory and walks the top-level object, populating
 the vocab table (base64 token_bytes decoded per rank, mapped to id 1000+rank) and
@@ -1866,8 +1764,6 @@ fail:
 
 ### `void vox_tokenizer_free(vox_tokenizer_t *tok)`
 
-Original source lines 331-343. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Frees each owned regular/special piece, their tables, and the context. The same
 path cleans partially populated objects after load failure.
 
@@ -1889,8 +1785,6 @@ void vox_tokenizer_free(vox_tokenizer_t *tok) {
 
 ### `const char *vox_tokenizer_decode(vox_tokenizer_t *tok, int token_id)`
 
-Original source lines 344-353. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Maps a single token id to its borrowed UTF-8 byte string: ids >= 1000 index the
 regular vocab at id-1000, ids 0..n_special index the special table, anything else
 yields NULL. The returned pointer is owned by the tokenizer and must not be freed.
@@ -1910,8 +1804,6 @@ const char *vox_tokenizer_decode(vox_tokenizer_t *tok, int token_id) {
 ```
 
 ### `char *vox_tokenizer_decode_seq(vox_tokenizer_t *tok, const int *tokens, int n_tokens)`
-
-Original source lines 354-380. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Totals piece lengths, allocates once, copies in token order, and appends NUL.
 Invalid IDs cannot index outside the tables.
@@ -1948,8 +1840,6 @@ char *vox_tokenizer_decode_seq(vox_tokenizer_t *tok, const int *tokens, int n_to
 
 ### `int vox_tokenizer_bos(vox_tokenizer_t *tok)`
 
-Original source lines 381-384. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Returns the model protocol's beginning-of-sequence control ID.
 
 ```{.c .numberLines startFrom="381"}
@@ -1961,8 +1851,6 @@ int vox_tokenizer_bos(vox_tokenizer_t *tok) {
 
 ### `int vox_tokenizer_eos(vox_tokenizer_t *tok)`
 
-Original source lines 385-388. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Returns the end-of-sequence ID used by decoder termination logic.
 
 ```{.c .numberLines startFrom="385"}
@@ -1973,8 +1861,6 @@ int vox_tokenizer_eos(vox_tokenizer_t *tok) {
 ```
 
 ### `int vox_tokenizer_vocab_size(vox_tokenizer_t *tok)`
-
-Original source lines 389-392. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Returns the context's vocabulary-table size for decoder range validation.
 
@@ -1993,7 +1879,7 @@ Read this file as one ownership unit. The source is divided at declaration bound
 
 Length: 87 lines. SHA-256: `dbabb127dd6413d9c39176692e920d995a52f1aea04b63c559b7edec3a99bb3d`.
 
-### Declaration map
+### Declaration map {.unnumbered .unlisted}
 
 This map gives the reading spine of the file. Line numbers refer to the original source and to the numbered listings below.
 
@@ -2018,9 +1904,9 @@ This map gives the reading spine of the file. Line numbers refer to the original
 | 85 | `void safetensors_print_all(const safetensors_file_t *sf);` |
 | 87 | `#endif /* VOXTRAL_SAFETENSORS_H */` |
 
-### Continuation of the surrounding declaration (lines 1-9)
+### Header preamble {.unnumbered .unlisted}
 
-Original source lines 1-9. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+This preamble contains comments and preprocessing setup that apply to the complete public header. It introduces no runtime state.
 
 ```{.c .numberLines startFrom="1"}
 /*
@@ -2036,15 +1922,11 @@ Original source lines 1-9. The boundary follows a declaration or a pagination br
 
 ### `#ifndef VOXTRAL_SAFETENSORS_H`
 
-Original source lines 10-10. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 ```{.c .numberLines startFrom="10"}
 #ifndef VOXTRAL_SAFETENSORS_H
 ```
 
 ### `#define VOXTRAL_SAFETENSORS_H`
-
-Original source lines 11-16. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 ```{.c .numberLines startFrom="11"}
 #define VOXTRAL_SAFETENSORS_H
@@ -2057,8 +1939,6 @@ Original source lines 11-16. The boundary follows a declaration or a pagination 
 
 ### `#define SAFETENSORS_MAX_TENSORS 1024`
 
-Original source lines 17-19. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 ```{.c .numberLines startFrom="17"}
 #define SAFETENSORS_MAX_TENSORS 1024
 
@@ -2066,8 +1946,6 @@ Original source lines 17-19. The boundary follows a declaration or a pagination 
 ```
 
 ### `typedef enum safetensor_dtype_t`
-
-Original source lines 20-30. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 ```{.c .numberLines startFrom="20"}
 typedef enum {
@@ -2085,8 +1963,6 @@ typedef enum {
 
 ### `typedef struct safetensor_t`
 
-Original source lines 31-40. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 ```{.c .numberLines startFrom="31"}
 typedef struct {
     char name[256];
@@ -2101,8 +1977,6 @@ typedef struct {
 ```
 
 ### `typedef struct safetensors_file_t`
-
-Original source lines 41-51. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 ```{.c .numberLines startFrom="41"}
 typedef struct {
@@ -2120,8 +1994,6 @@ typedef struct {
 
 ### `safetensors_file_t *safetensors_open(const char *path);`
 
-Original source lines 52-54. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Maps a file read-only, parses and validates its JSON header and every tensor
 range, then publishes a complete file object. Null means no mapping ownership
 escaped.
@@ -2134,8 +2006,6 @@ safetensors_file_t *safetensors_open(const char *path);
 
 ### `void safetensors_close(safetensors_file_t *sf);`
 
-Original source lines 55-57. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Unmaps bytes, closes the descriptor, and frees metadata ownership. It must
 outlive all direct BF16 pointers handed to model components.
 
@@ -2146,8 +2016,6 @@ void safetensors_close(safetensors_file_t *sf);
 ```
 
 ### `const safetensor_t *safetensors_find(const safetensors_file_t *sf, const char *name);`
-
-Original source lines 58-60. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Performs a name lookup in the parsed metadata table and returns a borrowed
 descriptor or null. Weight loaders use exact checkpoint names as the model ABI.
@@ -2160,8 +2028,6 @@ const safetensor_t *safetensors_find(const safetensors_file_t *sf, const char *n
 
 ### `const void *safetensors_data(const safetensors_file_t *sf, const safetensor_t *t);`
 
-Original source lines 61-64. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Returns a borrowed pointer to validated raw tensor bytes inside the mapping.
 No conversion or allocation occurs.
 
@@ -2173,8 +2039,6 @@ const void *safetensors_data(const safetensors_file_t *sf, const safetensor_t *t
 ```
 
 ### `float *safetensors_get_f32(const safetensors_file_t *sf, const safetensor_t *t);`
-
-Original source lines 65-68. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Returns a newly allocated FP32 copy, converting supported on-disk formats.
 Callers own and free it; this can double memory for large weights and is reserved
@@ -2189,8 +2053,6 @@ float *safetensors_get_f32(const safetensors_file_t *sf, const safetensor_t *t);
 
 ### `uint16_t *safetensors_get_bf16(const safetensors_file_t *sf, const safetensor_t *t);`
 
-Original source lines 69-72. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Returns a newly allocated BF16 representation, copying BF16 input or converting
 supported source values. Ownership differs from the direct accessor.
 
@@ -2203,8 +2065,6 @@ uint16_t *safetensors_get_bf16(const safetensors_file_t *sf, const safetensor_t 
 
 ### `uint16_t *safetensors_get_bf16_direct(const safetensors_file_t *sf, const safetensor_t *t);`
 
-Original source lines 73-75. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Returns a borrowed zero-copy BF16 pointer only when dtype and byte size match.
 It is read-only and tied to mapping lifetime.
 
@@ -2216,8 +2076,6 @@ uint16_t *safetensors_get_bf16_direct(const safetensors_file_t *sf, const safete
 
 ### `int safetensor_is_bf16(const safetensor_t *t);`
 
-Original source lines 76-78. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Small predicate used before selecting direct BF16 execution paths.
 
 ```{.c .numberLines startFrom="76"}
@@ -2227,8 +2085,6 @@ int safetensor_is_bf16(const safetensor_t *t);
 ```
 
 ### `int64_t safetensor_numel(const safetensor_t *t);`
-
-Original source lines 79-81. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Multiplies shape dimensions to obtain logical element count, with invalid shape
 metadata producing failure rather than a wrapped allocation size.
@@ -2241,8 +2097,6 @@ int64_t safetensor_numel(const safetensor_t *t);
 
 ### `void safetensor_print(const safetensor_t *t);`
 
-Original source lines 82-84. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Diagnostic printer for one tensor's name, dtype, shape, and byte interval; it
 does not print multi-gigabyte data.
 
@@ -2254,8 +2108,6 @@ void safetensor_print(const safetensor_t *t);
 
 ### `void safetensors_print_all(const safetensors_file_t *sf);`
 
-Original source lines 85-86. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Iterates metadata through `safetensor_print` for model-load diagnostics.
 
 ```{.c .numberLines startFrom="85"}
@@ -2264,8 +2116,6 @@ void safetensors_print_all(const safetensors_file_t *sf);
 ```
 
 ### `#endif /* VOXTRAL_SAFETENSORS_H */`
-
-Original source lines 87-87. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 ```{.c .numberLines startFrom="87"}
 #endif /* VOXTRAL_SAFETENSORS_H */
@@ -2287,7 +2137,7 @@ storage as if it were heap memory would be invalid.
 
 Length: 452 lines. SHA-256: `aaad153b4b7bedaec6139441b6b44fc650b5fc559ff1fff7d4d36ca98546fba4`.
 
-### Declaration map
+### Declaration map {.unnumbered .unlisted}
 
 This map gives the reading spine of the file. Line numbers refer to the original source and to the numbered listings below.
 
@@ -2313,9 +2163,9 @@ This map gives the reading spine of the file. Line numbers refer to the original
 | 431 | `void safetensor_print(const safetensor_t *t) {` |
 | 443 | `void safetensors_print_all(const safetensors_file_t *sf) {` |
 
-### Continuation of the surrounding declaration (lines 1-16)
+### Translation-unit preamble {.unnumbered .unlisted}
 
-Original source lines 1-16. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+This translation-unit preamble selects dependencies, compile-time features, and file-local constants used by the definitions that follow.
 
 ```{.c .numberLines startFrom="1"}
 /*
@@ -2338,8 +2188,6 @@ Original source lines 1-16. The boundary follows a declaration or a pagination b
 
 ### `static void skip_whitespace(const char **p)`
 
-Original source lines 17-20. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Advances the bounded header JSON cursor across whitespace.
 
 ```{.c .numberLines startFrom="17"}
@@ -2350,8 +2198,6 @@ static void skip_whitespace(const char **p) {
 ```
 
 ### `static int parse_string(const char **p, char *out, size_t max_len)`
-
-Original source lines 21-47. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Parses one bounded JSON string into fixed storage with escape handling and
 capacity checks, returning failure instead of truncating tensor names.
@@ -2388,8 +2234,6 @@ static int parse_string(const char **p, char *out, size_t max_len) {
 
 ### `static int64_t parse_int(const char **p)`
 
-Original source lines 48-59. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Consumes a signed header integer used for shapes and offsets. Later validation
 checks nonnegativity, multiplication overflow, and mapping bounds.
 
@@ -2410,8 +2254,6 @@ static int64_t parse_int(const char **p) {
 
 ### `static safetensor_dtype_t parse_dtype(const char *s)`
 
-Original source lines 60-70. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Maps known safetensors dtype strings to the internal enum; unsupported values
 remain explicit `UNKNOWN`.
 
@@ -2430,8 +2272,6 @@ static safetensor_dtype_t parse_dtype(const char *s) {
 ```
 
 ### `static int parse_tensor_entry(const char **p, safetensor_t *t)`
-
-Original source lines 71-155. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Parses one tensor object's dtype, shape, and two data offsets into metadata.
 Required fields and rank limits are validated before the descriptor is accepted.
@@ -2526,8 +2366,6 @@ static int parse_tensor_entry(const char **p, safetensor_t *t) {
 
 ### `static int parse_header(safetensors_file_t *sf)`
 
-Original source lines 156-203. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Walks the top-level header object, parsing each named tensor entry into the
 file's fixed tensors array and skipping __metadata__. Sets num_tensors. Returns
 -1 on any malformed structure, which aborts the open. Operates on the copied
@@ -2585,8 +2423,6 @@ static int parse_header(safetensors_file_t *sf) {
 ```
 
 ### `safetensors_file_t *safetensors_open(const char *path)`
-
-Original source lines 204-285. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Open validates file size, maps bytes read-only, parses the bounded JSON header,
 and verifies every tensor data interval before publishing the file object.
@@ -2679,8 +2515,6 @@ safetensors_file_t *safetensors_open(const char *path) {
 
 ### `void safetensors_close(safetensors_file_t *sf)`
 
-Original source lines 286-293. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Null-safe unmap/close/free teardown for the file object. The mapping is released
 once; individual tensor descriptors and direct pointers own nothing separately.
 
@@ -2696,8 +2530,6 @@ void safetensors_close(safetensors_file_t *sf) {
 ```
 
 ### `const safetensor_t *safetensors_find(const safetensors_file_t *sf, const char *name)`
-
-Original source lines 294-302. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Linear exact-name search over at most the configured metadata limit. Model load
 is infrequent, so simple lookup keeps ownership and failure behavior obvious.
@@ -2716,8 +2548,6 @@ const safetensor_t *safetensors_find(const safetensors_file_t *sf, const char *n
 
 ### `const void *safetensors_data(const safetensors_file_t *sf, const safetensor_t *t)`
 
-Original source lines 303-307. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Returns a borrowed pointer to a tensor's raw bytes inside the mmap by adding the
 8-byte header-length prefix, the header size, and the tensor's data_offset to the
 mapped base. No copy and no bounds re-check here; validity rests on the bounds
@@ -2732,8 +2562,6 @@ const void *safetensors_data(const safetensors_file_t *sf, const safetensor_t *t
 ```
 
 ### `int64_t safetensor_numel(const safetensor_t *t)`
-
-Original source lines 308-316. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Computes the product of dimensions with validity checks before the result is
 used for byte-size calculations and allocations.
@@ -2752,8 +2580,6 @@ int64_t safetensor_numel(const safetensor_t *t) {
 
 ### `static float bf16_to_f32(uint16_t bf16)`
 
-Original source lines 317-324. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Expands BF16 by placing its 16 bits in the high half of an IEEE-754 float word;
 the exponent width is preserved and the missing mantissa bits become zero.
 
@@ -2769,8 +2595,6 @@ static float bf16_to_f32(uint16_t bf16) {
 ```
 
 ### `static float f16_to_f32(uint16_t f16)`
-
-Original source lines 325-355. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Converts IEEE half precision to float, handling zero, subnormal, finite,
 infinite, and NaN exponent cases explicitly.
@@ -2810,8 +2634,6 @@ static float f16_to_f32(uint16_t f16) {
 ```
 
 ### `float *safetensors_get_f32(const safetensors_file_t *sf, const safetensor_t *t)`
-
-Original source lines 356-398. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Allocates one float per element and converts from supported F32, BF16, or F16
 storage. Every error frees partial output and returns null.
@@ -2864,8 +2686,6 @@ float *safetensors_get_f32(const safetensors_file_t *sf, const safetensor_t *t) 
 
 ### `int safetensor_is_bf16(const safetensor_t *t)`
 
-Original source lines 399-402. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Tests descriptor dtype without touching mapped tensor bytes.
 
 ```{.c .numberLines startFrom="399"}
@@ -2876,8 +2696,6 @@ int safetensor_is_bf16(const safetensor_t *t) {
 ```
 
 ### `uint16_t *safetensors_get_bf16(const safetensors_file_t *sf, const safetensor_t *t)`
-
-Original source lines 403-423. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Allocates BF16 output, copying direct BF16 data or narrowing supported FP32
 values. The caller owns this buffer independently of the mapping.
@@ -2908,8 +2726,6 @@ uint16_t *safetensors_get_bf16(const safetensors_file_t *sf, const safetensor_t 
 
 ### `uint16_t *safetensors_get_bf16_direct(const safetensors_file_t *sf, const safetensor_t *t)`
 
-Original source lines 424-430. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Zero-copy accessor returning a borrowed uint16 pointer straight into the mmap for
 a BF16 tensor, after checking dtype and that numel*2 fits data_size. No
 allocation; the pointer is read-only and invalid once the file is closed. This is
@@ -2926,8 +2742,6 @@ uint16_t *safetensors_get_bf16_direct(const safetensors_file_t *sf, const safete
 ```
 
 ### `void safetensor_print(const safetensor_t *t)`
-
-Original source lines 431-442. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Formats one metadata record for load debugging without dereferencing tensor
 contents.
@@ -2948,8 +2762,6 @@ void safetensor_print(const safetensor_t *t) {
 ```
 
 ### `void safetensors_print_all(const safetensors_file_t *sf)`
-
-Original source lines 443-452. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Prints every parsed metadata record in source-table order.
 

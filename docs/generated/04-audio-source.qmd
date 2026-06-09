@@ -112,7 +112,7 @@ with output scope is a common source of silent device-selection bugs.
 
 Length: 171 lines. SHA-256: `22b67776af6938d7c3d00ed5c3cd91a4ecae32dbe2b3762f14d02a8f6c95ea7e`.
 
-### Declaration map
+### Declaration map {.unnumbered .unlisted}
 
 This map gives the reading spine of the file. Line numbers refer to the original source and to the numbered listings below.
 
@@ -129,9 +129,9 @@ This map gives the reading spine of the file. Line numbers refer to the original
 | 108 | `private static func deviceHasInput(_ deviceID: AudioObjectID) -> Bool {` |
 | 147 | `private static func stringProperty(` |
 
-### Continuation of the surrounding declaration (lines 1-4)
+### Imports and file preamble {.unnumbered .unlisted}
 
-Original source lines 1-4. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+The file begins by importing `AudioToolbox`, `CoreAudio`, `Foundation`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
 ```{.swift .numberLines startFrom="1"}
 import AudioToolbox
@@ -141,8 +141,6 @@ import Foundation
 ```
 
 ### `struct MicrophoneDevice: Identifiable, Hashable, Sendable`
-
-Original source lines 5-9. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 A UI-facing pair of stable Core Audio device UID and human-readable name.
 `Identifiable` lets SwiftUI use the UID as row identity; `Hashable` supports
@@ -159,8 +157,6 @@ struct MicrophoneDevice: Identifiable, Hashable, Sendable {
 
 ### `enum AudioDeviceCatalog`
 
-Original source lines 10-10. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 A caseless enum used as a namespace for stateless Core Audio queries. Swift
 cannot instantiate it because no cases exist, giving C-like module functions
 while retaining access control and type-qualified names.
@@ -170,8 +166,6 @@ enum AudioDeviceCatalog {
 ```
 
 ### `static func inputDevices() -> [MicrophoneDevice]`
-
-Original source lines 11-27. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Enumerates all CoreAudio devices, keeps those exposing an input stream, and maps
 each to a MicrophoneDevice keyed by its stable device UID (falling back to the
@@ -200,8 +194,6 @@ what the app persists.
 
 ### `static func defaultInputDeviceUID() -> String?`
 
-Original source lines 28-32. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Resolves the system's current default input object and immediately translates
 its volatile numeric ID to the stable string UID persisted by the app. Failure
 at either Core Audio query is represented as `nil`.
@@ -215,8 +207,6 @@ at either Core Audio query is represented as `nil`.
 ```
 
 ### `static func resolveDeviceID(uid: String?) -> AudioObjectID?`
-
-Original source lines 33-42. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Resolves a persisted UID back to a live AudioObjectID, falling back to the system
 default input when the UID is nil or empty, and only matching devices that still
@@ -237,8 +227,6 @@ audio unit needs.
 ```
 
 ### `static func setInputDevice(_ deviceID: AudioObjectID, on audioUnit: AudioUnit) -> OSStatus`
-
-Original source lines 43-54. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Assigns the chosen hardware object to AUHAL's global current-device property.
 Core Audio's C API requires a mutable pointer even though the input ID is a
@@ -261,8 +249,6 @@ transaction can attach the failing setup step.
 ```
 
 ### `private static func defaultInputDeviceID() -> AudioObjectID?`
-
-Original source lines 55-73. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Queries the system object for `kAudioHardwarePropertyDefaultInputDevice`.
 Selector, global scope, and main element identify the property; success still
@@ -291,8 +277,6 @@ requires a nonzero device ID because zero is not usable hardware.
 ```
 
 ### `private static func allDeviceIDs() -> [AudioObjectID]`
-
-Original source lines 74-107. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Implements Core Audio's two-call variable-size pattern: ask for byte count,
 allocate an exactly sized Swift array, then fill it through an unsafe mutable
@@ -337,8 +321,6 @@ initialized identifiers.
 ```
 
 ### `private static func deviceHasInput(_ deviceID: AudioObjectID) -> Bool`
-
-Original source lines 108-146. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Reads the input-scope `AudioBufferList` and accepts a device only when at least
 one buffer reports channels. The raw allocation is aligned for the C structure
@@ -387,8 +369,6 @@ and released with `defer`, including every early return.
 ```
 
 ### `private static func stringProperty(…)`
-
-Original source lines 147-171. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Fetches a Core Foundation string property such as UID or name. Core Audio owns
 the returned `CFString`, so `takeUnretainedValue` borrows it rather than
@@ -440,7 +420,7 @@ observe a released context.
 
 Length: 358 lines. SHA-256: `f700222a7a96d1b117d7fd2d9e8ee7fc474b51322b1983d09fb85a3d5595fe95`.
 
-### Declaration map
+### Declaration map {.unnumbered .unlisted}
 
 This map gives the reading spine of the file. Line numbers refer to the original source and to the numbered listings below.
 
@@ -463,9 +443,9 @@ This map gives the reading spine of the file. Line numbers refer to the original
 | 309 | `private func requireNoError(_ status: OSStatus, step: String) throws {` |
 | 315 | `fileprivate static func convert(` |
 
-### Continuation of the surrounding declaration (lines 1-6)
+### Imports and file preamble {.unnumbered .unlisted}
 
-Original source lines 1-6. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+The file begins by importing `AVFoundation`, `AudioToolbox`, `CoreAudio`, `Foundation`, `Synchronization`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
 ```{.swift .numberLines startFrom="1"}
 @preconcurrency import AVFoundation
@@ -477,8 +457,6 @@ import Synchronization
 ```
 
 ### `enum MicrophonePermission`
-
-Original source lines 7-13. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Normalizes AVFoundation authorization into the four states the dashboard needs.
 Keeping permission separate from capture errors prevents “not yet asked” from
@@ -495,8 +473,6 @@ enum MicrophonePermission {
 ```
 
 ### `enum MicrophoneCaptureError: LocalizedError`
-
-Original source lines 14-33. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 The setup transaction's typed failure surface: missing selected device, absent
 AUHAL component, a named C configuration step plus `OSStatus`, or an unusable
@@ -527,8 +503,6 @@ enum MicrophoneCaptureError: LocalizedError {
 
 ### `private final class AudioRenderContext: @unchecked Sendable`
 
-Original source lines 34-41. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 The retained object passed through AUHAL's opaque callback pointer. It groups
 the Audio Unit, source/destination formats, converter, destination closure, and
 processing queue so the C callback needs one stable lifetime token.
@@ -546,8 +520,6 @@ private final class AudioRenderContext: @unchecked Sendable {
 ```
 
 ### `init(…)`
-
-Original source lines 42-58. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Stores already constructed audio objects and the escaping handler in the
 callback context. There is no setup logic here: all fallible construction stays
@@ -574,8 +546,6 @@ in `configure`, which can unwind before ownership is published.
 ```
 
 ### `private func microphoneInputCallback(…)`
-
-Original source lines 59-99. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 This function has a C callback ABI. `reference` is the opaque retained Swift
 context. The callback allocates/render-converts one chunk and immediately
@@ -628,8 +598,6 @@ private func microphoneInputCallback(
 
 ### `final class MicrophoneCaptureService: @unchecked Sendable`
 
-Original source lines 100-100. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Owns one AUHAL capture instance and one retained callback context. A lock
 protects publication/removal of those two lifetime roots; the processing queue
 owns ordinary delivery after the real-time callback has copied audio bytes.
@@ -639,8 +607,6 @@ final class MicrophoneCaptureService: @unchecked Sendable {
 ```
 
 ### `private struct State`
-
-Original source lines 101-114. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 The minimal lock-protected lifetime record. Audio Unit and callback context are
 removed together before teardown, so repeated `stop` calls observe an empty
@@ -665,8 +631,6 @@ state and cannot release either resource twice.
 
 ### `init()`
 
-Original source lines 115-127. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Constructs the model's fixed target format: interleaved signed PCM16, mono,
 16 kHz. Failure is a programming/platform invariant violation and therefore a
 precondition failure, not a recoverable per-session error. A dispatch-specific
@@ -690,8 +654,6 @@ key later prevents synchronously waiting on the processing queue from itself.
 
 ### `deinit`
 
-Original source lines 128-131. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Calls the idempotent stop path as a final ownership backstop. Correct application
 shutdown stops explicitly; `deinit` ensures an unexpectedly released service
 still removes callbacks before releasing their context.
@@ -704,8 +666,6 @@ still removes callbacks before releasing their context.
 ```
 
 ### `func permission() -> MicrophonePermission`
-
-Original source lines 132-141. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Maps AVFoundation's current authorization status without prompting. The
 `@unknown default` branch treats future framework cases conservatively as
@@ -726,8 +686,6 @@ restricted, preserving exhaustive behavior across newer SDKs.
 
 ### `func requestPermission() async -> Bool`
 
-Original source lines 142-152. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Returns immediately for decided states and suspends only for the system prompt
 when authorization is undetermined. `async` models that user interaction without
 blocking the main thread.
@@ -747,8 +705,6 @@ blocking the main thread.
 ```
 
 ### `func start(…)`
-
-Original source lines 153-186. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Start is transactional. Any failure after Audio Unit creation disposes the
 partially constructed instance. A successful return means device selection,
@@ -794,8 +750,6 @@ all completed.
 
 ### `func stop()`
 
-Original source lines 187-204. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 State is removed under the lock before external teardown. Repeated stop calls
 are therefore harmless. Queue synchronization occurs only when the caller is
 not already on that queue, avoiding self-deadlock.
@@ -822,8 +776,6 @@ not already on that queue, avoiding self-deadlock.
 ```
 
 ### `private func configure(…)`
-
-Original source lines 205-308. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Completes AUHAL setup as a transaction: enable input bus 1, disable output bus
 0, select hardware, read and install the callback-side format, create the
@@ -939,8 +891,6 @@ context is published only after every fallible step succeeds.
 
 ### `private func requireNoError(_ status: OSStatus, step: String) throws`
 
-Original source lines 309-314. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Adapts Core Audio's integer `OSStatus` convention to Swift throwing control flow
 while preserving the human-readable setup step. This keeps the configure
 sequence linear and ensures one catch block performs rollback.
@@ -955,8 +905,6 @@ sequence linear and ensures one catch block performs rollback.
 ```
 
 ### `fileprivate static func convert(…)`
-
-Original source lines 315-358. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 The converter input closure may be called more than once. The mutex-backed flag
 supplies the source buffer exactly once and then reports `.noDataNow`.
@@ -1027,7 +975,7 @@ must occur, and mutable file state remains queue-confined despite the class's
 
 Length: 183 lines. SHA-256: `760a3ab8a1912f3e661d2070e76b0e0197b6d33fff61e68dfe93d5d971d8ddd4`.
 
-### Declaration map
+### Declaration map {.unnumbered .unlisted}
 
 This map gives the reading spine of the file. Line numbers refer to the original source and to the numbered listings below.
 
@@ -1045,9 +993,9 @@ This map gives the reading spine of the file. Line numbers refer to the original
 | 161 | `private func perform<T: Sendable>(` |
 | 175 | `private static func directoryName(for session: ClassroomSession) -> String {` |
 
-### Continuation of the surrounding declaration (lines 1-3)
+### Imports and file preamble {.unnumbered .unlisted}
 
-Original source lines 1-3. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+The file begins by importing `ClassroomCaptionsCore`, `Foundation`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
 ```{.swift .numberLines startFrom="1"}
 import ClassroomCaptionsCore
@@ -1056,8 +1004,6 @@ import Foundation
 ```
 
 ### `struct SessionArchiveMetadata: Codable`
-
-Original source lines 4-14. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 The stable JSON summary written beside audio and transcripts. It records domain
 identity/times plus latched runtime choices and final byte count, without
@@ -1079,8 +1025,6 @@ struct SessionArchiveMetadata: Codable {
 
 ### `enum SessionArchiveError: LocalizedError`
 
-Original source lines 15-25. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Represents the WAV format's 32-bit data-size limit explicitly. The check occurs
 before narrowing `UInt64` accounting to the `UInt32` header field, preventing
 silent wraparound in long recordings.
@@ -1101,8 +1045,6 @@ enum SessionArchiveError: LocalizedError {
 
 ### `final class SessionArchiveService: @unchecked Sendable`
 
-Original source lines 26-26. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Queue-confined owner of incremental archive I/O. `@unchecked Sendable` is valid
 because callers never access `state`; synchronous and continuation-based methods
 route every mutation through the private utility queue.
@@ -1112,8 +1054,6 @@ final class SessionArchiveService: @unchecked Sendable {
 ```
 
 ### `private struct State`
-
-Original source lines 27-40. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Tracks the in-progress directory, WAV path/handle, exact PCM byte count, and the
 first asynchronous write failure. Capturing a failure in state lets `appendAudio`
@@ -1137,8 +1077,6 @@ remain nonthrowing while `finalize` still reports data loss.
 ```
 
 ### `func start(session: ClassroomSession, rootDirectory: URL) async throws -> URL`
-
-Original source lines 41-69. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Serializes archive setup onto its private utility queue: closes any open audio
 file, creates the timestamped session directory, writes a zero-length WAV header
@@ -1179,8 +1117,6 @@ Resets all per-session state so a prior recording cannot leak in.
 
 ### `func appendAudio(_ pcm16MonoData: Data)`
 
-Original source lines 70-84. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Asynchronously appends PCM16 mono bytes to the open audio handle and accumulates
 the byte count; on a write error it records the failure, closes the handle, and
 nils it so later appends are no-ops and finalize can surface the error.
@@ -1204,8 +1140,6 @@ nils it so later appends are no-ops and finalize can surface the error.
 ```
 
 ### `func finalize(…)`
-
-Original source lines 85-146. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 On the archive queue, propagates any earlier write failure, enforces the 4 GB PCM
 limit, rewrites the WAV header with the true data byte count, then writes
@@ -1279,8 +1213,6 @@ state. Returns the directory, or nil if no session was started.
 
 ### `func cancel()`
 
-Original source lines 147-153. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Synchronously closes the current file and clears all archive state. A synchronous
 barrier is appropriate here because callers need cancellation complete before
 starting another archive or releasing the service.
@@ -1297,8 +1229,6 @@ starting another archive or releasing the service.
 
 ### `private func closeAudioFile() throws`
 
-Original source lines 154-160. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Closes the optional handle and clears it after success. Centralizing this
 operation makes start, cancel, and error cleanup share the same ownership rule
 instead of closing a stale copied handle independently.
@@ -1314,8 +1244,6 @@ instead of closing a stale copied handle independently.
 ```
 
 ### `private func perform<T: Sendable>(…)`
-
-Original source lines 161-174. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Bridges serial dispatch work into Swift `async throws` with a checked
 continuation. Exactly one queue closure resumes the continuation with either the
@@ -1340,8 +1268,6 @@ crosses back from the archive queue.
 ```
 
 ### `private static func directoryName(for session: ClassroomSession) -> String`
-
-Original source lines 175-183. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Builds a filesystem-sortable local timestamp plus the first eight UUID
 characters. The POSIX locale prevents user locale settings from changing

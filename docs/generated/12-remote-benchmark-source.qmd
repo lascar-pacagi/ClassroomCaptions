@@ -84,7 +84,7 @@ and deterministic disconnect/failure events.
 
 Length: 333 lines. SHA-256: `e9daf475cb6630efb1da5b7f0c9d7df1ad87909054b476e991af7cc692948374`.
 
-### Declaration map
+### Declaration map {.unnumbered .unlisted}
 
 This map gives the reading spine of the file. Line numbers refer to the original source and to the numbered listings below.
 
@@ -112,9 +112,9 @@ This map gives the reading spine of the file. Line numbers refer to the original
 | 304 | `private func reset(_ state: inout State, preserveContinuation: Bool) {` |
 | 312 | `func findString(in value: Any, keys: [String]) -> String? {` |
 
-### Continuation of the surrounding declaration (lines 1-4)
+### Imports and file preamble {.unnumbered .unlisted}
 
-Original source lines 1-4. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+The file begins by importing `ClassroomCaptionsCore`, `Foundation`, `Synchronization`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
 ```{.swift .numberLines startFrom="1"}
 import ClassroomCaptionsCore
@@ -124,8 +124,6 @@ import Synchronization
 ```
 
 ### `enum VoxtralRealtimeError: LocalizedError`
-
-Original source lines 5-18. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 The remote backend's two local failures: an endpoint with a non-WebSocket scheme
 and a dictionary that cannot be serialized as JSON. Network closure and server
@@ -151,8 +149,6 @@ enum VoxtralRealtimeError: LocalizedError {
 
 ### `final class VoxtralRealtimeService: NSObject, StreamingTranscriptionService,`
 
-Original source lines 19-21. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Bridges an external WebSocket protocol to the same
 `StreamingTranscriptionService` contract as embedded Voxtral. It subclasses
 `NSObject` for URLSession delegation and promises `@unchecked Sendable`; a
@@ -165,8 +161,6 @@ final class VoxtralRealtimeService: NSObject, StreamingTranscriptionService,
 ```
 
 ### `private enum ConnectionState`
-
-Original source lines 22-27. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 The lock-protected transport phase. Keeping `connecting` distinct from
 `disconnected` prevents an early callback or repeated start from being treated
@@ -182,8 +176,6 @@ as an established session, while `connected` gates audio commit and sends.
 ```
 
 ### `private struct State`
-
-Original source lines 28-43. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Collects every field that must change atomically under one mutex: transport
 objects, event continuation, queued startup frames, commit/generation flags,
@@ -212,8 +204,6 @@ produce.
 
 ### `func events() -> AsyncStream<TranscriptionEvent>`
 
-Original source lines 44-52. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Creates the ordered `AsyncStream` consumed by the app model and stores its
 continuation under the mutex. `onTermination` removes only that output handle;
 transport shutdown remains explicit so a view task ending cannot silently
@@ -232,8 +222,6 @@ destroy an active backend.
 ```
 
 ### `func start(configuration: TranscriptionConfiguration) async throws`
-
-Original source lines 53-89. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Start creates one WebSocket task and installs state before resuming it so early
 delegate callbacks have a consistent owner. Connection timeout and cancellation
@@ -281,8 +269,6 @@ must settle the same continuation at most once.
 
 ### `func sendAudio(_ pcm16MonoData: Data) async`
 
-Original source lines 90-98. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Marks that a commit-worthy buffer exists, base64-encodes owned PCM bytes, and
 sends the protocol's append event. Base64 is required because this backend uses
 JSON text messages rather than binary WebSocket frames; it increases payload
@@ -301,8 +287,6 @@ size by roughly one third.
 ```
 
 ### `func commit()`
-
-Original source lines 99-113. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Commits the audio buffer only when connected, with uncommitted audio present, and
 no generation already in flight; it atomically clears hasUncommittedAudio and sets
@@ -329,8 +313,6 @@ overlapping generations.
 
 ### `func stop() async`
 
-Original source lines 114-124. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Under the mutex, records user intent, detaches the current task/session, and
 resets protocol state while preserving the event continuation. Cancellation and
 URLSession invalidation occur after unlocking, avoiding delegate re-entry while
@@ -351,8 +333,6 @@ the mutex is held.
 ```
 
 ### `func urlSession(…)`
-
-Original source lines 125-139. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Accepts the open callback only when it belongs to the currently stored task,
 then changes state to connected, emits the common lifecycle event, and starts
@@ -379,8 +359,6 @@ session harmless.
 
 ### `func urlSession(…)`
 
-Original source lines 140-154. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Converts WebSocket close code and optional UTF-8 reason into the shared terminal
 path. Normal closure and going-away are not reported as failures; abnormal codes
 retain their numeric value for diagnosis before disconnection is emitted.
@@ -405,8 +383,6 @@ retain their numeric value for diagnosis before disconnection is emitted.
 
 ### `func urlSession(_: URLSession, task: URLSessionTask, didCompleteWithError error: Error?)`
 
-Original source lines 155-165. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Handles URLSession task completion that may arrive in addition to a WebSocket
 close callback. Cancellation is recognized by `NSURLErrorCancelled` and treated
 as expected; task identity and disconnected-state checks in `handleTerminal`
@@ -427,8 +403,6 @@ deduplicate racing terminal callbacks.
 ```
 
 ### `private func listen(on task: URLSessionWebSocketTask)`
-
-Original source lines 166-183. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Arms one asynchronous receive. On success it parses the message and recursively
 arms the next receive only if the task is still current and connected; on
@@ -458,8 +432,6 @@ failure it enters terminal handling. This explicit re-arming is how
 
 ### `private func handle(_ message: URLSessionWebSocketTask.Message)`
 
-Original source lines 184-200. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Normalizes text and binary WebSocket messages to `Data`, then asks
 `JSONSerialization` for a dictionary. Unknown future message cases and malformed
 JSON are ignored rather than crashing the stream or fabricating caption events.
@@ -485,8 +457,6 @@ JSON are ignored rather than crashing the stream or fabricating caption events.
 ```
 
 ### `func handle(_ json: [String: Any])`
-
-Original source lines 201-256. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 The realtime event dispatcher: on session.created it marks the session ready once
 and flushes any queued frames; transcription delta events append to and emit
@@ -554,8 +524,6 @@ error events emit a failure. Tolerates three vendor event-name spellings per pha
 
 ### `private func send(_ event: [String: Any])`
 
-Original source lines 257-266. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Validates and serializes a protocol dictionary before passing text to the
 transport layer. Serialization failure becomes a typed transcription failure;
 no partially encoded frame is sent.
@@ -574,8 +542,6 @@ no partially encoded frame is sent.
 ```
 
 ### `private func sendText(_ text: String)`
-
-Original source lines 267-281. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Queues frames produced before the server's `session.created` event, otherwise
 returns the current task and sends outside the mutex. Send completion reports
@@ -601,8 +567,6 @@ is held.
 ```
 
 ### `private func handleTerminal(task: URLSessionWebSocketTask, message: String?)`
-
-Original source lines 282-299. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Single funnel for connection teardown: ignores stale or already-disconnected
 tasks, resets state while preserving the event continuation, invalidates the
@@ -632,8 +596,6 @@ disconnected. Ensures terminal state is delivered at most once per task.
 
 ### `private func emit(_ event: TranscriptionEvent)`
 
-Original source lines 300-303. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Reads the current `AsyncStream` continuation under the mutex and yields after
 the protected access. Events are values, so the consumer cannot mutate backend
 state through the stream.
@@ -646,8 +608,6 @@ state through the stream.
 ```
 
 ### `private func reset(_ state: inout State, preserveContinuation: Bool)`
-
-Original source lines 304-311. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Returns the aggregate to its disconnected defaults and optionally preserves the
 event continuation across transport restarts. Centralizing reset prevents one
@@ -665,8 +625,6 @@ flag, queued frame, or provisional caption from leaking into the next session.
 ```
 
 ### `func findString(in value: Any, keys: [String]) -> String?`
-
-Original source lines 312-333. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Recursively searches a JSON value for the first non-empty string under any of the
 priority keys, checking a dictionary's keys in order before descending into its
@@ -714,7 +672,7 @@ length. It is a diagnostic metric, not a replacement for listening tests.
 
 Length: 327 lines. SHA-256: `b836975ffd446735bacc0f15b3774f055b33f606fe8adb1d9958e346b346b4cc`.
 
-### Declaration map
+### Declaration map {.unnumbered .unlisted}
 
 This map gives the reading spine of the file. Line numbers refer to the original source and to the numbered listings below.
 
@@ -733,9 +691,9 @@ This map gives the reading spine of the file. Line numbers refer to the original
 | 174 | `private func wordAccuracy(reference: String, transcript: String) -> Double {` |
 | 195 | `private func run() throws {` |
 
-### Continuation of the surrounding declaration (lines 1-3)
+### Imports and file preamble {.unnumbered .unlisted}
 
-Original source lines 1-3. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
+The file begins by importing `CVoxtralEngine`, `Foundation`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
 ```{.swift .numberLines startFrom="1"}
 import CVoxtralEngine
@@ -744,8 +702,6 @@ import Foundation
 ```
 
 ### `private struct Arguments`
-
-Original source lines 4-14. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Fully parsed benchmark configuration with explicit defaults. Separating this
 value from execution keeps timed inference independent of command-line parsing.
@@ -766,8 +722,6 @@ private struct Arguments {
 
 ### `private struct PCMRecording`
 
-Original source lines 15-23. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Owned mono PCM16 bytes plus derived duration, guaranteeing the benchmark feeds
 the bridge's required format.
 
@@ -784,8 +738,6 @@ private struct PCMRecording {
 ```
 
 ### `private enum BenchmarkError: LocalizedError`
-
-Original source lines 24-36. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Typed usage and WAV-format failures rendered through `LocalizedError`.
 
@@ -807,8 +759,6 @@ private enum BenchmarkError: LocalizedError {
 
 ### `private func parseArguments() throws -> Arguments`
 
-Original source lines 37-38. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Parses the benchmark command line into Arguments: --model-dir and --audio are
 required, the rest optional with defaults. Consumes each recognized flag and
 throws usage if any unknown argument remains.
@@ -819,8 +769,6 @@ private func parseArguments() throws -> Arguments {
 ```
 
 ### `func take(_ flag: String) throws -> String`
-
-Original source lines 39-81. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Removes a named flag and its following value from mutable arguments, throwing
 usage if the value is absent. Leftover tokens expose unknown options.
@@ -873,8 +821,6 @@ usage if the value is absent. Leftover tokens expose unknown options.
 
 ### `private func readUInt16(_ data: Data, at offset: Int) -> UInt16`
 
-Original source lines 82-85. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Decodes a little-endian 16-bit WAV field from a previously bounds-checked offset.
 
 ```{.swift .numberLines startFrom="82"}
@@ -885,8 +831,6 @@ private func readUInt16(_ data: Data, at offset: Int) -> UInt16 {
 ```
 
 ### `private func readUInt32(_ data: Data, at offset: Int) -> UInt32`
-
-Original source lines 86-92. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Decodes a little-endian 32-bit RIFF size/rate field.
 
@@ -901,8 +845,6 @@ private func readUInt32(_ data: Data, at offset: Int) -> UInt32 {
 ```
 
 ### `private func loadPCMRecording(path: String) throws -> PCMRecording`
-
-Original source lines 93-138. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Loads and validates a WAV file by walking its RIFF chunks: requires RIFF/WAVE
 magic, reads the fmt chunk, locates the data chunk, and rejects anything that is
@@ -960,8 +902,6 @@ private func loadPCMRecording(path: String) throws -> PCMRecording {
 
 ### `private func drainText(…)`
 
-Original source lines 139-167. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Polls bridge text until `NO_TEXT`, resizes on `BUFFER_TOO_SMALL`, concatenates
 UTF-8 pieces, and records first-text latency exactly once.
 
@@ -999,8 +939,6 @@ private func drainText(
 
 ### `private func words(_ text: String) -> [String]`
 
-Original source lines 168-173. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
-
 Normalizes text into lowercase metric words for Levenshtein comparison. This is
 not the model's tokenizer.
 
@@ -1014,8 +952,6 @@ private func words(_ text: String) -> [String] {
 ```
 
 ### `private func wordAccuracy(reference: String, transcript: String) -> Double`
-
-Original source lines 174-194. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 Computes word accuracy as one minus the word-level Levenshtein distance normalized
 by the reference length, using a rolling two-row DP. An empty reference scores 1
@@ -1046,8 +982,6 @@ private func wordAccuracy(reference: String, transcript: String) -> Double {
 ```
 
 ### `private func run() throws`
-
-Original source lines 195-327. The boundary follows a declaration or a pagination break inside one large declaration; the listing remains byte-for-byte source.
 
 The benchmark constructs the same bridge options used by the app, feeds timed
 chunks, repeatedly drains text until `NO_TEXT`, finishes the stream, prints
