@@ -27,6 +27,7 @@ static int parse_string(const char **p, char *out, size_t max_len) {
     while (**p && **p != '"' && i < max_len - 1) {
         if (**p == '\\') {
             (*p)++;
+            if (**p == '\0') break; /* input ends with a lone backslash */
             if (**p == 'n') out[i++] = '\n';
             else if (**p == 't') out[i++] = '\t';
             else if (**p == 'r') out[i++] = '\r';
@@ -51,6 +52,13 @@ static int64_t parse_int(const char **p) {
     int neg = 0;
     if (**p == '-') { neg = 1; (*p)++; }
     while (**p >= '0' && **p <= '9') {
+        /* Clamp instead of overflowing: val * 10 + digit on attacker-chosen
+         * lengths is signed-overflow UB and can wrap bounds checks. */
+        if (val > (INT64_MAX - 9) / 10) {
+            val = INT64_MAX;
+            while (**p >= '0' && **p <= '9') (*p)++;
+            break;
+        }
         val = val * 10 + (**p - '0');
         (*p)++;
     }
@@ -271,8 +279,10 @@ safetensors_file_t *safetensors_open(const char *path) {
     for (int i = 0; i < sf->num_tensors; i++) {
         safetensor_t *t = &sf->tensors[i];
         size_t data_end = t->data_offset + t->data_size;
-        if (data_end < t->data_offset ||
-            8 + sf->header_size + data_end > sf->file_size) {
+        /* Compare by subtraction: 8 + header_size + data_end can wrap for a
+         * data_offset near SIZE_MAX and slip past an additive check. */
+        size_t data_region = sf->file_size - 8 - sf->header_size;
+        if (data_end < t->data_offset || data_end > data_region) {
             fprintf(stderr, "safetensors_open: data out of bounds for %s\n",
                     t->name);
             safetensors_close(sf);

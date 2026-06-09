@@ -159,6 +159,18 @@ ccv_stream_t *ccv_stream_create(
         stream->engine,
         options.max_decode_context_tokens
     );
+    /* Preallocate the decoder KV cache to the live restart bound plus a
+     * margin instead of the full 8192-position window: continuous mode
+     * restarts the decoder at max_decode_context, so the tail of a
+     * window-sized cache would stay resident but never be used (~740 MB at
+     * the default context). The cache still grows on demand if a longer
+     * context is configured later. */
+    {
+        int cache_positions = options.max_decode_context_tokens;
+        if (cache_positions < 250) cache_positions = 250;
+        if (cache_positions > 8000) cache_positions = 8000;
+        vox_decoder_kv_cache_preallocate(model->engine, cache_positions + 256);
+    }
     ccv_set_status(status, CCV_STATUS_OK);
     return stream;
 }

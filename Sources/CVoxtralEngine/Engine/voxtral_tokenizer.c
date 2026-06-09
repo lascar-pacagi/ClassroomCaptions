@@ -97,6 +97,7 @@ static int parse_str(const char **p, char *out, int max_len) {
     while (**p && **p != '"' && i < max_len - 1) {
         if (**p == '\\') {
             (*p)++;
+            if (**p == '\0') break; /* input ends with a lone backslash */
             if (**p == 'n') out[i++] = '\n';
             else if (**p == 't') out[i++] = '\t';
             else if (**p == 'r') out[i++] = '\r';
@@ -161,7 +162,7 @@ static void skip_value(const char **p) {
     } else if (**p == '{') {
         int d = 1; (*p)++;
         while (**p && d > 0) {
-            if (**p == '"') { (*p)++; while (**p && **p != '"') { if (**p == '\\') (*p)++; (*p)++; } if (**p) (*p)++; }
+            if (**p == '"') { (*p)++; while (**p && **p != '"') { if (**p == '\\') (*p)++; if (**p) (*p)++; } if (**p) (*p)++; }
             else if (**p == '{') { d++; (*p)++; }
             else if (**p == '}') { d--; (*p)++; }
             else (*p)++;
@@ -169,7 +170,7 @@ static void skip_value(const char **p) {
     } else if (**p == '[') {
         int d = 1; (*p)++;
         while (**p && d > 0) {
-            if (**p == '"') { (*p)++; while (**p && **p != '"') { if (**p == '\\') (*p)++; (*p)++; } if (**p) (*p)++; }
+            if (**p == '"') { (*p)++; while (**p && **p != '"') { if (**p == '\\') (*p)++; if (**p) (*p)++; } if (**p) (*p)++; }
             else if (**p == '[') { d++; (*p)++; }
             else if (**p == ']') { d--; (*p)++; }
             else (*p)++;

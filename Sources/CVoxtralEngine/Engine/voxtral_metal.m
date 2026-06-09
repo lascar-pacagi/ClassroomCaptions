@@ -92,6 +92,45 @@ static inline uint16_t bf16_to_f16(uint16_t bf16) {
     return (uint16_t)((sign << 15) | (new_exp << 10) | new_mant);
 }
 
+/* Convert a bf16 array to f16. On arm64 the conversion goes through f32 with
+ * NEON (8 elements per iteration) and rounds to nearest, which is slightly
+ * more accurate than the truncating scalar fallback; large tensors are split
+ * across cores because this conversion dominates model-load time. */
+#if defined(__aarch64__)
+#include <arm_neon.h>
+#endif
+#define BF16_CONVERT_PAR_CHUNK ((size_t)1 << 20)
+
+static void convert_bf16_to_f16(uint16_t *dst, const uint16_t *src, size_t n) {
+#if defined(__aarch64__)
+    if (n >= 2 * BF16_CONVERT_PAR_CHUNK) {
+        size_t chunks = (n + BF16_CONVERT_PAR_CHUNK - 1) / BF16_CONVERT_PAR_CHUNK;
+        dispatch_apply(chunks,
+                       dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0),
+                       ^(size_t c) {
+            size_t start = c * BF16_CONVERT_PAR_CHUNK;
+            size_t count = n - start < BF16_CONVERT_PAR_CHUNK
+                ? n - start : BF16_CONVERT_PAR_CHUNK;
+            convert_bf16_to_f16(dst + start, src + start, count);
+        });
+        return;
+    }
+    size_t i = 0;
+    for (; i + 8 <= n; i += 8) {
+        uint16x8_t b = vld1q_u16(src + i);
+        uint32x4_t lo = vshll_n_u16(vget_low_u16(b), 16);
+        uint32x4_t hi = vshll_n_u16(vget_high_u16(b), 16);
+        float16x4_t flo = vcvt_f16_f32(vreinterpretq_f32_u32(lo));
+        float16x4_t fhi = vcvt_f16_f32(vreinterpretq_f32_u32(hi));
+        vst1_u16(dst + i, vreinterpret_u16_f16(flo));
+        vst1_u16(dst + i + 4, vreinterpret_u16_f16(fhi));
+    }
+    for (; i < n; i++) dst[i] = bf16_to_f16(src[i]);
+#else
+    for (size_t i = 0; i < n; i++) dst[i] = bf16_to_f16(src[i]);
+#endif
+}
+
 /* ========================================================================
  * F16 Weight Cache (bf16 converted to f16, cached by CPU pointer)
  * ======================================================================== */
@@ -119,21 +158,15 @@ static id<MTLBuffer> get_cached_bf16_as_f16_buffer(const uint16_t *weights, size
         }
     }
 
-    /* Convert bf16 -> f16 */
-    uint16_t *f16_data = (uint16_t *)malloc(num_elements * sizeof(uint16_t));
-    if (!f16_data) {
+    /* Convert bf16 -> f16 directly into the shared buffer */
+    size_t size = num_elements * sizeof(uint16_t);
+    id<MTLBuffer> buf = [g_device newBufferWithLength:size
+                                              options:MTLResourceStorageModeShared];
+    if (!buf) {
         pthread_mutex_unlock(&g_f16_cache_mutex);
         return nil;
     }
-    for (size_t i = 0; i < num_elements; i++) {
-        f16_data[i] = bf16_to_f16(weights[i]);
-    }
-
-    size_t size = num_elements * sizeof(uint16_t);
-    id<MTLBuffer> buf = [g_device newBufferWithBytes:f16_data
-                                              length:size
-                                             options:MTLResourceStorageModeShared];
-    free(f16_data);
+    convert_bf16_to_f16((uint16_t *)[buf contents], weights, num_elements);
 
     if (buf && g_f16_cache_count < F16_WEIGHT_CACHE_SIZE) {
         g_f16_cache[g_f16_cache_count].cpu_ptr = weights;
@@ -163,7 +196,7 @@ static void clear_f16_cache(void) {
 #define MERGED_CACHE_SIZE 256
 
 typedef struct {
-    const void *key1, *key2;
+    const void *key1, *key2, *key3; /* key3 NULL for two-way merges */
     id<MTLBuffer> buffer;
 } merged_cache_entry_t;
 
@@ -176,25 +209,27 @@ static int g_merged_count = 0;
 static id<MTLBuffer> get_merged_f16_2(const uint16_t *bf16_a, size_t a_elems,
                                         const uint16_t *bf16_b, size_t b_elems) {
     for (int i = 0; i < g_merged_count; i++) {
-        if (g_merged_cache[i].key1 == bf16_a && g_merged_cache[i].key2 == bf16_b)
+        if (g_merged_cache[i].key1 == bf16_a && g_merged_cache[i].key2 == bf16_b &&
+            g_merged_cache[i].key3 == NULL)
             return g_merged_cache[i].buffer;
     }
 
-    id<MTLBuffer> buf_a = get_cached_bf16_as_f16_buffer(bf16_a, a_elems);
-    id<MTLBuffer> buf_b = get_cached_bf16_as_f16_buffer(bf16_b, b_elems);
-    if (!buf_a || !buf_b) return nil;
-
+    /* Convert each component directly into its slice of the merged buffer.
+     * Routing through get_cached_bf16_as_f16_buffer would also permanently
+     * cache an individual copy of every component that the default paths
+     * never read again (~5.3 GB of duplicated weights across both stacks). */
     size_t total = (a_elems + b_elems) * sizeof(uint16_t);
     id<MTLBuffer> merged = [g_device newBufferWithLength:total
                                                  options:MTLResourceStorageModeShared];
     if (!merged) return nil;
-    memcpy([merged contents], [buf_a contents], a_elems * sizeof(uint16_t));
-    memcpy((uint8_t *)[merged contents] + a_elems * sizeof(uint16_t),
-           [buf_b contents], b_elems * sizeof(uint16_t));
+    uint16_t *out = (uint16_t *)[merged contents];
+    convert_bf16_to_f16(out, bf16_a, a_elems);
+    convert_bf16_to_f16(out + a_elems, bf16_b, b_elems);
 
     if (g_merged_count < MERGED_CACHE_SIZE) {
         g_merged_cache[g_merged_count].key1 = bf16_a;
         g_merged_cache[g_merged_count].key2 = bf16_b;
+        g_merged_cache[g_merged_count].key3 = NULL;
         g_merged_cache[g_merged_count].buffer = merged;
         g_merged_count++;
     }
@@ -205,28 +240,25 @@ static id<MTLBuffer> get_merged_f16_3(const uint16_t *bf16_a, size_t a_elems,
                                         const uint16_t *bf16_b, size_t b_elems,
                                         const uint16_t *bf16_c, size_t c_elems) {
     for (int i = 0; i < g_merged_count; i++) {
-        if (g_merged_cache[i].key1 == bf16_a && g_merged_cache[i].key2 == bf16_b)
+        if (g_merged_cache[i].key1 == bf16_a && g_merged_cache[i].key2 == bf16_b &&
+            g_merged_cache[i].key3 == bf16_c)
             return g_merged_cache[i].buffer;
     }
 
-    id<MTLBuffer> buf_a = get_cached_bf16_as_f16_buffer(bf16_a, a_elems);
-    id<MTLBuffer> buf_b = get_cached_bf16_as_f16_buffer(bf16_b, b_elems);
-    id<MTLBuffer> buf_c = get_cached_bf16_as_f16_buffer(bf16_c, c_elems);
-    if (!buf_a || !buf_b || !buf_c) return nil;
-
+    /* See get_merged_f16_2: convert directly, never cache the components. */
     size_t total = (a_elems + b_elems + c_elems) * sizeof(uint16_t);
     id<MTLBuffer> merged = [g_device newBufferWithLength:total
                                                  options:MTLResourceStorageModeShared];
     if (!merged) return nil;
-    memcpy([merged contents], [buf_a contents], a_elems * sizeof(uint16_t));
-    memcpy((uint8_t *)[merged contents] + a_elems * sizeof(uint16_t),
-           [buf_b contents], b_elems * sizeof(uint16_t));
-    memcpy((uint8_t *)[merged contents] + (a_elems + b_elems) * sizeof(uint16_t),
-           [buf_c contents], c_elems * sizeof(uint16_t));
+    uint16_t *out = (uint16_t *)[merged contents];
+    convert_bf16_to_f16(out, bf16_a, a_elems);
+    convert_bf16_to_f16(out + a_elems, bf16_b, b_elems);
+    convert_bf16_to_f16(out + a_elems + b_elems, bf16_c, c_elems);
 
     if (g_merged_count < MERGED_CACHE_SIZE) {
         g_merged_cache[g_merged_count].key1 = bf16_a;
         g_merged_cache[g_merged_count].key2 = bf16_b;
+        g_merged_cache[g_merged_count].key3 = bf16_c;
         g_merged_cache[g_merged_count].buffer = merged;
         g_merged_count++;
     }
@@ -238,6 +270,7 @@ static void clear_merged_cache(void) {
         g_merged_cache[i].buffer = nil;
         g_merged_cache[i].key1 = NULL;
         g_merged_cache[i].key2 = NULL;
+        g_merged_cache[i].key3 = NULL;
     }
     g_merged_count = 0;
 }
@@ -3840,5 +3873,7 @@ size_t vox_metal_memory_used(void) {
     for (int i = 0; i < g_weight_cache_count; i++)
         total += g_weight_cache[i].size;
     pthread_mutex_unlock(&g_cache_mutex);
+    for (int i = 0; i < g_merged_count; i++)
+        total += [g_merged_cache[i].buffer length];
     return total;
 }

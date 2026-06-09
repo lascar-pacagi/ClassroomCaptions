@@ -46,12 +46,34 @@ static uint16_t *load_bf16_direct(safetensors_file_t *sf, const char *name) {
     return safetensors_get_bf16_direct(sf, t);
 }
 
+/* Like load_bf16_direct but also validates the element count. Used for
+ * tensors indexed by runtime values (token ids): an undersized tensor in a
+ * malformed checkpoint would otherwise become an out-of-bounds mmap read. */
+static uint16_t *load_bf16_direct_checked(safetensors_file_t *sf,
+                                          const char *name,
+                                          int64_t expected_numel) {
+    const safetensor_t *t = safetensors_find(sf, name);
+    if (!t) {
+        fprintf(stderr, "decoder: weight not found: %s\n", name);
+        return NULL;
+    }
+    if (safetensor_numel(t) != expected_numel) {
+        fprintf(stderr,
+                "decoder: %s has %lld elements, expected %lld\n",
+                name, (long long)safetensor_numel(t),
+                (long long)expected_numel);
+        return NULL;
+    }
+    return safetensors_get_bf16_direct(sf, t);
+}
+
 int vox_decoder_load(vox_decoder_t *dec, safetensors_file_t *sf) {
     char name[512];
 
     /* Token embeddings (large, bf16 mmap direct) */
-    dec->tok_embeddings_bf16 = load_bf16_direct(sf,
-        "mm_streams_embeddings.embedding_module.tok_embeddings.weight");
+    dec->tok_embeddings_bf16 = load_bf16_direct_checked(sf,
+        "mm_streams_embeddings.embedding_module.tok_embeddings.weight",
+        (int64_t)VOX_VOCAB_SIZE * VOX_DEC_DIM);
     if (!dec->tok_embeddings_bf16) return -1;
 
     /* Transformer layers */
@@ -215,7 +237,9 @@ static int kv_cache_grow(vox_ctx_t *ctx, int required) {
     if (required <= ctx->kv_cache_max) return 0;
 
     int kv_dim = VOX_DEC_KV_HEADS * VOX_DEC_HEAD_DIM;
-    int new_max = ctx->kv_cache_max;
+    /* kv_cache_max can be 0 if the initial allocation failed; doubling from
+     * zero would loop forever. */
+    int new_max = ctx->kv_cache_max > 0 ? ctx->kv_cache_max : 256;
     while (new_max < required) new_max *= 2;
 
     size_t new_stride = (size_t)new_max * kv_dim;

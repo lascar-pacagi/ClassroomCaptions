@@ -169,8 +169,9 @@ vox_ctx_t *vox_load(const char *model_dir) {
         if (vox_verbose >= 2)
             fprintf(stderr, "Pre-warming Metal weight cache...\n");
 
-        /* Encoder weights: merged QKV + merged w1+w3 (replaces individual caching)
-         * wo and w2 still cached individually. */
+        /* Encoder weights: merged QKV + merged w1+w3; the merge converts
+         * directly without caching individual copies. wo and w2 are read
+         * individually by the monolithic step and stay cached. */
         for (int i = 0; i < VOX_ENC_LAYERS; i++) {
             vox_enc_layer_t *l = &ctx->encoder.layers[i];
             size_t enc_attn = (size_t)(VOX_ENC_HEADS * VOX_ENC_HEAD_DIM) * VOX_ENC_DIM;
@@ -196,21 +197,16 @@ vox_ctx_t *vox_load(const char *model_dir) {
         vox_metal_warmup_bf16(ctx->adapter.linear1_weight_bf16,
                               (size_t)VOX_DEC_DIM * VOX_DEC_DIM);
 
-        /* Decoder weights (26 layers) */
+        /* Decoder weights (26 layers). Only wo and w2 are read individually
+         * by the monolithic step; q/k/v and w1/w3 exist solely inside the
+         * merged buffers warmed below, so caching them individually would
+         * duplicate ~3.9 GB of f16 weights that are never read again. */
         for (int i = 0; i < VOX_DEC_LAYERS; i++) {
             vox_dec_layer_t *l = &ctx->decoder.layers[i];
-            size_t dec_q  = (size_t)(VOX_DEC_HEADS * VOX_DEC_HEAD_DIM) * VOX_DEC_DIM;
-            size_t dec_kv = (size_t)(VOX_DEC_KV_HEADS * VOX_DEC_HEAD_DIM) * VOX_DEC_DIM;
             size_t dec_wo = (size_t)VOX_DEC_DIM * (VOX_DEC_HEADS * VOX_DEC_HEAD_DIM);
-            size_t dec_f1 = (size_t)VOX_DEC_HIDDEN * VOX_DEC_DIM;
             size_t dec_f2 = (size_t)VOX_DEC_DIM * VOX_DEC_HIDDEN;
-            vox_metal_warmup_bf16(l->wq_weight_bf16, dec_q);
-            vox_metal_warmup_bf16(l->wk_weight_bf16, dec_kv);
-            vox_metal_warmup_bf16(l->wv_weight_bf16, dec_kv);
             vox_metal_warmup_bf16(l->wo_weight_bf16, dec_wo);
-            vox_metal_warmup_bf16(l->w1_weight_bf16, dec_f1);
             vox_metal_warmup_bf16(l->w2_weight_bf16, dec_f2);
-            vox_metal_warmup_bf16(l->w3_weight_bf16, dec_f1);
         }
 
         /* Token embeddings (also used as logits projection) */
@@ -234,15 +230,17 @@ vox_ctx_t *vox_load(const char *model_dir) {
         /* Pre-warm decoder MPS ops and f32 weight caches */
         vox_metal_warmup_decoder_ops(ctx);
 
-        /* Pre-allocate KV cache (shared GPU memory) */
-        vox_decoder_kv_cache_preallocate(ctx, VOX_DEC_WINDOW + 1024);
+        /* The decoder KV cache is preallocated by the bridge once the
+         * stream's max decode context is known (a fraction of the full
+         * 8192-position window); pure C callers fall back to the automatic
+         * allocation inside vox_decoder_prefill. */
 
         if (vox_verbose >= 1)
             fprintf(stderr, "Decoder KV cache: %s\n",
                     ctx->kv_cache_fp16 ? "fp16" : "fp32");
 
         /* Pre-allocate encoder KV cache (shared GPU memory for monolithic step) */
-        vox_encoder_kv_cache_preallocate(ctx, VOX_ENC_WINDOW + 256);
+        vox_encoder_kv_cache_preallocate(ctx, VOX_ENC_WINDOW + VOX_ENC_INC_MAX_BATCH);
 
         if (vox_verbose >= 1)
             fprintf(stderr, "Metal GPU: %.1f MB\n",
@@ -344,6 +342,8 @@ void vox_free(vox_ctx_t *ctx) {
     if (ctx->safetensors) {
         safetensors_close((safetensors_file_t *)ctx->safetensors);
     }
+    if (ctx->tokenizer)
+        vox_tokenizer_free((vox_tokenizer_t *)ctx->tokenizer);
 
     free(ctx);
 }
@@ -1195,16 +1195,20 @@ vox_stream_t *vox_stream_init(vox_ctx_t *ctx) {
     s->ctx = ctx;
     s->max_decode_context = STREAM_DEFAULT_MAX_DECODE_KV;
 
-    /* Load tokenizer */
-    char tok_path[1024];
-    snprintf(tok_path, sizeof(tok_path), "%s/tekken.json", ctx->model_dir);
-    s->tokenizer = vox_tokenizer_load(tok_path);
+    /* Tokenizer: borrowed from the context, parsed once. Re-parsing the
+     * 14 MB tekken.json on every stream re-creation made session restarts
+     * pay a multi-hundred-millisecond cost for identical data. */
+    if (!ctx->tokenizer) {
+        char tok_path[1024];
+        snprintf(tok_path, sizeof(tok_path), "%s/tekken.json", ctx->model_dir);
+        ctx->tokenizer = vox_tokenizer_load(tok_path);
+    }
+    s->tokenizer = (vox_tokenizer_t *)ctx->tokenizer;
     if (!s->tokenizer) { free(s); return NULL; }
 
     /* Initialize incremental mel with 32 left-pad tokens of silence */
     s->mel_ctx = vox_mel_ctx_init(32 * RAW_AUDIO_LENGTH_PER_TOK);
     if (!s->mel_ctx) {
-        vox_tokenizer_free(s->tokenizer);
         free(s);
         return NULL;
     }
@@ -1328,7 +1332,7 @@ void vox_stream_free(vox_stream_t *s) {
     }
 
     vox_mel_free(s->mel_ctx);
-    if (s->tokenizer) vox_tokenizer_free(s->tokenizer);
+    /* s->tokenizer is owned by the context and freed in vox_free(). */
     free(s->adapter_buf);
     free(s->token_queue);
     free(s->logits);
@@ -1435,13 +1439,18 @@ char *vox_transcribe_stdin(vox_ctx_t *ctx) {
             } else if (memcmp(p, "data", 4) == 0) {
                 pcm_data = p + 8;
                 pcm_size = (int)chunk_size;
-                if (pcm_data + pcm_size > end) pcm_size = (int)(end - pcm_data);
+                /* Piped writers emit 0xFFFFFFFF (int -1) as the data size,
+                 * and >2 GiB sizes go negative through the int cast: in both
+                 * cases fall back to the rest of the buffer. */
+                if (pcm_size <= 0 || pcm_data + pcm_size > end)
+                    pcm_size = (int)(end - pcm_data);
             }
             p += 8 + chunk_size;
             if (chunk_size & 1) p++;
         }
 
-        if (audio_format != 1 || bits_per_sample != 16 || !pcm_data || channels < 1) {
+        if (audio_format != 1 || bits_per_sample != 16 || !pcm_data ||
+            channels < 1 || sample_rate <= 0) {
             fprintf(stderr, "Unsupported WAV format on stdin\n");
             free(buf);
             return NULL;

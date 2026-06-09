@@ -19,6 +19,7 @@ final class VoxtralEmbeddedService: @unchecked Sendable {
 
     private struct State: @unchecked Sendable {
         var model: OpaquePointer?
+        var modelDirectoryPath: String?
         var stream: OpaquePointer?
         var continuation: AsyncStream<TranscriptionEvent>.Continuation?
         var provisionalText = ""
@@ -57,18 +58,44 @@ final class VoxtralEmbeddedService: @unchecked Sendable {
 
                 var status = CCV_STATUS_OK
                 var errorBuffer = [CChar](repeating: 0, count: 512)
-                let model = ccv_model_load(
-                    modelDirectory.path,
-                    &status,
-                    &errorBuffer,
-                    errorBuffer.count
-                )
-                guard let model else {
-                    continuation.resume(throwing: self.makeError(
-                        status: status,
-                        buffer: errorBuffer
-                    ))
-                    return
+                // Reuse the already-loaded model when the directory has not
+                // changed: reloading means re-mapping and re-converting ~9 GB
+                // of weights and dominates session-start latency.
+                let cached = self.state.withLock { state -> OpaquePointer? in
+                    guard let model = state.model,
+                          state.modelDirectoryPath == modelDirectory.path else {
+                        return nil
+                    }
+                    return model
+                }
+                let model: OpaquePointer
+                if let cached {
+                    model = cached
+                } else {
+                    let stale = self.state.withLock {
+                        state -> OpaquePointer? in
+                        let staleModel = state.model
+                        state.model = nil
+                        state.modelDirectoryPath = nil
+                        return staleModel
+                    }
+                    if let stale {
+                        ccv_model_free(stale)
+                    }
+                    let loaded = ccv_model_load(
+                        modelDirectory.path,
+                        &status,
+                        &errorBuffer,
+                        errorBuffer.count
+                    )
+                    guard let loaded else {
+                        continuation.resume(throwing: self.makeError(
+                            status: status,
+                            buffer: errorBuffer
+                        ))
+                        return
+                    }
+                    model = loaded
                 }
 
                 var options = ccv_stream_options_default()
@@ -85,7 +112,12 @@ final class VoxtralEmbeddedService: @unchecked Sendable {
                     errorBuffer.count
                 )
                 guard let stream else {
-                    ccv_model_free(model)
+                    // Keep the loaded model cached: stream creation can fail
+                    // on its own and the next attempt should not pay a reload.
+                    self.state.withLock { state in
+                        state.model = model
+                        state.modelDirectoryPath = modelDirectory.path
+                    }
                     continuation.resume(throwing: self.makeError(
                         status: status,
                         buffer: errorBuffer
@@ -95,6 +127,7 @@ final class VoxtralEmbeddedService: @unchecked Sendable {
 
                 self.state.withLock { state in
                     state.model = model
+                    state.modelDirectoryPath = modelDirectory.path
                     state.stream = stream
                     state.provisionalText = ""
                     state.isRunning = true
@@ -104,6 +137,7 @@ final class VoxtralEmbeddedService: @unchecked Sendable {
                 } catch {
                     self.state.withLock { state in
                         state.model = nil
+                        state.modelDirectoryPath = nil
                         state.stream = nil
                         state.isRunning = false
                     }
@@ -179,13 +213,12 @@ final class VoxtralEmbeddedService: @unchecked Sendable {
                 }
 
                 let resources = self.state.withLock {
-                    state -> (OpaquePointer?, OpaquePointer?, Bool) in
-                    let resources = (state.stream, state.model)
+                    state -> (OpaquePointer?, Bool) in
+                    let stream = state.stream
                     state.stream = nil
-                    state.model = nil
                     let wasRunning = state.isRunning
                     state.isRunning = false
-                    return (resources.0, resources.1, wasRunning)
+                    return (stream, wasRunning)
                 }
 
                 if let stream = resources.0 {
@@ -198,11 +231,10 @@ final class VoxtralEmbeddedService: @unchecked Sendable {
                     }
                     ccv_stream_free(stream)
                 }
-                if let model = resources.1 {
-                    ccv_model_free(model)
-                }
+                // The model is intentionally retained across sessions so the
+                // next start is near-instant; releaseModel() frees it.
                 let finalizedText = self.takeFinalizedProvisional()
-                if resources.2 {
+                if resources.1 {
                     self.emit(.disconnected)
                 }
                 continuation.resume(returning: finalizedText)
@@ -210,7 +242,45 @@ final class VoxtralEmbeddedService: @unchecked Sendable {
         }
     }
 
+    /// Frees the retained model (no-op while a session is active). Called on
+    /// app shutdown; ordinary stops keep the model so restarts are instant.
+    func releaseModel() {
+        inferenceQueue.async { [weak self] in
+            guard let self else { return }
+            let model = self.state.withLock { state -> OpaquePointer? in
+                guard state.stream == nil else { return nil }
+                let model = state.model
+                state.model = nil
+                state.modelDirectoryPath = nil
+                return model
+            }
+            if let model {
+                ccv_model_free(model)
+            }
+        }
+    }
+
     private func drainText(from stream: OpaquePointer) {
+        // Tokens arrive in bursts (one decode pass yields ~a dozen), and every
+        // .provisional event triggers a full main-actor caption pipeline pass.
+        // Drain the whole burst first, then emit one metrics + one provisional
+        // event for it.
+        var appendedToken = false
+        defer {
+            if appendedToken {
+                let provisional = state.withLock { $0.provisionalText }
+                let totalTokens = Int(ccv_stream_text_tokens_generated(stream))
+                let decoderSeconds =
+                    ccv_stream_decoder_milliseconds(stream) / 1_000
+                emit(.tokenMetrics(GenerationTokenMetrics(
+                    totalTokens: totalTokens,
+                    tokensPerSecond: decoderSeconds > 0
+                        ? Double(totalTokens) / decoderSeconds
+                        : 0
+                )))
+                emit(.provisional(provisional))
+            }
+        }
         while true {
             var requiredCapacity = 0
             var buffer = [CChar](repeating: 0, count: 256)
@@ -243,19 +313,8 @@ final class VoxtralEmbeddedService: @unchecked Sendable {
                 as: UTF8.self
             )
             guard !token.isEmpty else { continue }
-            let provisional = state.withLock { state -> String in
-                state.provisionalText.append(token)
-                return state.provisionalText
-            }
-            let totalTokens = Int(ccv_stream_text_tokens_generated(stream))
-            let decoderSeconds = ccv_stream_decoder_milliseconds(stream) / 1_000
-            emit(.tokenMetrics(GenerationTokenMetrics(
-                totalTokens: totalTokens,
-                tokensPerSecond: decoderSeconds > 0
-                    ? Double(totalTokens) / decoderSeconds
-                    : 0
-            )))
-            emit(.provisional(provisional))
+            state.withLock { $0.provisionalText.append(token) }
+            appendedToken = true
         }
     }
 

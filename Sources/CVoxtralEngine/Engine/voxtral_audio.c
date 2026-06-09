@@ -80,9 +80,10 @@ float *vox_parse_wav_buffer(const uint8_t *data, size_t file_size, int *out_n_sa
         if (chunk_size & 1) p++;
     }
 
-    if (audio_format != 1 || bits_per_sample != 16 || pcm_data == NULL || channels < 1) {
-        fprintf(stderr, "parse_wav_buffer: unsupported format (need 16-bit PCM, got fmt=%d bits=%d)\n",
-                audio_format, bits_per_sample);
+    if (audio_format != 1 || bits_per_sample != 16 || pcm_data == NULL ||
+        channels < 1 || sample_rate <= 0) {
+        fprintf(stderr, "parse_wav_buffer: unsupported format (need 16-bit PCM, got fmt=%d bits=%d rate=%d)\n",
+                audio_format, bits_per_sample, sample_rate);
         return NULL;
     }
 
@@ -548,6 +549,8 @@ vox_mel_ctx_t *vox_mel_ctx_init(int left_pad_samples) {
     ctx->samples_cap = ctx->left_pad + 16000; /* room for ~1s of audio */
     ctx->samples = (float *)calloc((size_t)ctx->samples_cap, sizeof(float));
     if (!ctx->samples) {
+        free(ctx->dft_cos);
+        free(ctx->dft_sin);
         free(ctx->mel_filters);
         free(ctx);
         return NULL;

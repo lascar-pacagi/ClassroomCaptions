@@ -10,6 +10,7 @@ private struct Arguments {
     let chunkMilliseconds: Int
     let prerollMilliseconds: Int
     let simulateRealtime: Bool
+    let restartTest: Bool
 }
 
 private struct PCMRecording {
@@ -63,6 +64,8 @@ private func parseArguments() throws -> Arguments {
         ? Int(try take("--preroll-ms")) ?? 0 : 0
     let realtime = values.contains("--realtime")
     values.removeAll(where: { $0 == "--realtime" })
+    let restartTest = values.contains("--restart-test")
+    values.removeAll(where: { $0 == "--restart-test" })
     guard values.isEmpty else {
         throw BenchmarkError.usage("Unknown arguments: \(values.joined(separator: " "))")
     }
@@ -75,7 +78,8 @@ private func parseArguments() throws -> Arguments {
         processingInterval: interval,
         chunkMilliseconds: chunk,
         prerollMilliseconds: max(0, preroll),
-        simulateRealtime: realtime
+        simulateRealtime: realtime,
+        restartTest: restartTest
     )
 }
 
@@ -192,6 +196,86 @@ private func wordAccuracy(reference: String, transcript: String) -> Double {
     return max(0, 1 - Double(previous[rhs.count]) / Double(lhs.count))
 }
 
+private func seconds(_ duration: Duration) -> Double {
+    Double(duration.components.seconds)
+        + Double(duration.components.attoseconds) / 1e18
+}
+
+/// Emulates the app's stop/start cycle on one loaded model: create a stream,
+/// prime it with the same 3.2 s of silence the app feeds before reporting
+/// "connected", feed the recording, then finish and free. Two cycles show
+/// what a session restart costs once the model is retained.
+private func runRestartTest(
+    model: OpaquePointer,
+    recording: PCMRecording,
+    arguments: Arguments
+) throws {
+    for cycle in 1 ... 2 {
+        var status = CCV_STATUS_OK
+        var errorBuffer = [CChar](repeating: 0, count: 512)
+        var options = ccv_stream_options_default()
+        options.delay_ms = arguments.delayMilliseconds
+        options.processing_interval_seconds = arguments.processingInterval
+
+        let createStarted = ContinuousClock.now
+        guard let stream = ccv_stream_create(
+            model,
+            options,
+            &status,
+            &errorBuffer,
+            errorBuffer.count
+        ) else {
+            throw BenchmarkError.engine("Unable to create stream (cycle \(cycle)).")
+        }
+        let createSeconds = seconds(ContinuousClock.now - createStarted)
+
+        let primeStarted = ContinuousClock.now
+        let silence = [Int16](repeating: 0, count: 16_000 * 32 / 10)
+        let primeStatus = silence.withUnsafeBufferPointer {
+            ccv_stream_feed_pcm16(stream, $0.baseAddress, $0.count)
+        }
+        guard primeStatus == CCV_STATUS_OK else {
+            throw BenchmarkError.engine(
+                String(cString: ccv_status_description(primeStatus))
+            )
+        }
+        var discarded = ""
+        _ = try drainText(stream: stream, transcript: &discarded)
+        let primeSeconds = seconds(ContinuousClock.now - primeStarted)
+
+        let chunkSamples = max(1, 16_000 * arguments.chunkMilliseconds / 1_000)
+        let feedStarted = ContinuousClock.now
+        var transcript = ""
+        var offset = 0
+        while offset < recording.samples.count {
+            let end = min(offset + chunkSamples, recording.samples.count)
+            let chunk = Array(recording.samples[offset ..< end])
+            let feedStatus = chunk.withUnsafeBufferPointer {
+                ccv_stream_feed_pcm16(stream, $0.baseAddress, $0.count)
+            }
+            guard feedStatus == CCV_STATUS_OK else {
+                throw BenchmarkError.engine(
+                    String(cString: ccv_status_description(feedStatus))
+                )
+            }
+            _ = try drainText(stream: stream, transcript: &transcript)
+            offset = end
+        }
+        let feedSeconds = seconds(ContinuousClock.now - feedStarted)
+
+        let stopStarted = ContinuousClock.now
+        _ = ccv_stream_finish(stream)
+        _ = try? drainText(stream: stream, transcript: &transcript)
+        ccv_stream_free(stream)
+        let stopSeconds = seconds(ContinuousClock.now - stopStarted)
+
+        print("cycle\(cycle)_stream_create_seconds=\(String(format: "%.3f", createSeconds))")
+        print("cycle\(cycle)_prime_seconds=\(String(format: "%.3f", primeSeconds))")
+        print("cycle\(cycle)_feed_seconds=\(String(format: "%.3f", feedSeconds))")
+        print("cycle\(cycle)_stop_seconds=\(String(format: "%.3f", stopSeconds))")
+    }
+}
+
 private func run() throws {
     let arguments = try parseArguments()
     let recording = try loadPCMRecording(path: arguments.audioPath)
@@ -212,6 +296,16 @@ private func run() throws {
     }
     let loadDuration = ContinuousClock.now - loadStarted
     defer { ccv_model_free(model) }
+
+    if arguments.restartTest {
+        print("model_load_seconds=\(String(format: "%.3f", seconds(loadDuration)))")
+        try runRestartTest(
+            model: model,
+            recording: recording,
+            arguments: arguments
+        )
+        return
+    }
 
     var options = ccv_stream_options_default()
     options.delay_ms = arguments.delayMilliseconds

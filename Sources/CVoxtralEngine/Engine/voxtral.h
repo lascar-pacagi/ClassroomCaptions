@@ -31,6 +31,9 @@
 #define VOX_ENC_HEAD_DIM     64
 #define VOX_ENC_HIDDEN       5120
 #define VOX_ENC_WINDOW       750
+/* Max new positions per incremental encoder pass: the shared (Metal) KV cache
+ * is preallocated at VOX_ENC_WINDOW + this and cannot grow. */
+#define VOX_ENC_INC_MAX_BATCH 256
 #define VOX_ENC_NORM_EPS     1e-5f
 
 /* Downsampling */
@@ -159,6 +162,11 @@ typedef struct {
     /* Model file (kept open for mmap) */
     void *safetensors;       /* safetensors_file_t* */
     char model_dir[512];
+
+    /* Tokenizer cached across streams (vox_tokenizer_t*). Parsing the 14 MB
+     * tekken.json takes long enough to dominate stream re-creation, so the
+     * first stream loads it and later streams borrow it. */
+    void *tokenizer;
 
     /* KV cache for decoder (rolling: compacted when full) */
     float *kv_cache_k;       /* [layers, max_seq, kv_heads * head_dim] */

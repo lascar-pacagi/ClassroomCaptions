@@ -449,8 +449,9 @@ static int enc_inc_ensure_buffers(vox_ctx_t *ctx, int new_len) {
  * Incremental Encoder Forward Pass
  * ======================================================================== */
 
-float *vox_encoder_forward_incremental(vox_ctx_t *ctx, const float *x_new,
-                                        int new_len, int *out_len) {
+static float *encoder_forward_incremental_batch(vox_ctx_t *ctx,
+                                                const float *x_new,
+                                                int new_len, int *out_len) {
     vox_encoder_t *enc = &ctx->encoder;
     int dim = VOX_ENC_DIM;        /* 1280 */
     int n_heads = VOX_ENC_HEADS;  /* 32 */
@@ -671,4 +672,42 @@ float *vox_adapter_forward(vox_ctx_t *ctx, const float *enc_out,
 
     *out_seq_len = ds_len;
     return out;
+}
+
+
+/* Public entry: process new positions in bounded batches. The shared (Metal)
+ * KV cache is preallocated at VOX_ENC_WINDOW + VOX_ENC_INC_MAX_BATCH and
+ * cannot grow, so a single oversized call would fail and the caller would
+ * silently discard that audio (then every later chunk too). Batching keeps
+ * results identical: each batch compacts, appends, and attends exactly as
+ * separate smaller feeds would. */
+float *vox_encoder_forward_incremental(vox_ctx_t *ctx, const float *x_new,
+                                        int new_len, int *out_len) {
+    if (new_len <= VOX_ENC_INC_MAX_BATCH)
+        return encoder_forward_incremental_batch(ctx, x_new, new_len, out_len);
+
+    int dim = VOX_ENC_DIM;
+    float *combined = (float *)malloc((size_t)new_len * dim * sizeof(float));
+    if (!combined) { *out_len = 0; return NULL; }
+
+    int done = 0;
+    while (done < new_len) {
+        int batch = new_len - done;
+        if (batch > VOX_ENC_INC_MAX_BATCH) batch = VOX_ENC_INC_MAX_BATCH;
+        int batch_out = 0;
+        float *part = encoder_forward_incremental_batch(
+            ctx, x_new + (size_t)done * dim, batch, &batch_out);
+        if (!part || batch_out != batch) {
+            free(part);
+            free(combined);
+            *out_len = 0;
+            return NULL;
+        }
+        memcpy(combined + (size_t)done * dim, part,
+               (size_t)batch * dim * sizeof(float));
+        free(part);
+        done += batch;
+    }
+    *out_len = new_len;
+    return combined;
 }
