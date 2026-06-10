@@ -15,7 +15,8 @@ without blocking the main thread; `await Task.sleep` suspends the task.
 
 - model alias;
 - ordered system/user messages;
-- deterministic temperature;
+- deterministic temperature (the sampling-randomness control; zero always
+  picks the most likely token);
 - bounded maximum output;
 - non-streaming response choice.
 

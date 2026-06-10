@@ -12,7 +12,8 @@ The live subtitle never waits for this chapter's pipeline. The deterministic val
 ### Safety and latency contract
 
 The correction model receives quoted caption data and has no tool interface.
-Requests are serialized because parallel 26B-model generations would increase
+Requests are serialized because parallel 26B-model (26-billion-parameter)
+generations would increase
 latency and memory pressure. Failure, timeout, malformed JSON, or rejected text
 leaves the raw caption visible. This is a refinement path, never an
 accessibility dependency.
@@ -66,7 +67,8 @@ without blocking the main thread; `await Task.sleep` suspends the task.
 
 - model alias;
 - ordered system/user messages;
-- deterministic temperature;
+- deterministic temperature (the sampling-randomness control; zero always
+  picks the most likely token);
 - bounded maximum output;
 - non-streaming response choice.
 
@@ -133,6 +135,11 @@ This map gives the reading spine of the file. Line numbers refer to the original
 
 The file begins by importing `Foundation`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
+The only import is `Foundation`, Apple's base library beyond the Swift language
+itself; this file draws on it for `Process` (the child-program handle), `Pipe`,
+`URLSession` (the HTTP client), and `URLRequest`. Nothing executes at import
+time.
+
 ```{.swift .numberLines startFrom="1"}
 import Foundation
 
@@ -140,10 +147,13 @@ import Foundation
 
 ### `enum GemmaServerError: LocalizedError`
 
-The typed failure set for the locally launched MLX-LM server, conforming to
-LocalizedError so each case renders a user-facing string: executableMissing
-names the bad path, launchFailed wraps the spawn error or a non-zero exit, and
-unavailable means the health endpoint never went green within the startup window.
+The typed failure set for the locally launched MLX-LM server (the separate
+program that loads the Gemma model and answers requests over local HTTP).
+Conforming to `LocalizedError` lets each case render a user-facing string:
+`executableMissing` names the bad path, `launchFailed` wraps the spawn error or
+a non-zero exit, and `unavailable` means the health endpoint never answered
+successfully within the startup window. Distinct cases let the dashboard say
+*which* part of this optional, fail-soft feature went wrong.
 
 ```{.swift .numberLines startFrom="3"}
 enum GemmaServerError: LocalizedError {
@@ -168,9 +178,13 @@ enum GemmaServerError: LocalizedError {
 ### `final class GemmaServerController`
 
 Main-actor owner of the optional MLX-LM child and its health-check session.
-Actor isolation serializes launch and termination with UI workflows, while
-health probes suspend instead of blocking the event loop. Only the child stored
-in `process` is considered owned and eligible for termination.
+`Process` is Foundation's handle for launching and controlling a child program
+— roughly fork/exec, wait, and kill wrapped in one object — and `URLSession` is
+Foundation's HTTP client, the object that opens connections, sends requests,
+and hands back responses. Actor isolation serializes launch and termination
+with UI workflows, while health probes suspend instead of blocking the event
+loop. Only the child stored in `process` is considered owned and eligible for
+termination.
 
 ```{.swift .numberLines startFrom="20"}
 @MainActor
@@ -182,10 +196,12 @@ final class GemmaServerController {
 
 ### `init()`
 
-Creates an ephemeral session with one-second request and two-second resource
-timeouts. Individual failed probes therefore return quickly; `ensureReady`
-supplies the separate 45-second model-loading deadline around repeated probes.
-No cookies or persistent cache are useful for loopback health checks.
+Creates an ephemeral session (one that keeps no on-disk cache, cookies, or
+credentials — useless baggage for loopback health checks) with deliberately
+tight deadlines: one second for a request and two seconds for the whole
+transfer. A probe against a server that is not listening yet therefore fails
+almost immediately instead of hanging; `ensureReady` supplies the separate
+45-second model-loading deadline by simply repeating these cheap probes.
 
 ```{.swift .numberLines startFrom="25"}
     init() {
@@ -199,10 +215,15 @@ No cookies or persistent cache are useful for loopback health checks.
 
 ### `func ensureReady(…)`
 
-Readiness is idempotent: a healthy existing endpoint returns immediately.
-Otherwise the owned process is launched once and polled with `ContinuousClock`,
-which is monotonic and unaffected by wall-clock changes. Early child exit is
-reported without waiting for the full timeout.
+Readiness is idempotent: if the endpoint already answers health checks —
+no matter who started the server — the function returns at once, so a
+professor-managed server is reused rather than duplicated. Otherwise the owned
+child is launched once; because the only trustworthy ready signal is the server
+answering HTTP after its multi-second model load, the loop probes every 250 ms,
+and `Task.sleep` suspends between probes without occupying a thread. The
+deadline uses `ContinuousClock`, which is monotonic and unaffected by
+wall-clock changes, and an early child exit is reported immediately with its
+exit status instead of waiting out the full 45 seconds.
 
 ```{.swift .numberLines startFrom="32"}
     func ensureReady(
@@ -259,11 +280,14 @@ discovered through the lsof fallback.
 
 ### `func processIdentifier(endpoint: URL) async -> pid_t?`
 
-Resolves the server's PID, preferring the live owned Process's identifier. When
-the app did not spawn the server it falls back to running `lsof -nP -tiTCP:port
--sTCP:LISTEN` in a detached task, so a slow lsof can never stall the main actor
-or the caption path. Any lsof failure, non-zero exit, or unparseable output
-yields nil rather than a wrong PID.
+Resolves the server's PID, preferring the live owned `Process`'s identifier.
+When the app did not spawn the server, it asks the operating system instead by
+running `lsof -nP -tiTCP:port -sTCP:LISTEN` as a child process whose stdout is
+captured through a `Pipe` (an in-memory channel — the same idea as a Unix pipe
+— connecting the child's output to this app). `Task.detached` runs that lookup
+on a background executor, so a slow lsof plus `waitUntilExit` can never stall
+the main actor or the caption path. Any lsof failure, non-zero exit, or
+unparseable output yields nil rather than a wrong PID.
 
 ```{.swift .numberLines startFrom="72"}
     func processIdentifier(endpoint: URL) async -> pid_t? {
@@ -302,11 +326,15 @@ yields nil rather than a wrong PID.
 
 ### `private func launch(…)`
 
-Spawns the owned mlx_lm.server child once. It verifies the path is executable
-(else executableMissing) and the endpoint yields host and port, then runs it with
-deterministic flags: temp 0 and disabled thinking for reproducible proofreading,
-max-tokens 384, single decode/prompt concurrency, and WARNING logging. stdout and
-stderr go to /dev/null. A run failure is rethrown as launchFailed.
+Spawns the owned mlx_lm.server child once: it verifies the path is executable
+(else `executableMissing`) and that the endpoint yields a host and port, then
+starts the program with flags chosen for predictable proofreading. Temperature
+0 removes sampling randomness (the model always picks its most probable next
+token, so the same caption yields the same correction), disabled thinking stops
+the model from emitting a self-reasoning preamble, max-tokens caps any reply at
+384 tokens, and decode/prompt concurrency of one forbids overlapping
+generations that would compete for memory. stdout and stderr go to /dev/null,
+logging is WARNING-only, and a `run()` failure is rethrown as `launchFailed`.
 
 ```{.swift .numberLines startFrom="104"}
     private func launch(
@@ -350,10 +378,14 @@ stderr go to /dev/null. A run failure is rethrown as launchFailed.
 
 ### `private func isHealthy(endpoint: URL) async -> Bool`
 
-Probes readiness with a GET to v1/models on the short-timeout ephemeral health
-session, returning true only for a 2xx HTTPURLResponse. Any thrown error,
-non-HTTP response, or non-2xx status maps to false, so polling treats
-connection-refused during startup as simply not-yet-ready.
+One complete HTTP request/response cycle used as a readiness probe. It builds
+the standard `v1/models` URL, marks the request GET (a read-only fetch), and
+`try await healthSession.data(for:)` sends it and suspends until the server
+replies or the one-second timeout fires. An HTTP reply carries a three-digit
+status code; only the 200–299 "success" range counts as healthy. Any thrown
+error, non-HTTP response, or other status maps to false, so the poll loop
+treats connection-refused during startup as simply not-yet-ready rather than as
+a failure.
 
 ```{.swift .numberLines startFrom="141"}
     private func isHealthy(endpoint: URL) async -> Bool {
@@ -409,6 +441,11 @@ This map gives the reading spine of the file. Line numbers refer to the original
 
 The file begins by importing `ClassroomCaptionsCore`, `Foundation`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
+`ClassroomCaptionsCore` is the app's own domain module: it provides the caption
+segment types, the correction request/result values, and the deterministic
+`CaptionCorrectionValidator` applied at the end of `correct`. `Foundation`
+supplies the `URLSession` HTTP client and the JSON encoder/decoder pair.
+
 ```{.swift .numberLines startFrom="1"}
 import ClassroomCaptionsCore
 import Foundation
@@ -417,10 +454,12 @@ import Foundation
 
 ### `enum GemmaCorrectionError: LocalizedError`
 
-Separates malformed endpoint construction, structurally invalid success
-payloads, and non-2xx server replies carrying status plus body. Typed errors let
-the coordinator preserve control flow while `LocalizedError` supplies stable
-dashboard text.
+Separates the three ways a correction round trip can fail before validation:
+the endpoint URL cannot be built, the server's successful reply lacks the
+expected JSON structure, or the server answers with a non-success HTTP status
+(anything outside 200–299), in which case the numeric code and the reply body
+text are kept for diagnosis. Typed errors let the coordinator preserve ordinary
+control flow while `LocalizedError` supplies stable dashboard text.
 
 ```{.swift .numberLines startFrom="4"}
 enum GemmaCorrectionError: LocalizedError {
@@ -455,9 +494,13 @@ actor GemmaCorrectionService: CaptionCorrectionService {
 
 ### `private struct Message: Codable`
 
-The smallest chat-protocol unit: role and content. It remains a wire value rather
-than a domain enum because the OpenAI-compatible endpoint owns role vocabulary.
-`Codable` gives symmetric, compiler-checked JSON field names.
+The smallest chat-protocol unit: one labeled utterance. Chat-style LLM
+endpoints take a list of these, where `role` says who is speaking — "system"
+for the operator's standing instructions, "user" for the data to act on — and
+models are trained to give system text higher authority, which is what makes
+the injection defenses below meaningful. `role` stays a plain string rather
+than a Swift enum because the OpenAI-compatible endpoint owns the role
+vocabulary; `Codable` gives symmetric, compiler-checked JSON field names.
 
 ```{.swift .numberLines startFrom="22"}
     private struct Message: Codable {
@@ -469,10 +512,16 @@ than a domain enum because the OpenAI-compatible endpoint owns role vocabulary.
 
 ### `private struct CompletionRequest: Encodable`
 
-The OpenAI-style chat-completions request body. It hard-codes temperature 0 and
-stream false for deterministic, single-shot proofreading and pins model to
-default_model; only messages and the per-segment max_tokens vary. The constant
-fields have defaults, so they are encoded without being passed at the call site.
+The body of an OpenAI-style chat-completion request — the standard
+"generate text from this conversation" message an LLM server accepts. Its
+fields are the whole contract: `model` (pinned to default_model, the one model
+MLX-LM loaded), the ordered `messages` conversation, `temperature` 0.0 (no
+sampling randomness, so the same caption always yields the same correction),
+`max_tokens` capping how much the model may generate, and `stream` false so
+the reply arrives as one JSON document instead of incremental fragments.
+Because the constant fields carry default values, call sites supply only
+`messages` and the per-segment token budget, yet encoding still writes every
+field into the JSON.
 
 ```{.swift .numberLines startFrom="27"}
     private struct CompletionRequest: Encodable {
@@ -487,10 +536,14 @@ fields have defaults, so they are encoded without being passed at the call site.
 
 ### `private struct CompletionResponse: Decodable`
 
-The decoded response envelope: an array of choices and optional usage. It
-surfaces each choice's reasoningContent alongside content so correct() can reject
-any reply where the model leaked chain-of-thought instead of returning a clean
-caption. Nested CodingKeys remap the server's snake_case to camelCase.
+The decoded reply envelope. Completion servers return an array of `choices`
+(alternative generations — this app only ever reads the first) and an optional
+`usage` block counting prompt and generated tokens, which feeds the dashboard's
+correction metrics. Each choice's message exposes `reasoningContent` alongside
+`content` so `correct()` can reject any reply where the model leaked
+chain-of-thought (step-by-step self-talk) instead of returning a clean caption.
+Nested `CodingKeys` remap the server's snake_case names to Swift camelCase, and
+`Decodable` ignores any JSON fields this struct does not declare.
 
 ```{.swift .numberLines startFrom="35"}
     private struct CompletionResponse: Decodable {
@@ -590,9 +643,13 @@ override the injection defenses.
 
 ### `init(endpoint: URL)`
 
-Stores the already validated loopback endpoint and configures an ephemeral
-session with bounded request and resource deadlines. The initializer does not
-rewrite hosts or ports; endpoint policy remains the app model's responsibility.
+Stores the already validated loopback endpoint and builds an ephemeral session
+(no on-disk cache or cookies) whose deadlines bound every correction round
+trip: twelve seconds per request and fifteen for the whole transfer.
+Corrections are serialized one at a time, so a hung generation must fail fast
+and surrender the queue rather than stall later captions. The initializer does
+not rewrite hosts or ports; endpoint policy remains the app model's
+responsibility.
 
 ```{.swift .numberLines startFrom="118"}
     init(endpoint: URL) {
@@ -607,10 +664,18 @@ rewrite hosts or ports; endpoint policy remains the app model's responsibility.
 
 ### `func correct(…)`
 
-The request budget scales with caption length but remains bounded. Context and
-target are placed in separate data markers. After HTTP and JSON checks, any
-nonempty reasoning channel causes rejection; content then passes through the
-deterministic validator before becoming a result.
+One full request/response cycle with the model server. The function builds the
+`v1/chat/completions` URL, computes a token budget that scales with caption
+length but stays inside [48, 384], and assembles the two-message conversation:
+the mode's system prompt, then a user message in which previous captions and
+the target text sit inside distinct data markers so the model cannot mistake
+either for instructions. `JSONEncoder().encode` turns the request struct into
+JSON bytes, sent as a POST with a `Content-Type: application/json` header;
+`try await session.data(for:)` suspends until the reply arrives. The reply is
+then distrusted step by step — the status must be 2xx, `JSONDecoder` must
+produce the expected shape, any nonempty reasoning channel causes rejection,
+and the surviving text must still pass the deterministic validator before
+becoming a result.
 
 ```{.swift .numberLines startFrom="126"}
     func correct(

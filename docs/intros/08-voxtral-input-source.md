@@ -4,7 +4,8 @@ This chapter has three independent parts; read each beside the code it describes
 
 - **Audio front end** (`voxtral_audio.c`). Start at `vox_mel_feed`, the entry the
   streaming runtime calls with new samples: it appends them to a buffer and calls
-  `mel_compute_available`, where the per-frame *window -> DFT -> mel -> log* loop
+  `mel_compute_available`, where the per-frame *window -> DFT (Discrete Fourier
+  Transform) -> mel -> log* loop
   lives. `build_mel_filters` (called once at init) precomputes the 128 triangular
   filters; `vox_mel_finish` flushes the final padded frames. The math behind that
   loop is the next section.
@@ -39,9 +40,11 @@ across every frequency ("spectral leakage"). The taper makes the finite frame
 look periodic.
 
 **3. The Fourier transform (per frame).** Each windowed frame is moved from the
-time domain to the frequency domain. A Discrete Fourier Transform of
+time domain to the frequency domain — that is, rewritten as a sum of sinusoids,
+recording how much energy each frequency contributes. A Discrete Fourier Transform of
 `N_FFT = 400` real samples yields `N_FREQ = N_FFT/2 + 1 = 201` bins spanning 0 Hz
-to the 8 kHz Nyquist limit, about 40 Hz apart. The code computes this as a
+to the 8 kHz Nyquist limit (half the sample rate, the highest frequency a
+sampled signal can represent), about 40 Hz apart. The code computes this as a
 **direct** DFT against precomputed cosine/sine tables rather than calling an FFT
 library: at this size it is cheap, dependency-free, and reproduces the training
 pipeline bit-for-bit. What it keeps is **power**, `|FFT|^2 = real^2 + imag^2` —
@@ -67,7 +70,8 @@ clamp or scale will still mis-recognize**, because it moves the input off that
 distribution.
 
 The output is one `[frames, 128]` matrix. One last detail matches the reference
-implementation (vLLM): the **final STFT frame is dropped** (`stft[..., :-1]`), so
+implementation (vLLM, an open-source inference engine used as the reference):
+the **final STFT frame is dropped** (`stft[..., :-1]`), so
 one second of audio yields 100 frames, not 101.
 
 ### Doing it incrementally
@@ -79,7 +83,8 @@ counters survive buffer compaction — `sample_offset` (leading samples discarde
 and `mel_frame_offset` (leading frames compacted away) — so a frame's logical
 position is always recoverable even after old audio is freed (roughly every
 second, `MEL_SAMPLE_COMPACT_MIN`). At `finish`, right-edge reflection padding
-supplies the final windows so the last words are not truncated.
+(mirroring the last samples) supplies the final windows so the last words are
+not truncated.
 
 ## Safetensors as a model ABI
 

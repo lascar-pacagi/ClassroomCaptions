@@ -33,6 +33,12 @@ the WAV header boundary, and the per-source ticket cap):
   hardening (medium-risk audio change, needs manual listening tests), the
   broad unchecked-malloc cluster, systemic per-tensor shape validation beyond
   `tok_embeddings`, and plaintext HTTP (accepted design limitation).
+- **Minor findings from the 2026-06-10 book verification pass (not fixed):**
+  `AudioDeviceCatalog.stringProperty` reads `AudioObjectGetPropertyData`'s
+  returned `CFString` with `takeUnretainedValue` and never releases it — the
+  API transfers ownership, so each device query leaks one small string;
+  `DisplayChoice.frame` is captured but never read by any view; the `gelu`
+  Metal pipeline is compiled but never dispatched by the current host.
 
 ## Performance fix status (2026-06-10)
 

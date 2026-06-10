@@ -354,7 +354,8 @@ access behavior. View modifiers return new values; a chain such as
 ### Safety and latency contract
 
 The correction model receives quoted caption data and has no tool interface.
-Requests are serialized because parallel 26B-model generations would increase
+Requests are serialized because parallel 26B-model (26-billion-parameter)
+generations would increase
 latency and memory pressure. Failure, timeout, malformed JSON, or rejected text
 leaves the raw caption visible. This is a refinement path, never an
 accessibility dependency.
@@ -400,7 +401,8 @@ is part of the runtime's correctness.
 ![The streaming runtime keeps separate counters for samples, Mel frames, convolution positions, encoder positions, and decoder positions.](../figures/voxtral-time-domains.svg){#fig-voxtral-time-domains width=97%}
 
 PCM means Pulse-Code Modulation. A Mel spectrogram is a short-time spectral
-representation whose frequency bins follow a perceptual Mel scale. KV means
+representation (energy per frequency band, frame by frame over time) whose
+frequency bins follow a perceptual Mel scale. KV means
 key-value attention cache. BF16 means bfloat16, a 16-bit format retaining the
 8-bit exponent width of IEEE-754 float. FP16 is IEEE half precision; the two
 formats are not interchangeable.
@@ -423,7 +425,8 @@ make the underlying C operation cancellable or thread-safe.
 ### Boundary formats
 
 Audio code establishes the exact numerical representation entering the model.
-Safetensors code establishes tensor names, shapes, dtypes, mapped ownership, and
+Safetensors code establishes tensor names, shapes, dtypes (element data types
+such as BF16 or F32), mapped ownership, and
 bounds. Tokenizer code establishes the mapping between decoder IDs and bytes.
 These are not peripheral parsers: they define the model ABI on disk.
 
@@ -450,7 +453,8 @@ Unit. SiLU means Sigmoid Linear Unit. RoPE means Rotary Position Embedding.
 RMSNorm means Root Mean Square Layer Normalization.
 
 Shape errors compile successfully in C and usually become memory corruption or
-plausible but incorrect logits rather than a useful type error.
+plausible but incorrect logits (the per-vocabulary-entry scores from which the
+next token is chosen) rather than a useful type error.
 
 ![A transformer layer appends only the new K/V rows, then attention reuses the complete retained cache before the residual feed-forward path.](../figures/transformer-cache-flow.svg){#fig-transformer-cache-flow width=96%}
 """,
@@ -460,7 +464,8 @@ plausible but incorrect logits rather than a useful type error.
 The CPU validates dimensions, chooses a cached pipeline, fills small parameter
 structures, encodes work, and decides when completion is required. Metal
 buffers contain large tensors; command buffers order GPU operations; pipeline
-state objects are compiled shader entry points. Metal Performance Shaders (MPS)
+state objects are compiled entry points into shaders (the small programs that
+run on the GPU). Metal Performance Shaders (MPS)
 provide a tuned dense matrix multiply (`MPSMatrixMultiplication`) where a custom
 kernel is unnecessary.
 
@@ -639,7 +644,8 @@ FILE_GUIDES = {
     "ClassroomCaptionsApp.swift": """
 SwiftUI's `App` protocol is the process-level composition root. The
 `@State` wrapper gives the scene one persistent `ClassroomAppModel`; `WindowGroup`
-creates the dashboard scene; lifecycle hooks forward termination to the model.
+creates the dashboard scene (a scene is SwiftUI's unit of window content);
+lifecycle hooks forward termination to the model.
 For a C programmer, treat this file as the small `main` that constructs the
 long-lived owner graph rather than as an ordinary view.
 """,
@@ -701,7 +707,8 @@ actual data size, closes the handle, then writes transcript text, JSON, and
 metadata. Cancellation closes resources and removes partial state.
 
 The generic `perform` bridge converts callback/queue work into Swift
-continuations. Its ownership contract matters: exactly one continuation resume
+continuations (handles that resume a suspended `async` caller with a result or
+error). Its ownership contract matters: exactly one continuation resume
 must occur, and mutable file state remains queue-confined despite the class's
 `@unchecked Sendable` declaration.
 """,
@@ -713,7 +720,8 @@ invoke workflows; helper properties split a large dashboard into readable view
 fragments.
 
 The QR helper supplies UTF-8 URL bytes to Core Image, requests correction level
-M, then applies an integer scale without interpolation. The result transfers a
+M (a medium QR error-correction setting; Chapter 11 details the encoding), then
+applies an integer scale without interpolation. The result transfers a
 bearer URL visually; it does not add encryption or authentication.
 """,
     "CaptionOverlayController.swift": """
@@ -773,7 +781,8 @@ This service owns one C model handle and one C stream handle and confines all
 operations to a serial inference queue. Startup loads the full FP16/BF16 model,
 creates configured streaming state, primes the decoder with silence, and only
 then emits `connected`. Priming moves one-time allocation and kernel warm-up
-before live speech so the first words are not lost.
+(the first, slowest runs of the GPU compute routines) before live speech so the
+first words are not lost.
 
 PCM feed, flush, text draining, counters, and destruction never overlap.
 `AsyncStream` transfers value events to the app model. Stop drains stable text
@@ -791,7 +800,8 @@ Mel bins, and emitted frame indices. Most streaming errors in this layer are
 off-by-one mistakes between retained sample indices and absolute frame indices.
 """,
     "voxtral_tokenizer.c": """
-The tokenizer loader parses the Tekken vocabulary representation used by the
+The tokenizer loader parses the Tekken vocabulary representation (Mistral's
+JSON tokenizer format) used by the
 model and builds an ID-to-byte-piece table. Decoder output may split a UTF-8
 character across tokens, so consumers must concatenate bytes before assuming a
 complete displayed character. Control token IDs are model protocol, not text.
@@ -908,7 +918,9 @@ duration, inference time, real-time factor, first-token latency, the transcript,
 and optional word accuracy. It does not emit decoder token counts or
 tokens-per-second; those diagnostics exist only on the embedded in-app path.
 
-Word accuracy uses word-level Levenshtein distance normalized by reference
+Word accuracy uses word-level Levenshtein distance (the minimum number of word
+insertions, deletions, and substitutions turning one transcript into the other)
+normalized by reference
 length. It is a diagnostic metric, not a replacement for listening tests.
 """,
     "Package.swift": """
@@ -1524,11 +1536,27 @@ def symbol_present(symbol: str, text: str) -> bool:
     return re.search(left + re.escape(symbol) + right, text) is not None
 
 
-def symbol_guide(path: Path, block: list[str]) -> str | None:
+# Continuation notes attached during the current generation run; main() warns
+# about configured "@line" keys that no longer match any block, so commentary
+# cannot silently detach when source lines shift.
+ATTACHED_CONTINUATION_KEYS: set = set()
+
+
+def symbol_guide(
+    path: Path, block: list[str], start: int | None = None
+) -> str | None:
     # A pagination continuation of a large declaration begins no declaration of
-    # its own, so it must never borrow a note: its body can name other functions
-    # it merely calls. Only blocks that actually start a declaration qualify.
+    # its own, so it must never borrow a declaration note: its body can name
+    # other functions it merely calls. Continuations are instead addressed
+    # explicitly by their starting source line with an "@line" key, letting the
+    # interior pages of a long function carry their own commentary.
     if not declaration_names(path, block):
+        if start is not None:
+            key = (path.name, f"@{start}")
+            guide = SYMBOL_GUIDES.get(key)
+            if guide is not None:
+                ATTACHED_CONTINUATION_KEYS.add(key)
+                return guide.strip()
         return None
     # Match a note's symbol only against the block's own top-level declaration
     # lines, never the deeper body. Matching the whole block text let a function
@@ -1643,7 +1671,7 @@ def write_shader_section(
                 f"### Continuation of {subject} "
                 "{.unnumbered .unlisted}\n\n"
             )
-        guide = symbol_guide(SHADER_MSL_PATH, block)
+        guide = symbol_guide(SHADER_MSL_PATH, block, start)
         if guide:
             output.append(guide + "\n\n")
         body = "".join(block)
@@ -1716,7 +1744,7 @@ def write_file_section(path_text: str) -> tuple[str, bytes]:
                 f"### Continuation of {subject} "
                 "{.unnumbered .unlisted}\n\n"
             )
-        guide = symbol_guide(path, block)
+        guide = symbol_guide(path, block, start)
         if guide:
             output.append(guide + "\n\n")
         body = "".join(block)
@@ -1782,6 +1810,16 @@ def main() -> None:
     if missing:
         raise RuntimeError("production files omitted from source book: " + ", ".join(missing))
     print(f"verified complete production coverage: {len(production)} files")
+
+    stale = sorted(
+        key for key in SYMBOL_GUIDES
+        if key[1].startswith("@") and key not in ATTACHED_CONTINUATION_KEYS
+    )
+    if stale:
+        print(f"WARNING: {len(stale)} continuation note(s) no longer attach "
+              "(source lines moved?):")
+        for filename, at in stale:
+            print(f"  {filename} {at}")
 
 
 if __name__ == "__main__":

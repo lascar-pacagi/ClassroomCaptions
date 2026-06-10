@@ -33,9 +33,9 @@ plausible correction.
 | Piece | Process | Responsibility |
 | --- | --- | --- |
 | `ClassroomCaptions` | main app process | user interface (UI), audio, orchestration, embedded Voxtral, overlay, local server |
-| Metal runtime | main app process / graphics processing unit (GPU) | Voxtral tensor operations |
-| `mlx_lm.server` | child or reused local process | Gemma correction endpoint on loopback |
-| browser client | iPhone/Android/personal computer (PC) browser | caption Server-Sent Events (SSE) viewer or question form |
+| Metal runtime | main app process / graphics processing unit (GPU) | Voxtral tensor (multi-dimensional array) operations through Metal, Apple's GPU programming interface |
+| `mlx_lm.server` | child or reused local process | Gemma correction endpoint (request-serving network address) on loopback (the machine-internal network interface, 127.0.0.1) |
+| browser client | iPhone/Android/personal computer (PC) browser | caption Server-Sent Events (SSE, a one-way HTTP stream the server keeps open to push updates) viewer or question form |
 | `VoxtralBenchmark` | separate command-line interface (CLI) process | model speed and quality measurement |
 
 The application remains useful if Gemma is stopped or Wi-Fi sharing is
@@ -79,8 +79,8 @@ The Start action calls `ClassroomAppModel.startSession()`.
 1. The app latches session-sensitive settings.
 2. If correction is enabled, Gemma warm-up begins independently.
 3. Embedded Voxtral loads model components and creates a stream.
-4. The decoder is primed with silence so startup work does not consume the
-   first spoken words.
+4. The decoder — the model stage that emits caption text — is primed with
+   silence so startup work does not consume the first spoken words.
 5. Only after Voxtral emits `connected` does the app request/open microphone
    capture and create the optional archive.
 6. The session phase changes from `starting` to `listening`.
@@ -91,8 +91,8 @@ while the model initializes.
 
 ## One audio chunk through the system
 
-Assume the hardware provides frames at its native sample rate and channel
-layout.
+Assume the hardware provides frames at its native sample rate (audio
+measurements per second) and channel layout.
 
 ### Core Audio callback
 
@@ -113,13 +113,16 @@ keeps “paused” semantically consistent across transcription and recording.
 
 `VoxtralEmbeddedService` copies/owns the Pulse-Code Modulation (PCM) bytes and
 enqueues C calls on one
-serial inference queue. The mutable `vox_stream_t` is therefore never entered
+serial inference queue (a queue that runs one submitted task at a time, giving
+mutual exclusion). The mutable `vox_stream_t` is therefore never entered
 concurrently. C transforms only newly stable positions and retains the exact
-tails and key-value (KV) attention caches needed for the next chunk.
+tails and key-value (KV) attention caches (stored per-position vectors the
+model re-reads instead of recomputing) needed for the next chunk.
 
 ### Event transfer
 
-Complete token pieces are drained from C and emitted through
+Complete token pieces (a token is a model-chosen text fragment, often shorter
+than a word) are drained from C and emitted through
 `AsyncStream<TranscriptionEvent>`, a Swift asynchronous sequence whose producer
 yields events over time. The app model observes the stream and hops to
 `@MainActor`, Swift's isolation annotation for state that must be accessed on
@@ -169,7 +172,8 @@ authoritative transcript.
 ## Local sharing and student questions
 
 When sharing starts, `LocalCaptionServer` creates a Wi-Fi-constrained
-`NWListener`, a random viewer capability, and a Uniform Resource Locator (URL)
+`NWListener`, a random viewer capability (a secret bearer token: possession
+alone grants access), and a Uniform Resource Locator (URL)
 containing the Mac's Internet Protocol version 4 (IPv4) address. The dashboard
 encodes that URL as a Quick Response (QR) symbol.
 
@@ -195,8 +199,9 @@ control methods.
 
 `Sendable` is a Swift concurrency contract stating that a value may cross an
 isolation boundary. It does not make an object magically thread-safe. Each unchecked
-conformance in this application is backed by a serial queue, actor, mutex, or a
-combination whose responsibilities are documented in the relevant chapter.
+conformance in this application is backed by a serial queue, actor (a Swift
+reference type whose mutable state is accessed by one task at a time), mutex,
+or a combination whose responsibilities are documented in the relevant chapter.
 
 ## Stopping without losing the last words
 

@@ -19,7 +19,7 @@ The overlay requires behavior outside ordinary SwiftUI scene control:
 - no application activation when clicked;
 - explicit window level;
 - placement on a chosen `NSScreen`;
-- Spaces/full-screen collection behavior;
+- Spaces (macOS virtual desktops)/full-screen collection behavior;
 - pointer-level move and resize;
 - frame persistence per physical display.
 

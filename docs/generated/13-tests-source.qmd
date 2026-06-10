@@ -108,6 +108,10 @@ This map gives the reading spine of the file. Line numbers refer to the original
 
 The file begins by importing `ClassroomCaptionsCore`, `Foundation`, `XCTest`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
+The imports bring in `ClassroomCaptionsCore` (the production module providing
+`PCM16LevelMeter`), Foundation for the `Data` byte buffer, and XCTest, Apple's
+unit-test framework.
+
 ```{.swift .numberLines startFrom="1"}
 import ClassroomCaptionsCore
 import Foundation
@@ -117,8 +121,11 @@ import XCTest
 
 ### `final class AudioLevelMeterTests: XCTestCase`
 
-Specification for PCM16 level calculation, including normalization and malformed
-odd-byte input behavior.
+Specification for `PCM16LevelMeter`, the pure function that turns raw microphone
+bytes into the level reading behind the app's microphone indicator. The three
+tests pin the math at silence, at full scale, and on malformed input — if any of
+them drifted, the professor could no longer trust the meter that tells him
+whether the microphone is actually picking up his voice.
 
 ```{.swift .numberLines startFrom="5"}
 final class AudioLevelMeterTests: XCTestCase {
@@ -126,8 +133,13 @@ final class AudioLevelMeterTests: XCTestCase {
 
 ### `func testSilenceProducesZeroLevel()`
 
-Pins that all-zero PCM produces exactly zero RMS and peak rather than a floor or
-NaN.
+Pins that all-zero PCM produces exactly zero RMS (root-mean-square, the standard
+average-loudness measure), zero peak, and a zero normalized level — not a small
+floor value or NaN (the floating-point "not a number" that invalid math such as
+0/0 yields). A silent room must show a dead-flat meter; any residual reading
+would falsely suggest the microphone is live. `XCTAssertEqual` records a failure
+when its two arguments differ but lets the test continue, so all three fields
+are checked in one run.
 
 ```{.swift .numberLines startFrom="6"}
     func testSilenceProducesZeroLevel() {
@@ -143,7 +155,13 @@ NaN.
 
 ### `func testPeakAndRMSUseNormalizedPCMValues()`
 
-Pins conversion from signed 16-bit samples to unit-scale peak and RMS values.
+Feeds the most extreme samples — plus and minus `Int16.max` alternating with
+zeros — and pins the normalized statistics: peak exactly 1 and RMS √0.5, the
+analytic value for a full-scale signal active half the time. This proves the
+meter divides by the 16-bit full-scale value before computing statistics, so its
+readings live on a fixed 0-to-1 scale; the `accuracy:` parameter turns the
+assertion into a tolerance comparison, the correct way to compare floating-point
+results.
 
 ```{.swift .numberLines startFrom="15"}
     func testPeakAndRMSUseNormalizedPCMValues() {
@@ -159,7 +177,11 @@ Pins conversion from signed 16-bit samples to unit-scale peak and RMS values.
 
 ### `func testOddTrailingByteIsIgnored()`
 
-Pins safe handling of a final byte that cannot form a complete `Int16` sample.
+Appends a single stray byte after one complete sample and pins that measurement
+still reports full peak. PCM16 audio arrives over byte pipes, so a chunk
+boundary can split a 16-bit sample in half; the meter must treat the dangling
+half-sample as data that has not arrived yet, because trapping or misreading it
+would crash or corrupt the level display mid-lecture.
 
 ```{.swift .numberLines startFrom="24"}
     func testOddTrailingByteIsIgnored() {
@@ -173,8 +195,10 @@ Pins safe handling of a final byte that cannot form a complete `Int16` sample.
 
 ### `private func pcmData(_ samples: [Int16]) -> Data`
 
-Test fixture helper encoding native `Int16` values into the same byte layout the
-meter consumes.
+Fixture helper that reinterprets an `Int16` array as raw bytes — the Swift
+equivalent of casting an `int16_t*` to `char*` — producing exactly the byte
+layout the meter consumes. `withUnsafeBytes` briefly exposes the array's memory
+as an untyped byte view, and `Data` copies it before that view becomes invalid.
 
 ```{.swift .numberLines startFrom="31"}
     private func pcmData(_ samples: [Int16]) -> Data {
@@ -206,6 +230,10 @@ This map gives the reading spine of the file. Line numbers refer to the original
 
 The file begins by importing `CVoxtralEngine`, `XCTest`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
+Imports `CVoxtralEngine`, the C target whose header declares the `ccv_*` engine
+API, plus XCTest; Swift imports C headers directly, so the tests call the C
+functions without any wrapper.
+
 ```{.swift .numberLines startFrom="1"}
 import CVoxtralEngine
 import XCTest
@@ -214,8 +242,11 @@ import XCTest
 
 ### `final class CVoxtralBridgeTests: XCTestCase`
 
-Exercises the stable C ABI without loading a successful full model: defaults,
-structured failure, and revision provenance.
+Exercises the embedded recognizer's stable C ABI from Swift without ever loading
+a real model: the option defaults, a structured load failure, and the pinned
+upstream revision. These are the calls the app performs before any audio flows,
+so they must behave deterministically even on a machine with no model files
+installed — which is also what lets this suite run anywhere.
 
 ```{.swift .numberLines startFrom="4"}
 final class CVoxtralBridgeTests: XCTestCase {
@@ -223,9 +254,12 @@ final class CVoxtralBridgeTests: XCTestCase {
 
 ### `func testDefaultOptionsAreSuitableForRealtimeCaptions()`
 
-Pins the default streaming options the app relies on: 320 ms delay, 1.0 s
-processing interval, continuous mode on, and a 2000-token decode context cap, the
-realtime captioning baseline.
+Pins the defaults baked into `ccv_stream_options_default()`: a 320 ms delay, a
+1.0 s processing interval, continuous mode on, and a 2000-token decode-context
+cap — the realtime captioning baseline. The app builds its streaming session
+from these defaults, so a silent change in the C layer would shift caption
+latency or memory use without any Swift code changing; this test turns such a
+drift into a visible failure.
 
 ```{.swift .numberLines startFrom="5"}
     func testDefaultOptionsAreSuitableForRealtimeCaptions() {
@@ -269,8 +303,11 @@ rather than crashing.
 
 ### `func testPinnedRevisionIsExposed()`
 
-Pins that the compiled upstream revision is nonempty and available through the
-bridge for reproducible diagnostics.
+Pins that `ccv_upstream_revision()` returns the exact git commit hash of the
+upstream Voxtral sources the engine was built from; `String(cString:)` converts
+the NUL-terminated C string into a Swift string for comparison. Recording the
+precise revision keeps benchmarks and bug reports reproducible: changing the
+vendored sources forces a deliberate update of this constant.
 
 ```{.swift .numberLines startFrom="32"}
     func testPinnedRevisionIsExposed() {
@@ -315,6 +352,9 @@ This map gives the reading spine of the file. Line numbers refer to the original
 
 The file begins by importing `ClassroomCaptionsCore`, `XCTest`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
+Imports `ClassroomCaptionsCore` for `CaptionCorrectionValidator` and its error
+type, and XCTest for the test runner and assertions.
+
 ```{.swift .numberLines startFrom="1"}
 import ClassroomCaptionsCore
 import XCTest
@@ -323,8 +363,12 @@ import XCTest
 
 ### `final class CaptionCorrectionValidatorTests: XCTestCase`
 
-Executable policy for accepting notation-preserving proofreading while rejecting
-answers, control markup, translation, and excessive rewrites.
+Executable policy for the correction stage: conservative proofreading and
+notation rendering are accepted; answers, control markup, translation, and
+wholesale rewrites are rejected. The corrector is a language model, and a
+language model will sometimes treat a caption as a prompt to be answered — this
+validator and its tests are the wall that keeps such output off the classroom
+screen.
 
 ```{.swift .numberLines startFrom="4"}
 final class CaptionCorrectionValidatorTests: XCTestCase {
@@ -332,8 +376,11 @@ final class CaptionCorrectionValidatorTests: XCTestCase {
 
 ### `func testAcceptsConservativeFrenchCorrection() throws`
 
-Pins that ordinary French punctuation, capitalization, and agreement fixes pass
-without changing meaning.
+Pins the happy path: fixing the agreement and plural slips in "la section
+critiques" and "les deux thread" passes validation, and the corrected sentence
+comes back verbatim. An accepted baseline matters as much as the rejections
+below — a validator that rejected everything would technically be safe and
+completely useless, leaving the professor with raw recognizer text forever.
 
 ```{.swift .numberLines startFrom="5"}
     func testAcceptsConservativeFrenchCorrection() throws {
@@ -370,8 +417,10 @@ question mark rather than being answered.
 
 ### `func testAcceptsSpokenComplexityAndEqualityNotation() throws`
 
-Pins accepted conversion of spoken algorithmic complexity and equality into
-compact notation.
+Pins that dictated mathematics — "O de n est égal à un" — may be rendered as the
+compact notation "O(n) = 1". In an algorithms lecture formulas are spoken
+constantly; if the validator scored this rewrite as excessive, every formula
+would bounce back to its clumsy spoken transcription on the overlay.
 
 ```{.swift .numberLines startFrom="26"}
     func testAcceptsSpokenComplexityAndEqualityNotation() throws {
@@ -387,8 +436,10 @@ compact notation.
 
 ### `func testAcceptsTechnicalNotationInsideQuestion() throws`
 
-Pins that notation inside a question may be normalized while preserving the
-question form.
+Pins the point where two rules meet: notation may be normalized to "O(n) ≤
+O(n²)" inside a sentence that is, and must remain, a question. Neither rule may
+veto the other — rejecting the notation would degrade math captions, while
+"completing" the question would put words in the professor's mouth.
 
 ```{.swift .numberLines startFrom="35"}
     func testAcceptsTechnicalNotationInsideQuestion() throws {
@@ -404,8 +455,13 @@ question form.
 
 ### `func testAcceptsDenseUnicodeMathLogicAndCodeRendering() throws`
 
-Pins science-mode acceptance of a dense but meaning-preserving mixture of
-Unicode mathematics, logic, and code notation.
+Stress case for the rewrite budget: one long spoken paragraph of quantifiers,
+set membership, a summation, conditional probability, and array-indexing code is
+rendered as dense Unicode notation (∀, ℝ, Σ, P(A|B), tableau[i]) and must pass
+unchanged, even under the default validation mode. Nearly every character
+differs from the raw transcript here, so this pins that recognized notation
+renderings are budgeted differently from arbitrary rewrites such as the
+translation rejected further down.
 
 ```{.swift .numberLines startFrom="44"}
     func testAcceptsDenseUnicodeMathLogicAndCodeRendering() throws {
@@ -429,7 +485,11 @@ Unicode mathematics, logic, and code notation.
 
 ### `func testScienceModeAcceptsCompactSetMembership() throws`
 
-Pins the intended “n belongs to natural numbers” transformation into `n ∈ ℕ`.
+Pins the canonical science-mode rendering: "n appartient à l'ensemble des
+entiers naturels" becomes "n ∈ ℕ". The `mode: .science` argument selects the
+validation profile with the looser symbol budget, and the test pins that under
+it the compact candidate is returned exactly as proposed, so set-theory lectures
+get real notation instead of spelled-out phrases.
 
 ```{.swift .numberLines startFrom="61"}
     func testScienceModeAcceptsCompactSetMembership() throws {
@@ -488,7 +548,12 @@ renders plain text and must not leak typesetting commands.
 
 ### `func testRejectsAnswerAppendedToQuestion()`
 
-Pins rejection when a model preserves the question but appends an answer.
+Pins the most dangerous corrector failure: keeping the professor's question but
+helpfully appending the answer ("... ? Parce que son accès moyen est en O(1).").
+Students must see what was asked, not the model's solution, so validation throws
+`questionWasAnswered` and the raw caption stays. `XCTAssertThrowsError` asserts
+that the call throws and passes the thrown error to a closure (a function value)
+so the test can pin exactly which error occurred.
 
 ```{.swift .numberLines startFrom="96"}
     func testRejectsAnswerAppendedToQuestion() {
@@ -547,8 +612,12 @@ containsControlMarkup, preventing model reasoning tokens from reaching the capti
 
 ### `func testRejectsTranslationOrUnrelatedRewrite()`
 
-Pins edit-distance/semantic-shape defenses against translation or unrelated
-replacement text.
+Pins the defense against the corrector replacing the French sentence with an
+English translation — text whose meaning may be related but whose characters
+share almost nothing with what was said. The validator's edit-distance check
+(counting the whole-word insertions, deletions, and substitutions needed to
+turn one sentence into the other) rejects it as `excessiveRewrite`, so captions can never silently switch language
+or topic mid-lecture.
 
 ```{.swift .numberLines startFrom="132"}
     func testRejectsTranslationOrUnrelatedRewrite() {
@@ -609,6 +678,10 @@ This map gives the reading spine of the file. Line numbers refer to the original
 
 The file begins by importing `AppKit`, `XCTest`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
+Imports AppKit for `NSRect`, XCTest, and the app module via `@testable import`,
+which compiles the test with access to the module's internal (non-public)
+declarations such as `CaptionOverlayController`.
+
 ```{.swift .numberLines startFrom="1"}
 import AppKit
 @testable import ClassroomCaptions
@@ -618,8 +691,13 @@ import XCTest
 
 ### `final class CaptionOverlayGeometryTests: XCTestCase`
 
-Pure geometry specification for minimum size and containment inside arbitrary
-visible display rectangles.
+Pure geometry specification for `CaptionOverlayController.clamped`, the function
+that forces any proposed overlay frame back inside the visible display. The
+`@MainActor` attribute runs the tests on the main thread because the controller
+type is bound to it, but no window is ever created, so the suite stays fast and
+headless. For a hard-of-hearing professor the overlay is the lecture: a frame
+that escapes the screen means losing every caption until the window is hunted
+down.
 
 ```{.swift .numberLines startFrom="5"}
 @MainActor
@@ -667,8 +745,11 @@ guaranteeing the caption window stays legible.
 
 ### `func testClampShrinksFrameThatExceedsDisplay()`
 
-Pins that an oversized overlay is reduced to the available margin-inset display
-instead of remaining partly off-screen.
+Pins that an overlay larger than the screen is shrunk to the visible area minus
+the fixed 12-point margin: on an 800 by 576 visible rectangle starting at
+y = 24, the result is 776 by 552 anchored at (12, 36). Without shrinking, the
+edges of an oversized window — including the resize handles needed to fix it —
+would sit beyond the screen where the mouse cannot reach.
 
 ```{.swift .numberLines startFrom="29"}
     func testClampShrinksFrameThatExceedsDisplay() {
@@ -708,6 +789,8 @@ This map gives the reading spine of the file. Line numbers refer to the original
 
 The file begins by importing `ClassroomCaptionsCore`, `XCTest`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
+Imports `ClassroomCaptionsCore`, where `CaptionTimeline` lives, and XCTest.
+
 ```{.swift .numberLines startFrom="1"}
 import ClassroomCaptionsCore
 import XCTest
@@ -716,8 +799,11 @@ import XCTest
 
 ### `final class CaptionTimelineTests: XCTestCase`
 
-Specification for provisional replacement, finalized sequence identity, and
-correction-state preservation.
+Specification for `CaptionTimeline`, the value type that owns the ordered
+caption record: live provisional replacement, finalized segment identity, and
+what happens to a segment when its correction succeeds or fails. Everything
+students see and everything the archive stores flows through this structure, so
+its invariants are pinned here in isolation, with no audio or UI involved.
 
 ```{.swift .numberLines startFrom="4"}
 final class CaptionTimelineTests: XCTestCase {
@@ -766,8 +852,12 @@ or hides the original caption.
 
 ### `func testSequenceRemainsMonotonicAfterProvisionalUpdates()`
 
-Pins that any number of provisional revisions do not consume sequence numbers;
-only finalized segments advance the dense order.
+Pins that provisional revisions — the live guesses the recognizer rewrites as a
+sentence completes — consume no sequence numbers; only finalized captions
+advance the count, so the two finalized segments here are numbered 0 and 1 with
+no gap despite the extra drafts. A dense, monotonic sequence is what lets the
+export and remote viewers order segments reliably no matter how many revisions
+each one went through.
 
 ```{.swift .numberLines startFrom="28"}
     func testSequenceRemainsMonotonicAfterProvisionalUpdates() {
@@ -807,6 +897,9 @@ This map gives the reading spine of the file. Line numbers refer to the original
 
 The file begins by importing `ClassroomCaptionsCore`, `XCTest`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
+Imports `ClassroomCaptionsCore` for `CaptionTransformation` and XCTest for the
+assertions.
+
 ```{.swift .numberLines startFrom="1"}
 import ClassroomCaptionsCore
 import XCTest
@@ -815,7 +908,11 @@ import XCTest
 
 ### `final class CaptionTransformationTests: XCTestCase`
 
-Specification for the character edit-distance percentage shown in diagnostics.
+Specification for `CaptionTransformation.percentage`, the diagnostic figure that
+tells the professor how much the corrector changed a caption (0 means untouched,
+100 means completely replaced). Three points — both extremes plus one interior
+value — are enough to pin the formula: edit distance divided by the longer
+string's length.
 
 ```{.swift .numberLines startFrom="4"}
 final class CaptionTransformationTests: XCTestCase {
@@ -823,7 +920,10 @@ final class CaptionTransformationTests: XCTestCase {
 
 ### `func testIdenticalCaptionHasZeroPercentTransformation()`
 
-Pins the identity case at exactly zero percent.
+Pins the identity anchor: a caption the corrector did not touch scores exactly
+0 percent, not a tiny floating-point residue. Any nonzero score on unchanged
+text would destroy the metric's value as a quick "did the model alter my
+words?" signal in the diagnostics.
 
 ```{.swift .numberLines startFrom="5"}
     func testIdenticalCaptionHasZeroPercentTransformation() {
@@ -837,7 +937,10 @@ Pins the identity case at exactly zero percent.
 
 ### `func testCompletelyDifferentSameLengthCaptionHasFullTransformation()`
 
-Pins equal-length complete substitution at one hundred percent.
+Pins the opposite anchor: substituting every character of an equal-length string
+scores exactly 100 percent. Together with the zero case this fixes the metric's
+scale, so a mid-range reading keeps a stable meaning from one session to the
+next.
 
 ```{.swift .numberLines startFrom="12"}
     func testCompletelyDifferentSameLengthCaptionHasFullTransformation() {
@@ -887,6 +990,9 @@ This map gives the reading spine of the file. Line numbers refer to the original
 
 The file begins by importing `ClassroomCaptionsCore`, `XCTest`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
+Imports `ClassroomCaptionsCore` for the `ClassroomSession` value type and
+XCTest.
+
 ```{.swift .numberLines startFrom="1"}
 import ClassroomCaptionsCore
 import XCTest
@@ -895,8 +1001,11 @@ import XCTest
 
 ### `final class ClassroomSessionTests: XCTestCase`
 
-Specification for legal session phases and the phases in which captions may
-enter the timeline.
+Specification for `ClassroomSession`: which transitions of its phase machine
+(starting, listening, paused, stopping, idle) are legal, and in which phases a
+caption may enter the timeline. The session is a plain value type, so each test
+creates one with `var` and drives transitions directly — no audio hardware, no
+clock, no UI.
 
 ```{.swift .numberLines startFrom="4"}
 final class ClassroomSessionTests: XCTestCase {
@@ -926,9 +1035,10 @@ session reaches idle via finish.
 
 ### `func testCaptionsAreAcceptedOnlyWhileListening()`
 
-Pins that finalizeCaption returns nil and records nothing unless the session is
-listening: captions before markListening and after pause are dropped, so the
-timeline holds only the one accepted segment.
+Pins the gate on `finalizeCaption`: before `markListening` and after `pause` it
+returns nil and records nothing, leaving only the caption spoken while listening
+in the timeline. Pause must really mean pause — words spoken during a break or a
+private aside must never reach the classroom screen or the archived transcript.
 
 ```{.swift .numberLines startFrom="18"}
     func testCaptionsAreAcceptedOnlyWhileListening() {
@@ -974,6 +1084,10 @@ This map gives the reading spine of the file. Line numbers refer to the original
 
 The file begins by importing `Network`, `XCTest`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
+Uses `@testable import` to reach the app's internal server types
+(`LocalCaptionServer`, `CaptionSharingSecurity`), Network for `NWEndpoint.Port`
+when pinning test ports, and XCTest.
+
 ```{.swift .numberLines startFrom="1"}
 @testable import ClassroomCaptions
 import Network
@@ -983,8 +1097,12 @@ import XCTest
 
 ### `final class LocalCaptionServerTests: XCTestCase`
 
-Loopback integration tests for capability entropy, read-only snapshots, viewer
-authentication, student tickets, source binding, and rate limiting.
+Integration tests for the caption-sharing HTTP server, run against a real
+listener that the test process talks to over the machine's own network
+(loopback-style: the test is both server and client, so nothing leaves the Mac).
+They pin token entropy, exact-match authentication, the read-only shape of
+viewer data, student-question tickets, and per-source rate limits — the entire
+security story for putting captions on classroom Wi-Fi.
 
 ```{.swift .numberLines startFrom="5"}
 final class LocalCaptionServerTests: XCTestCase {
@@ -992,7 +1110,11 @@ final class LocalCaptionServerTests: XCTestCase {
 
 ### `func testPairingTokenHasExpectedEntropyAndEncoding() throws`
 
-Pins a 32-byte random token rendered as exactly 64 hexadecimal characters.
+Pins the pairing token's strength and shape: 32 random bytes — 256 bits of
+entropy, far beyond guessing range — rendered as exactly 64 hexadecimal
+characters, with two consecutive tokens never equal. This token is the only
+secret protecting the caption stream on shared Wi-Fi, so its size and encoding
+are pinned rather than assumed.
 
 ```{.swift .numberLines startFrom="6"}
     func testPairingTokenHasExpectedEntropyAndEncoding() throws {
@@ -1063,9 +1185,13 @@ viewers receive read-only caption state with no control surface.
 
 ### `func testServerRequiresTheGeneratedPairingToken() async throws`
 
-Pins that the caption page is gated on the generated pairing token: a wrong token
-gets 404 while the published pairing URL returns 200 with the captions page. Skips
-when no Wi-Fi listener is available.
+Starts the real server on a fixed test port and pins authentication at the HTTP
+level: a URL carrying a wrong token receives 404 — the page simply does not
+exist for unauthenticated callers, revealing nothing — while the published
+pairing URL receives 200 and the caption page. The test is `async` (it can
+`await` network replies); when the machine has no active Wi-Fi listener it
+throws `XCTSkip`, which marks the test skipped rather than failed, and the
+`defer` block stops the server even when an assertion fails early.
 
 ```{.swift .numberLines startFrom="52"}
     func testServerRequiresTheGeneratedPairingToken() async throws {
@@ -1237,6 +1363,15 @@ with 429, and an invalid ticket is rejected with 401.
 
 ### `func testTicketIssuanceIsCappedPerSource() async throws`
 
+Pins the per-source ticket cap: posting to `/student-ticket` succeeds with 200
+exactly `CaptionSharingSecurity.maximumTicketsPerSource` times, and the next
+request from the same source is refused with 429 ("too many requests"). Without
+the cap, one student device looping the ticket route could exhaust the global
+ticket table and lock the whole class out of asking questions — a one-phone
+denial of service. Like the other server tests it is an `async` test against a
+real listener and throws `XCTSkip` (skipped, not failed) when no Wi-Fi listener
+is available.
+
 ```{.swift .numberLines startFrom="207"}
     func testTicketIssuanceIsCappedPerSource() async throws {
         let captionUpdates = AsyncStream.makeStream(
@@ -1292,8 +1427,11 @@ with 429, and an invalid ticket is rejected with 401.
 
 ### `private func readyURL(…)`
 
-Starts a test server and awaits a ready/client-connected callback with a bounded
-continuation, skipping when the environment cannot expose Wi-Fi.
+Awaits the server's status stream until it reports `.ready` with the published
+URL, racing that against a second task that just sleeps for the timeout:
+whichever child of the task group finishes first wins, and `cancelAll()` stops
+the loser. Returning nil on `.failed` or timeout is what lets callers skip
+cleanly instead of hanging the whole suite on a server that never comes up.
 
 ```{.swift .numberLines startFrom="257"}
     private func readyURL(
@@ -1328,7 +1466,11 @@ continuation, skipping when the environment cannot expose Wi-Fi.
 
 ### `private func studentURL(…)`
 
-Enables questions and awaits the independently generated student capability URL.
+The same race-against-timeout pattern for the student-question status stream: it
+resolves to the independently generated student capability URL once the server
+publishes it, ignores `.stopped`, and yields nil after the timeout. The student
+URL is a separate secret from the viewer URL, so the tests must obtain it from
+this second stream rather than derive it.
 
 ```{.swift .numberLines startFrom="285"}
     private func studentURL(
@@ -1363,7 +1505,10 @@ Enables questions and awaits the independently generated student capability URL.
 
 ### `private func nextSubmission(…)`
 
-Bridges the asynchronous accepted-question callback into one awaited test value.
+Bridges the server's accepted-question callback into one awaited value: a task
+group races the first element of the submission stream against a sleeping
+timeout task, so the test can assert on the exact text the Mac-side handler
+received without ever risking an unbounded wait.
 
 ```{.swift .numberLines startFrom="313"}
     private func nextSubmission(
@@ -1429,6 +1574,9 @@ This map gives the reading spine of the file. Line numbers refer to the original
 
 The file begins by importing `Darwin`, `XCTest`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
+Imports the app module with `@testable` for the internal `ProcessMemory` helper,
+Darwin — the C/Unix layer of macOS — for `getpid`, and XCTest.
+
 ```{.swift .numberLines startFrom="1"}
 @testable import ClassroomCaptions
 import Darwin
@@ -1438,7 +1586,10 @@ import XCTest
 
 ### `final class ProcessMemoryTests: XCTestCase`
 
-Boundary test for Darwin resident-memory sampling.
+Boundary test for `ProcessMemory`, the wrapper over Darwin that reports a
+process's resident memory — the bytes it actually holds in RAM. The app polls
+this number so the professor can see what the loaded models cost, which makes
+"the query works on this machine" worth one executable check.
 
 ```{.swift .numberLines startFrom="5"}
 final class ProcessMemoryTests: XCTestCase {
@@ -1446,8 +1597,11 @@ final class ProcessMemoryTests: XCTestCase {
 
 ### `func testReadsCurrentProcessResidentMemory()`
 
-Pins that the current process produces a nonzero measurement on supported macOS
-instead of being reported as absent or zero.
+Pins that sampling the test process itself — identified with the familiar Unix
+`getpid()` — yields a value that is present and strictly positive, since a
+running process cannot occupy zero bytes. If the underlying system query broke
+or its result were misread, the memory figure would silently show blank or zero
+and stop warning that the models are outgrowing the machine.
 
 ```{.swift .numberLines startFrom="6"}
     func testReadsCurrentProcessResidentMemory() {
@@ -1489,6 +1643,10 @@ This map gives the reading spine of the file. Line numbers refer to the original
 
 The file begins by importing `ClassroomCaptionsCore`, `XCTest`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
+Imports both production modules — the app module via `@testable` for the archive
+service, and `ClassroomCaptionsCore` for sessions and the WAV header — plus
+XCTest.
+
 ```{.swift .numberLines startFrom="1"}
 @testable import ClassroomCaptions
 import ClassroomCaptionsCore
@@ -1498,8 +1656,11 @@ import XCTest
 
 ### `final class SessionExportTests: XCTestCase`
 
-Specification for WAV layout, stopping-phase final drain, transcript timing, and
-archive file creation.
+Specification for everything a session leaves on disk: the WAV header bytes,
+transcripts with timestamps relative to session start, the final-drain exception
+while stopping, and the archive directory contents. The archive is the
+professor's durable record of what students were shown, so the formats are
+pinned byte-for-byte rather than trusted to stay compatible.
 
 ```{.swift .numberLines startFrom="5"}
 final class SessionExportTests: XCTestCase {
@@ -1572,8 +1733,12 @@ rawText and startSeconds intact.
 
 ### `func testFinalDrainCaptionIsAcceptedWhileStopping()`
 
-Pins the intentional exception that finalized model drain may append a caption
-after the session has entered `stopping`.
+Pins the intentional exception to the listening-only rule: a caption finalized
+while the session is already `stopping` is still appended to the timeline. The
+recognizer always has a short tail of audio in flight, so the professor's last
+sentence finishes decoding after he clicks stop — without this carve-out the
+closing words of every lecture would vanish from both the screen and the
+transcript.
 
 ```{.swift .numberLines startFrom="50"}
     func testFinalDrainCaptionIsAcceptedWhileStopping() {
@@ -1680,6 +1845,14 @@ Little-endian assertion helper for 32-bit WAV sizes and rates.
 
 ### `func testWAVHeaderHandlesMaximumRIFFSize()`
 
+Pins the header builder at the format's hard ceiling: the RIFF chunk-size field
+stores `dataByteCount + 36`, so the largest legal payload is `UInt32.max - 36`
+bytes, and the test checks that the field then reads back exactly `UInt32.max`.
+Unlike C, Swift traps (deliberately crashes) on unsigned overflow instead of
+wrapping, so an unchecked addition one byte past this limit would abort the app
+while it was saving a lecture; `loadUnaligned` reads the little-endian 32-bit
+field straight from the raw bytes without requiring aligned storage.
+
 ```{.swift .numberLines startFrom="126"}
     func testWAVHeaderHandlesMaximumRIFFSize() {
         // The RIFF chunk-size field stores dataByteCount + 36; the largest
@@ -1757,6 +1930,9 @@ This map gives the reading spine of the file. Line numbers refer to the original
 
 The file begins by importing `ClassroomCaptionsCore`, `XCTest`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
+Imports `ClassroomCaptionsCore`, home of `SpokenOverlayCommandRecognizer` and
+`SpokenOverlayCommand`, and XCTest.
+
 ```{.swift .numberLines startFrom="1"}
 import ClassroomCaptionsCore
 import XCTest
@@ -1765,8 +1941,12 @@ import XCTest
 
 ### `final class SpokenOverlayCommandTests: XCTestCase`
 
-Dense specification for exact, tolerant, partial, multi-command, and
-lecture-text-preserving voice recognition.
+Dense specification for `SpokenOverlayCommandRecognizer`, the matcher that lets
+the professor drive the overlay by voice: exact phrases, tolerant variants,
+partial-phrase suppression, several commands per transcript, and preservation of
+the surrounding lecture text. Both failure directions are costly in class — a
+missed command takes away hands-free control, and a false trigger hides the
+captions students are reading.
 
 ```{.swift .numberLines startFrom="4"}
 final class SpokenOverlayCommandTests: XCTestCase {
@@ -1774,7 +1954,11 @@ final class SpokenOverlayCommandTests: XCTestCase {
 
 ### `func testRecognizesFixedShowAndHidePhrases()`
 
-Pins the configured show/hide phrases and their actions.
+Pins the basic contract: the configured show phrase yields a `.show` command and
+the hide phrase a `.hide`, each with empty `remainingText` because the sentence
+contained nothing but the command. The recognizer is a pure function — text in,
+optional `SpokenOverlayCommand` out — which is why this whole suite runs without
+audio or UI.
 
 ```{.swift .numberLines startFrom="5"}
     func testRecognizesFixedShowAndHidePhrases() {
@@ -1800,8 +1984,11 @@ Pins the configured show/hide phrases and their actions.
 
 ### `func testFixedPhraseDoesNotConfuseOrdinaryActionWords()`
 
-Pins that ordinary occurrences of action vocabulary without the trigger phrase
-do not control the overlay.
+Pins that a sentence containing "affiche" and "masque" — words a CS professor
+describing UI code says constantly — produces no command, asserted with
+`XCTAssertNil` (fails if the value is non-nil). A false trigger on ordinary
+action vocabulary would blank the captions in front of the class merely for
+explaining what a function does.
 
 ```{.swift .numberLines startFrom="24"}
     func testFixedPhraseDoesNotConfuseOrdinaryActionWords() {
@@ -1839,8 +2026,11 @@ lecture sentence survives.
 
 ### `func testDetectsPartialFixedPhrase()`
 
-Pins provisional suppression when recognition contains only a prefix of the
-configured trigger.
+Pins `isPotentialCommand` on a bare "Sésame": provisional captions are shown
+live while the model is still finishing the sentence, so a visible prefix that
+could still grow into a command phrase must be held back from display. Otherwise
+students would watch half a magic phrase appear and vanish every time the
+professor controls the overlay.
 
 ```{.swift .numberLines startFrom="46"}
     func testDetectsPartialFixedPhrase() {
@@ -1855,7 +2045,10 @@ configured trigger.
 
 ### `func testDetectsPartialSecondWordWithoutDisplayingIt()`
 
-Pins suppression through a partially recognized second trigger word.
+Extends suppression into the middle of the second trigger word: "Sésame rou" and
+"Sésame lum" could each still complete into a configured phrase, so both must
+stay flagged as potential commands. This is the pin that keeps command fragments
+from ever flashing on the classroom screen mid-recognition.
 
 ```{.swift .numberLines startFrom="54"}
     func testDetectsPartialSecondWordWithoutDisplayingIt() {
@@ -1875,7 +2068,10 @@ Pins suppression through a partially recognized second trigger word.
 
 ### `func testDoesNotSuppressUnrelatedSecondWord()`
 
-Pins that a shared first word followed by unrelated speech remains lecture text.
+Pins the opposite edge: "Sésame logique" shares the first trigger word, but its
+second word can no longer become either configured phrase, so it must flow
+through as ordinary lecture text. Over-eager suppression would be its own bug,
+holding real sentences off the screen on the mere suspicion of being commands.
 
 ```{.swift .numberLines startFrom="67"}
     func testDoesNotSuppressUnrelatedSecondWord() {
@@ -1890,7 +2086,11 @@ Pins that a shared first word followed by unrelated speech remains lecture text.
 
 ### `func testRecognizesMultipleCommandsInSpokenOrder()`
 
-Pins ordered extraction when several control phrases occur in one transcript.
+Pins that when one transcript contains several command phrases, `recognizeAll`
+returns them in the order they were said — hide, show, hide — not in whatever
+order the matchers happened to run. The overlay must replay the professor's
+intent sequentially; reordering would leave it in the opposite visibility state
+from the one he asked for.
 
 ```{.swift .numberLines startFrom="75"}
     func testRecognizesMultipleCommandsInSpokenOrder() {
@@ -1908,7 +2108,10 @@ Pins ordered extraction when several control phrases occur in one transcript.
 
 ### `func testRecognizesShowHideAndClearCommandsInSpokenOrder()`
 
-Pins the full three-action ordering and complete removal of command text.
+Repeats the ordering pin across the full action set by adding a configured clear
+phrase: hide, clear, show come back exactly as spoken, and the final
+`remainingText` is empty because the transcript held nothing but commands.
+Spoken order must survive however many distinct actions are configured.
 
 ```{.swift .numberLines startFrom="86"}
     func testRecognizesShowHideAndClearCommandsInSpokenOrder() {
@@ -1927,7 +2130,10 @@ Pins the full three-action ordering and complete removal of command text.
 
 ### `func testClearCommandRetainsAdjacentLectureText()`
 
-Pins that clear is consumed while neighboring lecture words survive.
+Pins that a clear command spoken at the end of a sentence is consumed while the
+sentence before it — "La preuve est terminée." — returns as `remainingText`. It
+is natural to chain a wrap-up sentence with the command that wipes the overlay,
+and the wrap-up itself must still reach the captions.
 
 ```{.swift .numberLines startFrom="98"}
     func testClearCommandRetainsAdjacentLectureText() {
@@ -1949,7 +2155,10 @@ Pins that clear is consumed while neighboring lecture words survive.
 
 ### `func testDetectsPartialClearCommand()`
 
-Pins provisional holdback for an incomplete clear phrase.
+Pins provisional holdback for the clear phrase as well: "Bonjour soleil bla"
+could still become "Bonjour soleil blanc", so it is flagged as a potential
+command and kept off the live caption line. Every configurable action phrase
+needs its own suppression coverage, because each is matched independently.
 
 ```{.swift .numberLines startFrom="113"}
     func testDetectsPartialClearCommand() {
@@ -1965,7 +2174,11 @@ Pins provisional holdback for an incomplete clear phrase.
 
 ### `func testRecognizesNextStudentQuestionCommand()`
 
-Pins the spoken action that pops and presents the next anonymous question.
+Pins the spoken command that pops the next anonymous student question onto the
+overlay, configured as its own phrase and consumed entirely (empty
+`remainingText`). Voice control matters doubly here: the professor is
+mid-lecture and away from the keyboard, and the question queue is how a
+hard-of-hearing lecturer keeps the class interactive.
 
 ```{.swift .numberLines startFrom="122"}
     func testRecognizesNextStudentQuestionCommand() {
@@ -1990,7 +2203,11 @@ Pins the spoken action that pops and presents the next anonymous question.
 
 ### `func testRecognizesDismissStudentQuestionCommand()`
 
-Pins the separate action that clears the currently presented question.
+Pins the companion command that dismisses the currently displayed question,
+configured as a phrase distinct from "next question". Separate phrases for
+separate queue operations mean a recognition near-miss can at worst do nothing —
+it cannot perform the wrong operation on a student's question in front of
+everyone.
 
 ```{.swift .numberLines startFrom="140"}
     func testRecognizesDismissStudentQuestionCommand() {
@@ -2035,8 +2252,11 @@ remainingText.
 
 ### `func testRecognizesObservedCesAmesLumiereVariant()`
 
-Pins tolerance for an actual Voxtral homophone/transcription variant observed
-during testing.
+Pins tolerance for a transcription Voxtral actually produced in testing: "Ces
+âmes lumières", a near-homophone of the spoken "Sésame lumière", must still
+recognize as `.show`. Field-observed variants get their own pins so a recognizer
+refactor can never quietly reintroduce the failure where the professor says the
+magic phrase and nothing happens.
 
 ```{.swift .numberLines startFrom="169"}
     func testRecognizesObservedCesAmesLumiereVariant() {
@@ -2054,7 +2274,11 @@ during testing.
 
 ### `func testRecognizesHyphenatedShowCommand()`
 
-Pins normalization across hyphenated versus spaced trigger transcription.
+Pins punctuation normalization in the trigger: the configured "Gloubi boulga"
+matches the transcribed hyphenated "Gloubi-boulga,". This test also introduces
+the recognizer's second form — a configurable trigger phrase followed by a
+spoken action word ("affiche" for show) — instead of one fixed phrase per
+action.
 
 ```{.swift .numberLines startFrom="180"}
     func testRecognizesHyphenatedShowCommand() {
@@ -2071,7 +2295,11 @@ Pins normalization across hyphenated versus spaced trigger transcription.
 
 ### `func testRecognizesAccentsAndHideSynonym()`
 
-Pins accent normalization and the configured hide-action synonym.
+Pins two tolerances at once: the configured phrase is unaccented ("Ecoute")
+while the transcript carries the accent ("Écoute"), and "cache" is accepted as a
+synonym action word for hiding. Accent and synonym drift are everyday behavior
+for French speech recognition; without these allowances the professor would be
+fighting the recognizer's spelling to control his own overlay.
 
 ```{.swift .numberLines startFrom="190"}
     func testRecognizesAccentsAndHideSynonym() {
@@ -2088,8 +2316,11 @@ Pins accent normalization and the configured hide-action synonym.
 
 ### `func testRecognizesTolerantSingularAndAgreementVariant()`
 
-Pins bounded grammatical-number/agreement variation without opening arbitrary
-fuzzy matching.
+Pins bounded grammatical tolerance: "Oreille compensé" — singular, with
+mismatched agreement — still matches the configured "Oreilles compensées". In
+spoken French these endings are silent, so the recognizer cannot hear the
+difference; the tolerance stays enumerated and narrow, though, never a license
+for arbitrary fuzzy matching.
 
 ```{.swift .numberLines startFrom="200"}
     func testRecognizesTolerantSingularAndAgreementVariant() {
@@ -2106,7 +2337,11 @@ fuzzy matching.
 
 ### `func testRecognizesOneCharacterTranscriptionError()`
 
-Pins the accepted edit-distance budget for one-character ASR error.
+Pins the edit-distance budget on trigger words: "Oreiles", one letter short of
+"Oreilles", still matches, and the action word "masque" yields `.hide`. A
+routine one-character transcription slip must not cost the professor control of
+the overlay; the rejection test below pins the ceiling, so together they bracket
+exactly how much error is forgiven.
 
 ```{.swift .numberLines startFrom="210"}
     func testRecognizesOneCharacterTranscriptionError() {
@@ -2138,7 +2373,10 @@ rejected even when a valid action word follows, preventing false triggers.
 
 ### `func testRetainsLectureTextFromSameSegment()`
 
-Pins preservation of lecture text surrounding a recognized control phrase.
+Pins that lecture text spoken before a trigger-plus-action command survives: the
+command is excised and "La preuve est terminée." comes back as `remainingText`.
+Losing neighboring words every time a command is spoken would punch silent holes
+into the captions and the transcript students rely on.
 
 ```{.swift .numberLines startFrom="227"}
     func testRetainsLectureTextFromSameSegment() {
@@ -2158,7 +2396,9 @@ Pins preservation of lecture text surrounding a recognized control phrase.
 
 ### `func testRetainsTextAfterCommand()`
 
-Pins preservation specifically for words following a command.
+Pins the mirror case: words spoken after the command survive as `remainingText`.
+Together with the preceding test, the recognizer is pinned to remove exactly the
+command and nothing else, whichever side of it the lecture content falls on.
 
 ```{.swift .numberLines startFrom="240"}
     func testRetainsTextAfterCommand() {
@@ -2213,6 +2453,13 @@ provisional suppression, but a trigger embedded mid-sentence is not.
 
 ### `func testOverlappingPhrasesPreferTheLongestWithoutCrashing()`
 
+Regression pin for a real crash: with one configured phrase a token-prefix of
+another ("Bonjour soleil" versus "Bonjour soleil blanc"), the matchers used to
+produce overlapping match ranges, and removing both trapped on invalidated
+string indices — a Swift runtime trap aborts the process, so the captioning app
+died mid-lecture. The test pins the fix: the longest match wins, and the spoken
+clear phrase yields exactly one `.clear` command.
+
 ```{.swift .numberLines startFrom="272"}
     func testOverlappingPhrasesPreferTheLongestWithoutCrashing() {
         // One configured phrase is a token-prefix of another. Before the
@@ -2230,6 +2477,12 @@ provisional suppression, but a trigger embedded mid-sentence is not.
 ```
 
 ### `func testIdenticalConfiguredPhrasesYieldOneCommandWithoutCrashing()`
+
+Companion regression pin: the settings UI does not stop the professor from
+assigning the same phrase to two different commands, and previously both
+matchers claimed the same text range, whose double removal crashed. The test
+pins the de-duplication — one spoken sentence yields exactly one command — so a
+small configuration slip can no longer take down captioning in class.
 
 ```{.swift .numberLines startFrom="285"}
     func testIdenticalConfiguredPhrasesYieldOneCommandWithoutCrashing() {
@@ -2267,6 +2520,9 @@ This map gives the reading spine of the file. Line numbers refer to the original
 
 The file begins by importing `XCTest`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
+Imports XCTest and the app module via `@testable` so the test can call
+`VoxtralRealtimeService`'s internal `findString` helper directly.
+
 ```{.swift .numberLines startFrom="1"}
 import XCTest
 @testable import ClassroomCaptions
@@ -2275,7 +2531,11 @@ import XCTest
 
 ### `final class VoxtralProtocolTests: XCTestCase`
 
-Pure parser tests for tolerant extraction from remote WebSocket JSON shapes.
+Pure parser tests for `VoxtralRealtimeService.findString`, the tolerant
+extractor that digs transcript text out of whatever JSON shape a remote Voxtral
+server emits. Different server builds wrap the text differently, and a parsing
+miss does not raise an error — it silently produces no caption — so the search
+rules are pinned here without any network involved.
 
 ```{.swift .numberLines startFrom="4"}
 final class VoxtralProtocolTests: XCTestCase {
@@ -2283,7 +2543,12 @@ final class VoxtralProtocolTests: XCTestCase {
 
 ### `func testFindStringUsesRequestedKeyPriority()`
 
-Pins deterministic key priority when several candidate transcript fields exist.
+Pins the search order: at each dictionary level every requested key is tried
+before the search descends into nested values. Here "delta" exists only one
+level down while "text" sits at the top, so the top-level "fallback" wins over
+the nested "preferred" — a shallow match beats a deeper one regardless of the
+key list's order. Pinning this keeps extraction deterministic when a server
+message happens to contain several plausible text fields.
 
 ```{.swift .numberLines startFrom="5"}
     func testFindStringUsesRequestedKeyPriority() {
@@ -2303,7 +2568,11 @@ Pins deterministic key priority when several candidate transcript fields exist.
 
 ### `func testNestedTranscriptIsFound()`
 
-Pins recursive discovery of transcript text inside nested dictionaries/arrays.
+Pins that the search recurses through both dictionaries and arrays, retrieving
+"nested transcript" from `response.items[0].transcript`. Remote APIs tend to
+nest their results deeper over time; if recursion broke, the connection would
+look healthy while every caption silently vanished — the worst possible failure
+for someone depending on the words.
 
 ```{.swift .numberLines startFrom="18"}
     func testNestedTranscriptIsFound() {

@@ -45,7 +45,8 @@ that read changed properties. It does not create synchronization. The
 `@MainActor` annotation is the synchronization rule: observable properties are
 read and written on the main executor.
 
-When a callback arrives from a dispatch queue, URLSession delegate, or server
+When a callback arrives from a dispatch queue, a URLSession delegate (the
+object Foundation's HTTP client calls back with results), or the server
 queue, the callback creates a `Task { @MainActor in ... }` or otherwise hops to
 the main actor. The copied event/question/snapshot crosses the boundary; the
 originating service object remains with its own owner.

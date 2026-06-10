@@ -71,10 +71,17 @@ structure prevents the UI from combining a token count from one instant with a
 rate from another. `let` has the same intent as a fully initialized `const`
 record in C, while Swift's memberwise assignment in `init` guarantees that no
 partially initialized value escapes.
+
+`init` is the type's constructor; inside it, `self` names the instance under
+construction, much like a `this` pointer for a value being built, and the
+compiler refuses to let `init` return until every stored property is assigned.
+Because this is a `struct`, assignment copies the whole value, so a reader can
+never observe a later mutation made through some other reference.
 """),
             Section(21, 39, "Configuration and the streaming service contract", """
 `TranscriptionConfiguration` contains values that are latched when a service
-starts. `endpoint` and `model` are needed by the remote implementation;
+starts. `endpoint` (a Foundation `URL`, a parsed address value rather than a
+bare string) and `model` are needed by the remote implementation;
 `delayMilliseconds` is also meaningful to the embedded stream. Keeping one
 configuration type makes the app model independent of the selected backend,
 although it means an implementation may legitimately ignore fields that do not
@@ -87,9 +94,12 @@ delegate/callback graph with one ordered sequence. The `async` keyword permits
 suspension; it does **not** itself make a conforming C handle thread-safe. Each
 implementation must still serialize access to its mutable decoder.
 
-`Data` is passed to `sendAudio` by value. Swift's copy-on-write storage avoids a
-copy when possible, but the implementation must retain or copy bytes before
-returning if work continues on another queue.
+`Data` (Foundation's growable byte buffer — conceptually a length-counted
+`void *` with value semantics) is passed to `sendAudio` by value. Swift's
+copy-on-write storage avoids a copy when possible, but the implementation must
+retain or copy bytes before returning if work continues on another queue. The
+underscore in `sendAudio(_ pcm16MonoData: Data)` removes the external argument
+label, so the call site reads `sendAudio(buffer)`.
 
 ::: {.callout-note title="Swift for a C programmer: protocol, async, throws, and generics"}
 `protocol StreamingTranscriptionService` declares required operations without
@@ -109,13 +119,24 @@ context, professor-defined terminology, and the presentation policy.
 
 The distinction between `standard` and `science` is policy, not model
 selection. Science mode permits transformations such as “appartient aux
-entiers naturels” into `∈ ℕ`. `CaseIterable` supports a settings picker;
-`Codable` permits persistence; the raw `String` gives stable serialized values.
+entiers naturels” into `∈ ℕ`. `CaseIterable` (the compiler synthesizes a list
+of every case) supports a settings picker; `Codable` (synthesized conversion to
+and from serialized forms such as JSON) permits persistence; declaring the enum
+`: String` gives each case a fixed textual raw value, so stored settings stay
+stable even if the source declaration is reordered.
 
 Most importantly, the request exposes no tool, closure, URL, filesystem path,
 or application controller. Even if caption text contains an imperative or a
 question, Gemma receives only a text-correction task and has no capability with
 which to execute it.
+
+::: {.callout-note title="Swift for a C programmer: dictionaries, default arguments, and leading dots"}
+`[String: String]` is a built-in hash table (`Dictionary`) from string keys to
+string values. The parameter `mode: CaptionCorrectionMode = .standard` declares
+a default argument, so callers may omit it. The leading dot in `.standard` is
+shorthand for `CaptionCorrectionMode.standard`; the enum type is inferred from
+context.
+:::
 """),
             Section(64, 85, "Correction result and service boundary", """
 The result separates the candidate text from optional accounting metadata.
@@ -156,10 +177,13 @@ export can distinguish “Gemma was disabled” from “Gemma failed.”
 Identity has two layers. `id` is globally unique and is used to match an
 asynchronous correction result with its segment. `sequence` is dense,
 human-readable ordering inside one session. Timestamps record when provisional
-speech began and when finalization occurred.
+speech began and when finalization occurred; `Date` is Foundation's
+absolute-time value, a point on the clock rather than a formatted string.
 
 UUID means Universally Unique Identifier. Swift's Foundation `UUID` value is
-used here as an opaque identity, whereas `sequence` expresses ordering.
+used here as an opaque identity, whereas `sequence` expresses ordering. The
+`Identifiable` conformance is a standard protocol requiring exactly this `id`
+property; SwiftUI relies on it to track which row is which as a list changes.
 
 `rawText` is immutable evidence from Voxtral. Gemma never overwrites it.
 `correctedText`, state, and failure are `private(set)`: other modules may read
@@ -227,8 +251,11 @@ provisional text from being mistaken for an append-only finalized segment.
 `segments` is append-only during a session; `provisional` is the single
 replaceable tail. `nextSequence` is private derived bookkeeping. Because
 `CaptionTimeline` is a value type, a mutation made inside the main-actor app
-model is transactional from SwiftUI's point of view: observers see the new
-value after the mutating method returns.
+model (the application object Swift confines to the single UI thread) is
+transactional from SwiftUI's point of view: observers see the new value after
+the mutating method returns. The `Date()` default argument is evaluated at
+each call, so production code stamps “now” while tests can inject a fixed
+clock.
 
 Whitespace-only hypotheses clear the provisional caption. The first nonempty
 hypothesis captures `timestamp`; later revisions update only text. Optional
@@ -258,10 +285,13 @@ runtime behavior or the calling convention.
 """),
             Section(137, 172, "Identity-based updates, bounded context, and reset", """
 Correction callbacks carry a UUID, so each method performs a linear lookup and
-delegates the transition to `CaptionSegment`. The complexity is `O(n)` per
-update. For lecture-sized histories and one serialized correction worker this
-keeps the state simple; a UUID-to-index table would be justified only after
-measurement shows this lookup to matter.
+delegates the transition to `CaptionSegment`. `firstIndex(where:)` returns an
+optional index, and `guard let index = ... else` is Swift's fused
+null-check-and-assign: it either binds the wrapped value to a new constant or
+forces the early exit. The complexity is `O(n)` per update. For lecture-sized
+histories and one serialized correction worker this keeps the state simple; a
+UUID-to-index table would be justified only after measurement shows this
+lookup to matter.
 
 `recentSegments` returns a copied suffix and explicitly defines nonpositive
 limits as empty. `reset` retains the array allocation for the next session,
@@ -322,7 +352,9 @@ policy without duplicating transcript policy.
 Correction can finish while the microphone is listening, paused, or stopping,
 so these methods do not gate on session phase. Correctness instead depends on
 segment identity and its correction state, both checked by the timeline. The
-single-expression bodies return the delegated Boolean directly.
+single-expression bodies return the delegated Boolean directly: when a Swift
+function body is one expression, that expression is returned implicitly, with
+no `return` keyword — and there is nowhere for extra policy to creep in.
 """),
         ),
     ),
@@ -361,21 +393,33 @@ word-Levenshtein distance permits local spelling, punctuation, and notation
 changes but rejects wholesale rewriting. The constants are product policy,
 not mathematical truths; tests document representative accepted and rejected
 sentences and should accompany any threshold change.
+
+::: {.callout-note title="Swift for a C programmer: enums as namespaces, static, and functions as values"}
+`CaptionCorrectionValidator` is an enum with **no cases**: no value of it can
+ever exist, which makes it a pure namespace for related functions — the
+checked equivalent of a C file holding only functions. `static func` attaches
+a function to the type rather than to an instance; unlike C's file-scope
+`static`, it says nothing about linkage. In
+`contains(where: lowered.contains)`, a method is itself passed as the
+predicate value, like handing over a function pointer bound to its receiver.
+:::
 """),
             Section(97, 115, "Question heuristic and lexical tokenization", """
 Question detection combines punctuation with common French and English opening
 words because speech recognition often omits `?`. It is intentionally
 conservative: false positives preserve raw text, while false negatives could
-allow an answer-like rewrite.
+allow an answer-like rewrite. `questionStarts` is a `Set<String>`, a hash set
+whose membership test is constant-time — the only operation this check needs.
 
 `words` splits on every non-letter and non-number Unicode `Character`. This
 removes punctuation for distance comparison while retaining accented letters
 and digits. It is lexical normalization, not a natural-language parser.
 
-The block passed to `split` is a closure. Swift permits the final closure
-argument outside parentheses, a form called **trailing-closure syntax**.
-`.map(String.init)` then constructs one `String` per substring and returns a
-new array.
+The block passed to `split` is a closure; `character in` names its parameter
+before the body. Swift permits the final closure argument outside parentheses,
+a form called **trailing-closure syntax**. `.map(String.init)` then passes the
+`String` constructor itself as the transform, so it constructs one `String`
+per substring and returns a new array.
 """),
             Section(116, 188, "Canonicalizing spoken mathematics and symbols", """
 The replacement table maps verbose spoken forms and compact mathematical glyphs
@@ -387,12 +431,21 @@ Order matters: longer phrases appear before their substrings, so the specific
 natural-number phrase is consumed before generic “appartient à”. This is a
 small deterministic rewrite system. Adding a notation requires considering
 overlap and adding paired tests for spoken and symbolic forms.
+
+Each table entry is a tuple, an anonymous fixed-size pair of values. The loop
+header `for (source, replacement) in replacements` destructures every pair
+into two named constants, so the body reads without index arithmetic.
 """),
             Section(189, 204, "Automatic detection of notation-heavy speech", """
 Even outside explicit science mode, four or more cues activate relaxed
 thresholds. Requiring several cues avoids treating an ordinary isolated word
 such as “non” as mathematical content. The heuristic scans a short fixed list,
 so its cost is negligible compared with model inference.
+
+`reduce(into: 0)` folds the cue list into one running value: the closure
+receives the accumulator `count` by mutable reference plus each `cue`. It is
+Swift's library spelling of the counting loop a C programmer would write by
+hand.
 """),
             Section(205, 224, "Word-level Levenshtein distance", """
 This is the standard dynamic-programming recurrence for insertion, deletion,
@@ -400,6 +453,10 @@ and substitution. Only the previous and current rows are retained, reducing
 memory from `O(mn)` to `O(n)` while time remains `O(mn)`. At each cell, the
 three arguments to `min` correspond respectively to insertion, deletion, and
 match/substitution.
+
+`Array(0 ... rhs.count)` materializes the first row 0 through *n* from a
+closed range — `...` includes both endpoints — and `enumerated()` pairs each
+element with its index, Swift's idiom for a counted loop.
 """),
         ),
     ),
@@ -440,7 +497,8 @@ RMS means root mean square. dBFS means decibels relative to full scale, where
 quieter.
 """),
             Section(18, 42, "Measuring a PCM16 buffer", """
-The byte count is truncated to complete 16-bit samples. `withUnsafeBytes`
+The byte count is truncated to complete 16-bit samples;
+`MemoryLayout<Int16>.size` is Swift's `sizeof(int16_t)`. `withUnsafeBytes`
 borrows the storage only for the closure; no pointer escapes. Binding to
 `Int16` gives a typed view, and `prefix(sampleCount)` makes the intended bound
 explicit.
@@ -468,7 +526,8 @@ of audio bytes per second.
 
 The function appends fields in wire-format order. Returning `Data` keeps this
 binary concern out of the archive service, which can reserve a header, stream
-PCM bytes, then rewrite the final sizes.
+PCM bytes, then rewrite the final sizes. Underscores in numeric literals such
+as `16_000` are digit separators with no semantic effect.
 
 RIFF means Resource Interchange File Format. WAVE is the RIFF form type used by
 the Waveform Audio File Format.
@@ -493,13 +552,25 @@ and pretty printing so exports are both machine-readable and diffable.
 Timestamp conversion rounds once to integer milliseconds, then uses quotient
 and remainder arithmetic. Hours are omitted for shorter lectures but retained
 when needed; milliseconds always have three digits.
+
+::: {.callout-note title="Swift for a C programmer: string interpolation and Self"}
+Inside a string literal, `\\(expression)` splices the expression's textual
+form in place — a type-checked `sprintf`. `Self` with a capital S names the
+enclosing type, so `Self.timestamp(...)` calls the private static helper
+defined below. `String(format:)` is the genuine `printf`-style formatter, used
+here for fixed-width zero-padded fields.
+:::
 """),
             Section(110, 120, "Binary append helpers", """
-`appendASCII` force-unwraps conversion because all callers are compile-time
-ASCII literals; failure would indicate a programmer error, not user input.
+`private extension Data` grafts these two helpers onto Foundation's existing
+`Data` type — Swift can extend types it does not own — while `private` keeps
+them visible only in this file. `appendASCII` force-unwraps conversion with
+`!`, which extracts an optional's value and deliberately crashes on `nil`;
+that is acceptable because all callers are compile-time ASCII literals, so
+failure would indicate a programmer error, not user input.
 `appendLittleEndian` first converts the integer value, then borrows its bytes
-for the duration of `append`. The generic constraint prevents accidental use
-with floating-point or variable-width values.
+for the duration of `append`. The generic constraint `T: FixedWidthInteger`
+prevents accidental use with floating-point or variable-width values.
 
 ASCII means American Standard Code for Information Interchange.
 """),
@@ -515,17 +586,23 @@ removal from Unicode source text.""",
             Section(1, 30, "Public command values and internal match coordinates", """
 The public result contains only the requested action and lecture text left
 after command removal. Internal `Match` and `Token` values retain ranges into
-the original string. Swift string indices are not integer byte offsets; they
-remain valid only for the specific string from which they were produced.
+the original string. `Range<String.Index>` is a half-open interval — lower
+bound included, upper bound excluded — of positions in one specific string.
+Swift string indices are not integer byte offsets; they remain valid only for
+the specific string from which they were produced.
 """),
             Section(31, 76, "Legacy trigger form and the single-result facade", """
 The first overload recognizes a trigger phrase followed by one action synonym.
 It slides over token windows, uses tolerant token comparison, removes the exact
-source range, and cleans punctuation. The second overload delegates to the
-multi-command implementation and returns its first result, preserving a simple
-API for callers that do not need batching.
+source range, and cleans punctuation. `map(\\.normalized)` uses a key path — a
+literal naming a property — as shorthand for the closure `{ $0.normalized }`;
+`zip` walks two sequences in lock-step pairs and `allSatisfy` requires the
+predicate to hold for every pair. Swift tells the two same-named `recognize`
+functions apart by their parameter labels, so both overloads coexist. The
+second overload delegates to the multi-command implementation and returns its
+first result, preserving a simple API for callers that do not need batching.
 """),
-            Section(77, 140, "Recognizing and removing several commands safely", """
+            Section(77, 144, "Recognizing and removing several commands safely", """
 All configured phrases are matched independently, then sorted by source
 position, longest first at equal positions. Distinct phrases can produce
 overlapping matches — one phrase may be a token-prefix of another, or two
@@ -539,7 +616,7 @@ carries the cleaned remaining lecture text; otherwise a caller processing each
 result could append the same caption multiple times. The special alias is
 enabled only for the known phrase it repairs, limiting accidental matches.
 """),
-            Section(141, 176, "Holding back a possible provisional command", """
+            Section(145, 182, "Holding back a possible provisional command", """
 Voxtral emits partial hypotheses such as “sésame lu…”. These methods answer
 whether current text is a prefix of any configured command. The app can
 temporarily withhold such text from the overlay until the phrase either
@@ -548,7 +625,7 @@ completes as a command or diverges into ordinary speech.
 The trigger-only overload compares only the available prefix. Empty input and
 empty configuration are rejected explicitly.
 """),
-            Section(177, 215, "Bounded tolerance for recognition errors", """
+            Section(183, 221, "Bounded tolerance for recognition errors", """
 Matching proceeds from safest to loosest: exact equality, equality after
 removing a plural `s`, then edit distance at most one. Fuzzy matching is allowed
 only when both roots have at least five characters; applying it to short words
@@ -557,41 +634,45 @@ would create too many collisions in normal French speech.
 The local Levenshtein implementation uses Unicode characters and two rows. With
 the tiny command vocabulary, its quadratic time is insignificant.
 """),
-            Section(216, 250, "Action synonyms and sliding phrase matches", """
+            Section(222, 255, "Action synonyms and sliding phrase matches", """
 The legacy action word maps a small explicit French vocabulary to show/hide.
 Configured full phrases use a sliding token window, preserving every matching
 source range. This can return more than one occurrence, which is why
 `recognizeAll` later owns ordering and deletion.
 """),
-            Section(251, 268, "A narrowly scoped Voxtral alias", """
+            Section(256, 272, "A narrowly scoped Voxtral alias", """
 Empirical testing showed that “sésame lumière” can be transcribed as “ces âmes
 lumières”. This helper recognizes exactly that three-token acoustic confusion
 and maps it to `.show`. It is not a general language-model correction and is
 activated only when the configured show phrase is the corresponding command.
 """),
-            Section(269, 294, "Prefix matching for an unfinished final token", """
+            Section(273, 297, "Prefix matching for an unfinished final token", """
 All complete provisional tokens must match tolerantly. Only the final token may
 be a literal prefix of its expected word, and it must contain at least two
 characters. This models streaming transcription while avoiding a holdback on
 every one-letter utterance.
 """),
-            Section(295, 325, "Unicode-aware tokenization with removable ranges", """
+            Section(298, 328, "Unicode-aware tokenization with removable ranges", """
 The scanner starts a token on letters or numbers and closes it on punctuation
-or whitespace. Normalization folds case and diacritics for recognition, but
-the stored range still addresses the untouched source. The nested
-`appendToken` function captures `tokenStart` and resets it after emission,
-equivalent to a small scanner state machine.
+or whitespace. The walk advances with `text.index(after:)` because string
+positions cannot be incremented arithmetically: one user-perceived character
+may occupy several bytes. Normalization folds case and diacritics for
+recognition, but the stored range still addresses the untouched source. The
+nested `appendToken` function captures `tokenStart` and resets it after
+emission, equivalent to a small scanner state machine.
 
 This dual representation is the key design point: comparing normalized copies
 alone would make it difficult to remove the corresponding accented,
 punctuated substring from the original caption reliably.
 """),
-            Section(326, 347, "Cleaning punctuation left by command removal", """
+            Section(329, 350, "Cleaning punctuation left by command removal", """
 If no lexical token remains, the correct caption is empty. Otherwise anchored
 regular expressions remove punctuation stranded at the beginning or end, and
 the third expression collapses a doubled period created where a command used
-to be. Cleanup is intentionally narrow; it does not rewrite punctuation inside
-the student's or professor's sentence.
+to be. The `#"..."#` form is a raw string literal: between pound-delimited
+quotes, backslashes are ordinary characters, so regex escapes need no
+doubling. Cleanup is intentionally narrow; it does not rewrite punctuation
+inside the student's or professor's sentence.
 """),
         ),
     ),

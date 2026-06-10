@@ -24,7 +24,8 @@ is part of the runtime's correctness.
 ![The streaming runtime keeps separate counters for samples, Mel frames, convolution positions, encoder positions, and decoder positions.](../figures/voxtral-time-domains.svg){#fig-voxtral-time-domains width=97%}
 
 PCM means Pulse-Code Modulation. A Mel spectrogram is a short-time spectral
-representation whose frequency bins follow a perceptual Mel scale. KV means
+representation (energy per frequency band, frame by frame over time) whose
+frequency bins follow a perceptual Mel scale. KV means
 key-value attention cache. BF16 means bfloat16, a 16-bit format retaining the
 8-bit exponent width of IEEE-754 float. FP16 is IEEE half precision; the two
 formats are not interchangeable.
@@ -58,9 +59,11 @@ The local runtime loads several cooperating components:
 - strided convolutional stem;
 - audio transformer encoder;
 - modality adapter projecting/grouping audio features;
-- text decoder with autoregressive KV cache;
+- text decoder (autoregressive: it emits one token at a time, each conditioned
+  on everything emitted before) with its KV cache;
 - tokenizer mapping token IDs to byte pieces;
-- time/delay conditioning used by the realtime checkpoint.
+- time/delay conditioning used by the realtime checkpoint (a saved set of
+  trained weights).
 
 Weights are immutable after load. Stream state is separate so one model context
 could conceptually support multiple streams, although ClassroomCaptions uses
@@ -77,21 +80,26 @@ this file:
    window into a 128-bin Mel vector, one per 10 ms hop.
 3. **Convolution positions — ~50 Hz.** A two-layer causal **convolutional stem**
    consumes Mel frames: `conv0` (kernel 3, stride 1, 128 -> 1280 channels) then
-   `conv1` (kernel 3, **stride 2**, 1280 -> 1280), each followed by GELU. The
+   `conv1` (kernel 3, **stride 2**, 1280 -> 1280), each followed by GELU (a
+   smooth nonlinear activation function). The
    stride-2 layer halves the time axis, so 100 Mel frames become ~50 convolution
-   positions of width 1280. Because the convolutions are causal (left-padded) and
+   positions of width 1280. Because the convolutions are causal (left-padded, so
+   each output depends only on present and past input) and
    run on chunks, the runtime keeps a Mel-frame tail and a one-position
    `conv0_residual`, so a chunk boundary yields exactly the outputs a
    whole-lecture pass would, and it discards the positions nearest a boundary that
    the zero padding would otherwise contaminate.
 4. **Encoder positions — ~50 Hz.** The 32-layer audio transformer (Chapter 9)
-   refines those 1280-d vectors with sliding-window self-attention, consuming only
+   refines those 1280-d vectors with sliding-window self-attention (each position
+   blends in information from a bounded window of earlier positions; Chapter 9
+   explains the mechanism and its parallel "heads"), consuming only
    positions that later audio can no longer change.
 5. **Adapter / decoder positions — 12.5 Hz.** The modality adapter concatenates
    every `VOX_DOWNSAMPLE = 4` consecutive encoder frames (1280 x 4 = 5120) and
    projects them into the decoder's 3072-d space, dropping the rate to 12.5 Hz.
-   The 26-layer text decoder then attends over those audio embeddings and its own
-   previous tokens to emit caption pieces autoregressively.
+   The 26-layer text decoder then attends over (selectively reads from) those
+   audio embeddings (the projected vectors that now stand for the audio) and its
+   own previous tokens to emit caption pieces autoregressively.
 
 Every arrow is a **downsample with memory**: tail buffers and absolute counters
 (samples -> Mel -> conv -> encoder -> adapter) make the streamed result identical
@@ -111,7 +119,7 @@ are in front of you. The whole engine is governed by a handful of constants
 | convolution positions | ~50 Hz | 1280 | conv1 stride 2 |
 | encoder positions | ~50 Hz | 1280 | `VOX_ENC_LAYERS 32`, 32 heads x `VOX_ENC_HEAD_DIM 64`, window `VOX_ENC_WINDOW 750` |
 | adapter / decoder input | 12.5 Hz | 3072 | `VOX_DOWNSAMPLE 4` (1280 x 4 = 5120 -> 3072) |
-| decoder hidden -> logits | 12.5 Hz | 3072 -> vocab | `VOX_DEC_LAYERS 26`, 32 query / 8 KV heads x `VOX_DEC_HEAD_DIM 128`, window `VOX_DEC_WINDOW 8192` |
+| decoder hidden -> logits (per-vocabulary-entry scores for the next token) | 12.5 Hz | 3072 -> vocab | `VOX_DEC_LAYERS 26`, 32 query / 8 KV heads x `VOX_DEC_HEAD_DIM 128`, window `VOX_DEC_WINDOW 8192` |
 
 **A worked example — two seconds of speech.** Follow one short utterance all the
 way through:
@@ -152,7 +160,8 @@ Stride alignment and causal receptive fields determine this stability.
 ## Delay conditioning
 
 Realtime Voxtral conditions generation on a configured caption delay. The C
-runtime builds a sinusoidal embedding from the delay value and feeds the
+runtime builds a sinusoidal embedding (a vector of sine and cosine values that
+encodes the delay number) from the delay value and feeds the
 adapter/model tensors expected by the checkpoint. A smaller delay requests
 earlier output but gives the model less future acoustic context; latency falls
 while recognition stability may degrade.
@@ -270,6 +279,12 @@ extern "C" {
 ```
 
 ### `#endif`
+
+A bare `#endif` closes the nearest open preprocessor conditional. This header
+has three: the first two end the `#ifdef __cplusplus` regions that emit the
+opening and the closing brace of the `extern "C"` linkage wrapper, and the
+final one ends the include guard opened by `#ifndef CLASSROOM_VOXTRAL_H` — the
+point through which the preprocessor skips on any repeated inclusion.
 
 ```{.c .numberLines startFrom="9"}
 #endif
@@ -453,10 +468,12 @@ void ccv_stream_cancel(ccv_stream_t *stream);
 
 ### `ccv_status_t ccv_stream_read_text(…)`
 
-Copies the next queued UTF-8 text fragment into caller-owned storage and reports
-its required byte count through `bytes_written`. `NO_TEXT` means polling may
-stop for now. `BUFFER_TOO_SMALL` lets the caller allocate the required capacity
-and retry without losing the queued fragment.
+Copies the next queued UTF-8 text fragment into caller-owned storage and always
+reports the byte count it needs, NUL terminator included, through
+`required_capacity`. `NO_TEXT` means polling may stop for now.
+`BUFFER_TOO_SMALL` lets the caller allocate the reported capacity and retry
+without losing the fragment — the bridge keeps holding it until a copy
+succeeds.
 
 ```{.c .numberLines startFrom="64"}
 ccv_status_t ccv_stream_read_text(
@@ -545,12 +562,24 @@ The matching conditional near the end closes the brace only in C++ mode.
 
 ### `#endif`
 
+A bare `#endif` closes the nearest open preprocessor conditional. This header
+has three: the first two end the `#ifdef __cplusplus` regions that emit the
+opening and the closing brace of the `extern "C"` linkage wrapper, and the
+final one ends the include guard opened by `#ifndef CLASSROOM_VOXTRAL_H` — the
+point through which the preprocessor skips on any repeated inclusion.
+
 ```{.c .numberLines startFrom="81"}
 #endif
 
 ```
 
 ### `#endif`
+
+A bare `#endif` closes the nearest open preprocessor conditional. This header
+has three: the first two end the `#ifdef __cplusplus` regions that emit the
+opening and the closing brace of the `extern "C"` linkage wrapper, and the
+final one ends the include guard opened by `#ifndef CLASSROOM_VOXTRAL_H` — the
+point through which the preprocessor skips on any repeated inclusion.
 
 ```{.c .numberLines startFrom="83"}
 #endif
@@ -601,6 +630,12 @@ This map gives the reading spine of the file. Line numbers refer to the original
 ### Translation-unit preamble {.unnumbered .unlisted}
 
 This translation-unit preamble selects dependencies, compile-time features, and file-local constants used by the definitions that follow.
+
+The bridge includes its own public header, the upstream engine API, and — only
+when compiled with Metal — the GPU backend header. `stdatomic.h` supplies the
+atomic type for the cancellation flag, `unistd.h` the `access()` call used to
+check model files, and `CCV_UPSTREAM_REVISION` pins the upstream commit hash
+that `ccv_upstream_revision()` reports.
 
 ```{.c .numberLines startFrom="1"}
 #include "ClassroomVoxtral.h"
@@ -995,8 +1030,10 @@ ccv_status_t ccv_stream_read_text(
 
 ### `uint64_t ccv_stream_samples_fed(const ccv_stream_t *stream)`
 
-Exposes the upstream cumulative sample counter without revealing stream layout.
-Invalid handles return zero for diagnostics.
+Returns the bridge's own monotonic count of accepted samples — incremented in
+`ccv_stream_feed_pcm16` only after the engine accepts a buffer, so rejected
+audio is never counted. A null handle reads as zero, letting diagnostics code
+call it unconditionally.
 
 ```{.c .numberLines startFrom="260"}
 uint64_t ccv_stream_samples_fed(const ccv_stream_t *stream) {
@@ -1089,7 +1126,8 @@ This service owns one C model handle and one C stream handle and confines all
 operations to a serial inference queue. Startup loads the full FP16/BF16 model,
 creates configured streaming state, primes the decoder with silence, and only
 then emits `connected`. Priming moves one-time allocation and kernel warm-up
-before live speech so the first words are not lost.
+(the first, slowest runs of the GPU compute routines) before live speech so the
+first words are not lost.
 
 PCM feed, flush, text draining, counters, and destruction never overlap.
 `AsyncStream` transfers value events to the app model. Stop drains stable text
@@ -1124,6 +1162,12 @@ This map gives the reading spine of the file. Line numbers refer to the original
 
 The file begins by importing `ClassroomCaptionsCore`, `CVoxtralEngine`, `Foundation`, `Synchronization`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
+An `import` makes a compiled module's public declarations visible — there is no
+textual inclusion as with `#include`. `ClassroomCaptionsCore` supplies the
+shared event and metrics value types, `CVoxtralEngine` is the C bridge target
+whose `ccv_*` functions Swift calls directly, `Foundation` provides `Data` and
+`URL`, and `Synchronization` provides the `Mutex` that guards shared state.
+
 ```{.swift .numberLines startFrom="1"}
 import ClassroomCaptionsCore
 import CVoxtralEngine
@@ -1134,9 +1178,13 @@ import Synchronization
 
 ### `enum VoxtralEmbeddedError: LocalizedError`
 
-Swift-facing failures for invalid model path, C load/create failure, and stream
-operation failure. Each carries enough bridge text to diagnose configuration
-without exposing raw status handling to the app model.
+The service's only error type. A Swift `enum` case can carry payload values
+(roughly a tagged union in C); the single `engine` case packages the bridge's
+status code with its human-readable message. Conforming to `LocalizedError`
+lets Swift's error machinery display `errorDescription` directly, so whatever
+the C side wrote into its error buffer — missing model files, failed load,
+failed stream creation — reaches the UI without the app model handling raw
+status codes.
 
 ```{.swift .numberLines startFrom="6"}
 enum VoxtralEmbeddedError: LocalizedError {
@@ -1154,10 +1202,14 @@ enum VoxtralEmbeddedError: LocalizedError {
 
 ### `final class VoxtralEmbeddedService: @unchecked Sendable`
 
-Owns the embedded backend's C handles and serial inference queue. The class is
-`@unchecked Sendable` because opaque pointers are not compiler-verifiable;
-queue confinement guarantees that feed, drain, flush, finish, and destruction
-never overlap.
+Owns the embedded backend's C handles and serial inference queue. A `final
+class` is a reference type that cannot be subclassed; `Sendable` marks a type
+safe to share across threads, and `@unchecked` means the programmer asserts
+that instead of the compiler proving it — opaque C pointers are not
+verifiable. The real guarantee is queue confinement: feed, drain, flush,
+finish, and destruction never overlap. `startupPrerollSamples` is
+16,000 × 3.2 = 51,200 samples — the 3.2 s of silence fed to prime the decoder
+at startup.
 
 ```{.swift .numberLines startFrom="17"}
 final class VoxtralEmbeddedService: @unchecked Sendable {
@@ -1167,9 +1219,15 @@ final class VoxtralEmbeddedService: @unchecked Sendable {
 
 ### `private struct State: @unchecked Sendable`
 
-Queue-confined lifecycle record for model/stream handles, continuation,
-activation flags, pending provisional text, counters, and priming state. Keeping
-them together lets startup and stop publish coherent transitions.
+One record for everything mutable: the two C handles (`OpaquePointer` is
+Swift's type for a pointer to an undeclared C struct), the event continuation,
+the provisional caption accumulated so far, and the running flag. It lives
+inside a `Mutex` (the Synchronization module's mutual-exclusion lock;
+`withLock` runs a closure while holding it) because event-stream registration
+and termination touch state off the inference queue. The `DispatchQueue` below
+is the serial queue from the chapter introduction — the only place C functions
+are called — and `.userInitiated` raises its priority because caption latency
+is user-visible.
 
 ```{.swift .numberLines startFrom="20"}
     private struct State: @unchecked Sendable {
@@ -1191,8 +1249,13 @@ them together lets startup and stop publish coherent transitions.
 
 ### `func events() -> AsyncStream<TranscriptionEvent>`
 
-Creates the ordered event stream and stores its continuation under queue
-ownership. Termination removes the output sink without racing C-handle access.
+Builds the `AsyncStream` the app model consumes with `for await`: an
+AsyncStream is a one-way channel whose producer pushes values through a
+continuation handle. The builder closure stores that continuation in state so
+`emit(_:)` can yield events in order; `onTermination` fires when the consumer
+stops listening and clears the sink, so later events are dropped rather than
+sent to nobody. `[weak self]` keeps this long-lived callback from holding the
+service in memory.
 
 ```{.swift .numberLines startFrom="35"}
     func events() -> AsyncStream<TranscriptionEvent> {
@@ -1331,9 +1394,14 @@ outside live capture.
 
 ### `func sendAudio(_ pcm16MonoData: Data)`
 
-`Data` owns the callback bytes. The inference queue converts and feeds them
-serially, drains complete token pieces, and emits metrics. No second feed can
-enter the mutable C stream concurrently.
+The capture path hands over a `Data` (Foundation's owned byte buffer, a managed
+counterpart of a malloc block) and returns immediately; the feed itself runs on
+the inference queue, so no second feed can enter the mutable C stream
+concurrently. `withUnsafeBytes` exposes the bytes as a raw pointer valid only
+inside the closure, and `bindMemory(to: Int16.self)` reinterprets them as
+PCM16 samples — the C call takes a sample count, not bytes. Success drains
+newly decoded tokens; any failure except CANCELLED becomes a `.failed` event,
+CANCELLED being the owner's own shutdown rather than an error.
 
 ```{.swift .numberLines startFrom="155"}
     func sendAudio(_ pcm16MonoData: Data) {
@@ -1451,6 +1519,14 @@ final drain may produce text after the last ordinary event.
 ```
 
 ### `func releaseModel()`
+
+Frees the cached C model on app shutdown; ordinary stops keep it so the next
+`start()` skips the multi-second weight reload. The locked closure returns the
+model pointer only when no stream is active — a live session keeps its model —
+and clears the cache fields so a later `start()` reloads; the actual
+`ccv_model_free` runs after the lock is released, keeping the lock hold-time to
+a pointer swap. Scheduling on the inference queue orders the free after any
+inference work already queued.
 
 ```{.swift .numberLines startFrom="247"}
     func releaseModel() {
@@ -1657,8 +1733,11 @@ failure, preferring the specific bridge message when present.
 
 ### `private func statusMessage(_ status: ccv_status_t) -> String`
 
-Converts the bridge's borrowed C status-description pointer to a Swift string
-with a stable fallback for an unexpected null.
+Wraps the C lookup for call sites that have a status but no bridge message.
+`ccv_status_description` returns borrowed static storage and answers every
+enum value (out-of-range ones map to a fixed "unknown status" string), and
+`String(cString:)` copies the NUL-terminated UTF-8 into an owned Swift string,
+so the result stays valid after any C state is freed.
 
 ```{.swift .numberLines startFrom="389"}
     private func statusMessage(_ status: ccv_status_t) -> String {
@@ -1750,6 +1829,10 @@ This map gives the reading spine of the file. Line numbers refer to the original
 
 This preamble contains comments and preprocessing setup that apply to the complete public header. It introduces no runtime state.
 
+Banner comment only: it identifies this header as the public API of the pure C
+inference engine for Voxtral Realtime 4B (a four-billion-parameter
+speech-to-text model); no declarations yet.
+
 ```{.c .numberLines startFrom="1"}
 /*
  * voxtral.h - Voxtral Realtime 4B Pure C Inference Engine
@@ -1761,11 +1844,21 @@ This preamble contains comments and preprocessing setup that apply to the comple
 
 ### `#ifndef VOXTRAL_H`
 
+First half of the conventional include guard, same pattern as the bridge
+header: the macro is undefined on first inclusion, so the body is processed
+once, and every later inclusion skips ahead to the final `#endif`.
+
 ```{.c .numberLines startFrom="7"}
 #ifndef VOXTRAL_H
 ```
 
 ### `#define VOXTRAL_H`
+
+Records that the header has been processed, then pulls in the three standard
+headers the API depends on: `stddef.h` for `size_t`, `stdint.h` for the
+fixed-width integer types (BF16 weights travel as `uint16_t`), and `stdio.h`
+for standard I/O declarations. The constants that follow are the model's
+datasheet — fixed by the trained checkpoint, not tunable.
 
 ```{.c .numberLines startFrom="8"}
 #define VOXTRAL_H
@@ -1792,7 +1885,10 @@ to this rate before feeding the model.
 
 ### `#define VOX_MEL_BINS 128`
 
-Each acoustic frame contains 128 Mel-band values, matching checkpoint training.
+Each acoustic frame is a vector of 128 Mel-band energies: the spectrum of one
+25 ms window summarized into 128 perceptually spaced frequency bands, matching
+checkpoint training. This is also the conv stem's input channel count —
+`conv0_weight` below is [1280, 128, 3].
 
 ```{.c .numberLines startFrom="20"}
 #define VOX_MEL_BINS         128
@@ -1826,7 +1922,11 @@ front-end downsampling; this is distinct from the 100 Hz Mel clock.
 
 ### `#define VOX_LOG_MEL_MAX 1.5f`
 
-Checkpoint-specific upper clamp used before log-Mel normalization.
+Fixed stand-in for the running maximum of the log-Mel values: the front end
+clips anything more than 8 below it (to 1.5 − 8 = −6.5), limiting the dynamic
+range to eight orders of magnitude before the final (val + 4) / 4
+normalization. The value is checkpoint-specific — preprocessing must reproduce
+exactly what the model saw during training.
 
 ```{.c .numberLines startFrom="24"}
 #define VOX_LOG_MEL_MAX      1.5f
@@ -1836,7 +1936,9 @@ Checkpoint-specific upper clamp used before log-Mel normalization.
 
 ### `#define VOX_ENC_DIM 1280`
 
-Width of each encoder residual vector and normalization weight.
+Width of the encoder's working vectors: every position is 1280 floats from the
+conv stem onward, and each layer reads and writes that same width. All the
+[.., 1280] and [1280] shapes in the structs below derive from this one number.
 
 ```{.c .numberLines startFrom="27"}
 #define VOX_ENC_DIM          1280
@@ -1852,7 +1954,10 @@ Number of stacked audio-transformer layers and encoder KV-cache planes.
 
 ### `#define VOX_ENC_HEADS 32`
 
-Number of encoder query heads.
+Attention runs as 32 parallel heads — independent attention units, each with
+its own learned projections over a slice of the vector — whose outputs are
+concatenated. 32 heads × 64 dims per head explains the 2048-row Q/K/V
+projections in `vox_enc_layer_t`.
 
 ```{.c .numberLines startFrom="29"}
 #define VOX_ENC_HEADS        32
@@ -1860,8 +1965,10 @@ Number of encoder query heads.
 
 ### `#define VOX_ENC_KV_HEADS 32`
 
-Encoder key/value head count; here it equals query heads, unlike grouped-query
-attention in the decoder.
+Number of key/value heads. The encoder keeps one K/V head per query head
+(32 = 32), the classic multi-head layout; the decoder instead uses
+grouped-query attention, where several query heads share one K/V head to
+shrink the KV cache (see `VOX_DEC_KV_HEADS`).
 
 ```{.c .numberLines startFrom="30"}
 #define VOX_ENC_KV_HEADS     32
@@ -1869,7 +1976,9 @@ attention in the decoder.
 
 ### `#define VOX_ENC_HEAD_DIM 64`
 
-Per-head Q/K/V width. Projection width is heads multiplied by this dimension.
+Each head attends within a 64-dimensional subspace; heads × head-dim
+(32 × 64 = 2048) gives the full projection width, which is why the encoder's
+attention weight matrices are [2048, 1280].
 
 ```{.c .numberLines startFrom="31"}
 #define VOX_ENC_HEAD_DIM     64
@@ -1877,7 +1986,9 @@ Per-head Q/K/V width. Projection width is heads multiplied by this dimension.
 
 ### `#define VOX_ENC_HIDDEN 5120`
 
-Intermediate width of the encoder's gated feed-forward network.
+Middle width of the encoder's gated feed-forward block: two projections widen
+1280 to 5120 (`w1` acting as a multiplicative gate on `w3`'s output), and `w2`
+projects the product back down to 1280.
 
 ```{.c .numberLines startFrom="32"}
 #define VOX_ENC_HIDDEN       5120
@@ -1885,7 +1996,11 @@ Intermediate width of the encoder's gated feed-forward network.
 
 ### `#define VOX_ENC_WINDOW 750`
 
-Maximum retained encoder attention window before rolling-cache compaction.
+The encoder attends over at most the last 750 positions — roughly 15 seconds of
+audio at about 50 positions per second. When the rolling encoder KV cache
+reaches this window it is compacted and the oldest positions drop out; that
+bound is what keeps memory and per-step cost constant over an unbounded
+lecture.
 
 ```{.c .numberLines startFrom="33"}
 #define VOX_ENC_WINDOW       750
@@ -1895,13 +2010,23 @@ Maximum retained encoder attention window before rolling-cache compaction.
 
 ### `#define VOX_ENC_INC_MAX_BATCH 256`
 
+Upper bound on how many new positions one incremental encoder pass may append —
+about five seconds of audio at roughly 50 positions per second. The bound
+exists because the Metal-shared encoder KV cache is preallocated at
+`VOX_ENC_WINDOW + 256` positions and cannot grow, so
+`vox_encoder_forward_incremental` splits a larger backlog into batches of at
+most this size, producing results identical to one oversized pass.
+
 ```{.c .numberLines startFrom="36"}
 #define VOX_ENC_INC_MAX_BATCH 256
 ```
 
 ### `#define VOX_ENC_NORM_EPS 1e-5f`
 
-Numerical epsilon added inside encoder RMS normalization.
+Small constant added inside encoder RMS normalization (which rescales each
+1280-vector by its root-mean-square so activation magnitudes stay stable layer
+after layer); the epsilon keeps the division well-defined for a near-zero
+vector.
 
 ```{.c .numberLines startFrom="37"}
 #define VOX_ENC_NORM_EPS     1e-5f
@@ -1922,7 +2047,10 @@ audio position.
 
 ### `#define VOX_DEC_DIM 3072`
 
-Decoder residual/token-embedding width.
+Width of the decoder's working vectors: token embeddings, adapter outputs, and
+every layer's input and output are 3072 floats. The adapter exists precisely to
+turn 5120-wide grouped audio features into this width, so audio and text can
+share one decoder sequence.
 
 ```{.c .numberLines startFrom="43"}
 #define VOX_DEC_DIM          3072
@@ -1955,7 +2083,8 @@ reducing cache memory.
 
 ### `#define VOX_DEC_HEAD_DIM 128`
 
-Per-head decoder attention width.
+Each decoder head spans 128 dimensions, so 32 query heads make the 4096-row
+`wq` and 8 K/V heads make the 1024-row `wk`/`wv` in `vox_dec_layer_t`.
 
 ```{.c .numberLines startFrom="47"}
 #define VOX_DEC_HEAD_DIM     128
@@ -1963,7 +2092,9 @@ Per-head decoder attention width.
 
 ### `#define VOX_DEC_HIDDEN 9216`
 
-Intermediate width of the decoder SwiGLU feed-forward network.
+Middle width of the decoder's SwiGLU feed-forward block — the gated variant in
+which one 3072-to-9216 projection passes through a smooth activation and
+multiplies the other, before `w2` projects the product back to 3072.
 
 ```{.c .numberLines startFrom="48"}
 #define VOX_DEC_HIDDEN       9216
@@ -1980,7 +2111,8 @@ restart threshold for latency.
 
 ### `#define VOX_DEC_NORM_EPS 1e-5f`
 
-Decoder RMSNorm epsilon.
+The decoder's RMS-normalization epsilon; same numerical-stability role as
+`VOX_ENC_NORM_EPS`.
 
 ```{.c .numberLines startFrom="50"}
 #define VOX_DEC_NORM_EPS     1e-5f
@@ -1988,7 +2120,10 @@ Decoder RMSNorm epsilon.
 
 ### `#define VOX_VOCAB_SIZE 131072`
 
-Number of decoder output/token-embedding rows, including control tokens.
+Number of token IDs the decoder can emit — 131,072 = 2^17 rows, including
+control tokens. Each decode step produces a logits vector (one raw score per
+vocabulary entry) of exactly this length, computed against the same
+[131072, 3072] table that serves as the token-embedding matrix.
 
 ```{.c .numberLines startFrom="51"}
 #define VOX_VOCAB_SIZE       131072
@@ -1996,7 +2131,11 @@ Number of decoder output/token-embedding rows, including control tokens.
 
 ### `#define VOX_ADA_NORM_DIM 32`
 
-Bottleneck width of each layer's delay-conditioned adaptive norm MLP.
+Bottleneck width of the per-layer delay-conditioning network: each layer's tiny
+MLP takes the 3072-wide time embedding of the configured caption delay,
+squeezes it to 32 values, and expands it back into 3072 per-channel scale
+factors (`ada_norm_down`/`ada_norm_up` below). This is how the chapter
+introduction's delay conditioning physically enters every decoder layer.
 
 ```{.c .numberLines startFrom="52"}
 #define VOX_ADA_NORM_DIM     32
@@ -2004,7 +2143,11 @@ Bottleneck width of each layer's delay-conditioned adaptive norm MLP.
 
 ### `#define VOX_ROPE_THETA 1000000.0f`
 
-Base frequency scale for decoder rotary position embeddings.
+Base of the rotary position embedding (RoPE), which encodes where a token sits
+by rotating pairs of query/key channels through position-dependent angles. Each
+channel pair turns at a different rate drawn from a geometric series with this
+base; the large 10^6 base gives very slowly turning low-frequency channels, so
+positions stay distinguishable across the 8192-token window.
 
 ```{.c .numberLines startFrom="53"}
 #define VOX_ROPE_THETA       1000000.0f
@@ -2240,9 +2383,11 @@ Compile-time ceiling for alternative-token diagnostics per decoded position.
 
 ### `vox_ctx_t *vox_load(const char *model_dir);`
 
-Long-lived model context: immutable weights/mapping, shared GPU resources,
-decoder and encoder rolling caches, delay conditioning, and reusable scratch.
-Streams borrow this object; it must outlive them.
+Builds the long-lived `vox_ctx_t` from one model directory: maps
+`consolidated.safetensors`, loads encoder/adapter/decoder weights, and sets up
+caches and acceleration resources. Returns an owned context, or NULL on
+failure. The tokenizer is deliberately not loaded here — the first stream
+parses it and the context then lends it to later streams.
 
 ```{.c .numberLines startFrom="225"}
 vox_ctx_t *vox_load(const char *model_dir);
@@ -2252,9 +2397,9 @@ vox_ctx_t *vox_load(const char *model_dir);
 
 ### `void vox_free(vox_ctx_t *ctx);`
 
-Long-lived model context: immutable weights/mapping, shared GPU resources,
-decoder and encoder rolling caches, delay conditioning, and reusable scratch.
-Streams borrow this object; it must outlive them.
+Releases every context-owned allocation — weights and their file mapping,
+caches, and scratch buffers. All borrowing streams must be freed first,
+mirroring the stream-before-model order the Swift service enforces.
 
 ```{.c .numberLines startFrom="228"}
 void vox_free(vox_ctx_t *ctx);
@@ -2264,8 +2409,11 @@ void vox_free(vox_ctx_t *ctx);
 
 ### `void vox_set_delay(vox_ctx_t *ctx, int delay_ms);`
 
-Adds terminal feature padding, processes all remaining stable positions, and
-ends the stream.
+Converts the requested delay in milliseconds to the model's 80 ms token grid
+(valid range 80–2400, default 320 = 4 delay tokens) and recomputes the
+decoder's time conditioning from it. The realtime checkpoint is trained to know
+how far captions lag the audio: a smaller delay asks for earlier words with
+less future acoustic context, as the chapter introduction describes.
 
 ```{.c .numberLines startFrom="231"}
 void vox_set_delay(vox_ctx_t *ctx, int delay_ms);
@@ -2562,6 +2710,9 @@ int vox_encoder_kv_cache_preallocate(vox_ctx_t *ctx, int max_pos);
 
 ### `#endif /* VOXTRAL_H */`
 
+Closes the include guard opened on line 7; the trailing comment names the
+matching macro — a courtesy in a 343-line header.
+
 ```{.c .numberLines startFrom="343"}
 #endif /* VOXTRAL_H */
 ```
@@ -2631,6 +2782,15 @@ This map gives the reading spine of the file. Line numbers refer to the original
 
 This translation-unit preamble selects dependencies, compile-time features, and file-local constants used by the definitions that follow.
 
+The header comment states this file's job: orchestrate the whole pipeline from
+weight loading to text. The includes pull in the engine's own subsystems — the
+math kernels, the safetensors weight-file reader, the audio front end, the
+tokenizer, and (when built with `USE_METAL`) the GPU backend — plus the libc
+headers for I/O, string handling, math, and the `gettimeofday` timers. Two
+globals, `vox_verbose` and `vox_monitor`, gate diagnostic printing on stderr
+for this file and the tokenizer; the audio module keeps its own independent
+`vox_verbose_audio` flag.
+
 ```{.c .numberLines startFrom="1"}
 /*
  * voxtral.c - Main API for Voxtral Realtime 4B inference
@@ -2666,11 +2826,16 @@ int vox_monitor = 0;
 
 ### `static void vox_compute_time_embedding(float *out, float t_value)`
 
-Builds the decoder timing embedding for a scalar t_value, matching the vLLM
-Mistral time embedding: inverse frequencies decay geometrically over dim/2 bands,
-emb = t * inv_freq, and the output is the concatenation [cos(emb), sin(emb)]
-written into the caller-owned out of length VOX_DEC_DIM. out must already be sized
-to the full decoder dim, since cos fills the low half and sin the high half.
+Builds the timing embedding (a fixed-length vector of numbers encoding one
+scalar) for `t_value`, the configured caption delay measured in decoder tokens.
+Rather than handing the model a raw number, the scalar is spread across
+`VOX_DEC_DIM` sinusoids: each of the dim/2 frequency bands gets a geometrically
+decaying `inv_freq`, and the output is cos(t·inv_freq) in the low half and
+sin(t·inv_freq) in the high half — a smooth encoding the network can
+interpolate between delays it saw in training. The layout matches the vLLM
+(reference GPU server) Mistral implementation exactly, so this C runtime
+conditions the decoder the same way the published checkpoint expects. `out`
+must already hold `VOX_DEC_DIM` floats.
 
 ```{.c .numberLines startFrom="31"}
 static void vox_compute_time_embedding(float *out, float t_value) {
@@ -2693,12 +2858,18 @@ static void vox_compute_time_embedding(float *out, float t_value) {
 
 ### `static void vox_update_time_conditioning(vox_ctx_t *ctx)`
 
-Recomputes t_cond from the current delay_tokens and precomputes, per decoder
-layer, the ada_scale vector ada_up(GELU(ada_down(t_cond))). The ada_scale buffer
-is lazily allocated once into context storage sized VOX_DEC_LAYERS * VOX_DEC_DIM
-and reused thereafter; the per-layer matmuls read the borrowed mapped ada_norm
-weights. Called at load and whenever the delay changes, so the decoder's per-layer
-modulation always reflects the active delay.
+Recomputes everything that depends on the configured delay. It first rebuilds
+`t_cond` (the time-conditioning vector — the sinusoidal encoding of
+`delay_tokens` from the previous function), then for each of the 26 decoder
+layers precomputes `ada_scale = ada_up(GELU(ada_down(t_cond)))`: a tiny
+two-matrix network (3072 -> 32 -> 3072, with GELU, a smooth nonlinear
+activation, between them) that turns the delay encoding into a per-layer
+scaling vector the decoder later applies to its activations. Doing the work
+here — into a buffer lazily allocated to `VOX_DEC_LAYERS x VOX_DEC_DIM` and
+reused — keeps it out of the per-token decode loop; it runs at load time and
+again whenever `vox_set_delay` changes the delay. The `ada_norm` weight
+matrices are small f32 copies converted out of the weight file at load time and
+owned (and later freed) by the context.
 
 ```{.c .numberLines startFrom="47"}
 static void vox_update_time_conditioning(vox_ctx_t *ctx) {
@@ -2751,10 +2922,12 @@ extern int vox_decoder_load(vox_decoder_t *dec, safetensors_file_t *sf);
 
 ### `static uint16_t *load_bf16_direct(safetensors_file_t *sf, const char *name)`
 
-Resolves an adapter weight tensor by name and returns a borrowed, zero-copy bf16
-pointer into the safetensors mapping (via safetensors_get_bf16_direct), or NULL
-after logging when the tensor is absent. The returned pointer is owned by the
-mapping, not the caller.
+Looks up one weight tensor (a named array of model parameters) in the
+safetensors file — the model's weight container, which the loader maps into
+memory rather than copying onto the heap — and returns a pointer straight into
+that mapping, in bf16 (bfloat16, the 16-bit float format the weights are stored
+in). No copy is made, so the pointer is owned by the mapping, not the caller;
+a missing name logs to stderr and returns NULL so the load can abort.
 
 ```{.c .numberLines startFrom="93"}
 static uint16_t *load_bf16_direct(safetensors_file_t *sf, const char *name) {
@@ -2770,10 +2943,13 @@ static uint16_t *load_bf16_direct(safetensors_file_t *sf, const char *name) {
 
 ### `static int vox_adapter_load(vox_adapter_t *adapter, safetensors_file_t *sf)`
 
-Resolves the two audio-language projection weight tensors by their safetensors
-names and stores borrowed bf16 pointers into the mapped file (no copy). Returns
--1 if either tensor is missing, aborting the load. The pointers remain valid only
-while the safetensors mapping is open.
+Loads the modality adapter — the small projection network that turns grouped
+encoder audio vectors into the decoder's 3072-wide embedding space, the last
+narrowing step of the funnel. It resolves the two projection matrices by their
+long checkpoint names and stores borrowed bf16 pointers into the mapped weight
+file; nothing is copied, so the pointers stay valid only while the safetensors
+mapping is open. Returns -1 if either tensor is missing, which aborts model
+loading.
 
 ```{.c .numberLines startFrom="102"}
 static int vox_adapter_load(vox_adapter_t *adapter, safetensors_file_t *sf) {
@@ -2794,9 +2970,18 @@ static int vox_adapter_load(vox_adapter_t *adapter, safetensors_file_t *sf) {
 
 ### `vox_ctx_t *vox_load(const char *model_dir)`
 
-Model loading opens each component, validates expected tensors, initializes
-Metal, and preallocates caches. Follow every failure label to verify that it
-releases exactly the resources constructed before that point.
+Builds the immutable model context: allocate, record defaults (320 ms delay,
+weights read in place as bf16), open the memory-mapped
+`consolidated.safetensors`, then load encoder, adapter, and decoder in turn —
+each failure path hands whatever exists so far to `vox_free` and returns NULL.
+It then precomputes the delay conditioning and, when Metal (Apple's GPU API) is
+available, pre-warms the GPU weight cache: every bf16 matrix is converted once
+into the f16 form the GPU kernels read, and the q/k/v and w1/w3 matrices are
+warmed only as merged buffers, because the per-token step reads them merged —
+caching them individually too would duplicate about 3.9 GB of weights that are
+never read again. Without this warm-up the first decoded token would pay the
+whole conversion cost as a visible latency spike. Finally it preallocates the
+encoder's KV cache (its stored attention history) and reports GPU memory used.
 
 ```{.c .numberLines startFrom="116"}
 vox_ctx_t *vox_load(const char *model_dir) {
@@ -3108,11 +3293,14 @@ static void trim_ascii_whitespace(char *s) {
 
 ### `static void tok_embed_bf16_to_f32(…)`
 
-Expands a single token's embedding row from bf16 to f32 by zero-extending each
-16-bit value into the high half of a 32-bit float and copying into dst. Indexes
-the borrowed mapped embedding table at token_id * dim; dst is caller scratch of
-length dim. Used to add the previous token's embedding onto the adapter output
-before each decoder step.
+Fetches one token's embedding (the learned `dim`-float vector that represents
+that vocabulary entry inside the model) from the memory-mapped bf16 table at
+row `token_id` and widens it to f32 in caller scratch. The conversion is a pure
+bit trick: bf16 is exactly the top 16 bits of an IEEE-754 float, so shifting
+each value left by 16 and reinterpreting the bits yields the correct float with
+zeros in the low mantissa bits. The decoder calls this every step to add the
+previous token's embedding onto the audio (adapter) embedding before the next
+forward pass.
 
 ```{.c .numberLines startFrom="400"}
 static void tok_embed_bf16_to_f32(float *dst, const uint16_t *tok_emb_bf16,
@@ -3132,9 +3320,18 @@ static void tok_embed_bf16_to_f32(float *dst, const uint16_t *tok_emb_bf16,
 
 ### `struct vox_stream`
 
-This structure is the complete mutable streaming state. Fields belong to
-different time domains; prefixes may be compacted while absolute counters
-continue increasing. It is intentionally not exposed through the project ABI.
+The complete mutable state of one live transcription, grouped by funnel stage:
+the incremental mel front end with its absolute sample counter; tail buffers
+(`mel_tail`, `conv0_tail`, `conv0_residual`) carrying convolution boundary
+context between chunks; leftover encoder positions awaiting four-way grouping;
+the growing adapter buffer; decoder progress (`gen_pos`, `prev_token`, watchdog
+streaks, restart counters); the circular queue of decoded text pieces that
+Swift polls; and timing totals. The recurring pattern is one buffer plus one
+absolute counter per stage: buffers compact their already-consumed prefixes to
+stay small, while counters such as `total_adapter` and `gen_pos` keep counting
+in absolute stream coordinates, so compaction can never change which moment of
+audio a stored vector represents. The struct is private to this file; the
+project ABI sees only opaque pointers.
 
 ```{.c .numberLines startFrom="413"}
 struct vox_stream {
@@ -3209,11 +3406,15 @@ struct vox_stream {
 
 ### `typedef enum stream_tok_class`
 
-The four-way classification a sampled token can take before the stream decides
-what to do with it: TEXT (a non-empty decoded piece), CONTROL (id below the text
-range), INVALID (text-range id that decodes to empty, e.g. Tekken token 1000 =
-byte 0x00), and EOS. stream_classify_token assigns it; the streak watchdogs and
-enqueue logic branch on it.
+The four-way classification a sampled token receives before the stream decides
+what to do with it: TEXT (the token decodes to a non-empty UTF-8 piece),
+CONTROL (an ID below 1000, the model's reserved non-text range), INVALID (a
+text-range ID whose decode is empty), and EOS (the end-of-sequence token, the
+model's signal that the current caption is complete). INVALID exists because in
+Tekken (Mistral's tokenizer — the table mapping token IDs to byte sequences)
+token 1000 is the raw byte 0x00, which as a C string is empty; counting such
+tokens as text would let "decode activity with no visible output" defeat the
+stall watchdogs.
 
 ```{.c .numberLines startFrom="481"}
 typedef enum stream_tok_class {
@@ -3229,11 +3430,13 @@ typedef enum stream_tok_class {
 
 ### `static stream_tok_class_t stream_classify_token(vox_stream_t *s, int token_id)`
 
-Classifies a sampled token into EOS, CONTROL (id below the 1000 text range),
-INVALID (text-range id whose decode is NULL or empty), or TEXT. The empty-decode
-case matters because Tekken token 1000 is byte 0x00, which as a C string is
-empty; treating it as non-text prevents decode activity with no visible output
-from masquerading as progress.
+Applies that classification to one token ID: EOS (the end-of-sequence token)
+and the sub-1000 control range are recognized by ID alone; anything else is
+decoded through the tokenizer, and a NULL or empty piece counts as INVALID
+rather than TEXT. The distinction feeds the recovery logic in
+`stream_run_decoder`: only genuinely visible text resets the non-text streak,
+so a decoder stuck emitting byte 0x00 or control tokens still triggers a
+restart.
 
 ```{.c .numberLines startFrom="490"}
 static stream_tok_class_t stream_classify_token(vox_stream_t *s, int token_id) {
@@ -3299,12 +3502,22 @@ static void stream_enqueue_token(vox_stream_t *s, const char *alts[VOX_MAX_ALT])
 
 ### `static float *stream_conv_stem(…)`
 
-Runs new mel frames through the two-layer conv stem incrementally and returns a
-newly-allocated [out_len, 1280] buffer of post-conv positions (caller frees; NULL
-when nothing emerges). Conv1 has stride 2, so an odd conv0 count is saved as
-conv0_residual and prepended next chunk to avoid corrupting alignment forever.
-mel_tail and conv0_tail carry boundary context so causal convolutions match a
-non-streaming pass.
+Pushes newly arrived mel frames (each a 10 ms slice of audio described as 128
+spectral numbers — step 2 of the funnel) through the two-layer convolutional
+stem incrementally, returning a freshly allocated `[out_len, 1280]` buffer of
+post-convolution positions (caller frees; NULL when nothing emerges). Both
+layers are causal convolutions: each output mixes its input with the two before
+it and never a future one, which is what makes chunked streaming possible — but
+it also means a chunk's first outputs would see zero padding where the real
+previous frames belong. The cure is tail buffers: `mel_tail` keeps the last two
+mel frames and `conv0_tail` the last two conv0 outputs, each prepended to the
+next chunk so its early outputs are computed from real history, with the
+pad-contaminated overlap discarded. `conv1` additionally has stride 2 — it
+emits one output per two inputs, halving the rate to ~50 per second — so it
+must always be fed an even count; an odd leftover conv0 column is parked in
+`conv0_residual` and prepended next time, because otherwise the stride phase
+would shift and every later output would be wrong. The streamed result is
+exactly what one whole-lecture pass would have produced.
 
 ```{.c .numberLines startFrom="538"}
 static float *stream_conv_stem(vox_stream_t *s, const float *mel_new,
@@ -3438,6 +3651,15 @@ static float *stream_conv_stem(vox_stream_t *s, const float *mel_new,
 
 ### Continuation of `static float *stream_conv_stem(…)` {.unnumbered .unlisted}
 
+This stretch is the second convolution layer plus the epilogue. The first chunk
+feeds `conv1` directly (zero left-padding is genuinely correct at the start of
+the audio), while every later chunk prepends the two saved `conv0_tail`
+positions and discards the first output those positions contaminate; the tail
+is then refreshed from the last two columns of `feed`. After the stride-2
+convolution and GELU (a smooth nonlinearity applied after each layer), the
+surviving columns are transposed from the channel-major `[1280, len]` scratch
+into the row-per-position `[len, 1280]` layout the encoder expects.
+
 ```{.c .numberLines startFrom="665"}
     if (is_first) {
         /* First chunk: zero left-pad is correct for start of sequence */
@@ -3497,11 +3719,14 @@ static float *stream_conv_stem(vox_stream_t *s, const float *mel_new,
 
 ### `static void stream_adapter_compact(vox_stream_t *s)`
 
-Drops adapter tokens the decoder has already consumed by memmove-ing the
-surviving tail to the front of adapter_buf and advancing adapter_pos_offset by
-the consumed count. Keeps physical buffer indices small while gen_pos and
-total_adapter stay in an absolute logical coordinate; phys_pos is always the
-logical position minus adapter_pos_offset.
+Reclaims adapter-buffer space once the decoder has consumed a prefix. Each
+adapter row is one 3072-float audio embedding the decoder reads exactly once
+(one 80 ms step of the funnel's final stage); rows behind `gen_pos` are dead,
+so the surviving tail is memmoved to the front and `adapter_pos_offset`
+advances by the discarded count. The logical counters (`gen_pos`,
+`total_adapter`) keep counting absolute stream positions forever; a physical
+index is always the logical position minus `adapter_pos_offset`, so compaction
+never changes which moment of audio a row represents.
 
 ```{.c .numberLines startFrom="719"}
 static void stream_adapter_compact(vox_stream_t *s) {
@@ -3524,11 +3749,16 @@ static void stream_adapter_compact(vox_stream_t *s) {
 
 ### `static void stream_reset_decoder_state(vox_stream_t *s)`
 
-Hard-resets only the decoder side: zeroes the decoder KV cache length/offset,
-drops the adapter backlog and its logical offset, rewinds gen_pos, and re-primes
-prev_token to BOS with the streak/eos/prompt flags cleared. Used on EOS, KV
-overflow, or a control-token loop so live transcription restarts without
-rebuilding the mel/encoder front end.
+Hard-resets only the language half of the stream: zeroing the decoder KV cache
+length and offset (the KV cache is the per-layer key/value vectors attention
+re-reads for every earlier token, so clearing it forgets all text context),
+dropping the adapter backlog and its logical offset, rewinding `gen_pos`, and
+re-priming `prev_token` to BOS (the beginning-of-sequence token that starts
+every prompt) with the EOS/streak/prompt flags cleared. Used on a plain EOS restart (and as the final step of the full reset): the
+next caption starts from a clean prompt while the mel/convolution/encoder front
+end keeps its place in the audio timeline. KV-cache overflow and control-token
+loops escalate to `stream_reset_full_state` instead, which also rebuilds that
+front end.
 
 ```{.c .numberLines startFrom="735"}
 static void stream_reset_decoder_state(vox_stream_t *s) {
@@ -3554,12 +3784,15 @@ static void stream_reset_decoder_state(vox_stream_t *s) {
 
 ### `static int stream_reset_full_state(vox_stream_t *s)`
 
-Full live-stream recovery: tears down and rebuilds the mel context with the
-standard 32-token silence left-pad, zeroes all conv-stem boundary buffers
-(mel_tail, conv0_tail, conv0_residual, enc_residual) and the encoder KV cache,
-then chains into the decoder reset. Returns -1 if the new mel context cannot be
-allocated, in which case the caller falls back to a decoder-only reset to keep the
-stream alive.
+The deeper recovery: it rebuilds the audio front end as well. A fresh mel
+context is allocated first — with the standard 32 tokens of leading silence the
+model expects before speech — so that failure leaves the old state intact and
+returns -1, letting the caller fall back to a decoder-only reset instead of
+killing the stream. On success it swaps in the new mel context, zeroes every
+conv-stem boundary buffer (`mel_tail`, `conv0_tail`, `conv0_residual`,
+`enc_residual`) and the encoder KV cache (the encoder's stored attention
+history), then chains into the decoder reset, leaving the stream in the state
+of a brand-new one.
 
 ```{.c .numberLines startFrom="754"}
 static int stream_reset_full_state(vox_stream_t *s) {
@@ -3596,9 +3829,21 @@ static int stream_reset_full_state(vox_stream_t *s) {
 
 ### `static void stream_run_encoder(vox_stream_t *s)`
 
-Only newly stable convolution positions enter the encoder. Produced embeddings
-are appended in absolute order, then grouped by the modality adapter. Buffer
-compaction cannot change the position represented by an embedding.
+The front half of the pipeline, run after every feed: it decides whether enough
+new audio has arrived, then advances mel frames all the way to adapter
+embeddings. The gate works in absolute mel coordinates — `mel_cursor` minus the
+context's own offset locates the unprocessed frames even after old ones were
+discarded — and demands `min_new_mel` new frames (312 for the very first chunk,
+sized so the first batch already covers the decoder's prompt) unless the stream
+is finishing. Stable frames then pass through three stages: the incremental
+conv stem; the encoder transformer, 32 layers refining each 1280-float position
+using a KV cache (the stored key/value attention vectors that let new positions
+attend to earlier ones without recomputing them); and the adapter, which only
+consumes groups of exactly `VOX_DOWNSAMPLE = 4` encoder positions, so up to
+three leftovers are parked in `enc_residual` and prepended next round. New
+adapter rows land in the doubling `adapter_buf` at physical offsets that
+account for past compaction, `total_adapter` advances in absolute coordinates,
+and the consumed mel frames are finally discarded from the front-end buffer.
 
 ```{.c .numberLines startFrom="784"}
 static void stream_run_encoder(vox_stream_t *s) {
@@ -3733,12 +3978,16 @@ static void stream_run_encoder(vox_stream_t *s) {
 
 ### `static void stream_fill_alts(…)`
 
-Fills the alternatives array for one emitted position: alts[0] is the best token's
-decoded piece, and when n_alt > 1 it softmaxes the logits in place and repeatedly
-scans the text-range vocabulary for the next-highest tokens, stopping once the
-relative distance 1 - p/best_prob exceeds alt_cutoff or n_alt is reached. The
-stored strings are borrowed from the tokenizer; the logits buffer is destructively
-overwritten with probabilities, which is fine because it is re-filled every step.
+Builds the per-position alternatives array: `alts[0]` is always the decoded
+text of the chosen token, and when alternatives are enabled (`n_alt > 1`) the
+raw logits (the decoder's score for every vocabulary entry) are converted in
+place by softmax (exponentiate and normalize so the scores become probabilities
+summing to 1), then the text-range vocabulary is rescanned for the next-best
+tokens. Collection stops once the relative distance `1 - p/best_prob` exceeds
+`alt_cutoff` — only tokens nearly as probable as the winner qualify — or when
+`n_alt` slots are filled. The stored strings are borrowed from the tokenizer,
+and destroying the logits is safe because the buffer is refilled on every
+decode step.
 
 ```{.c .numberLines startFrom="912"}
 static void stream_fill_alts(vox_stream_t *s, int best_token,
@@ -3803,10 +4052,20 @@ static void stream_fill_alts(vox_stream_t *s, int best_token,
 
 ### `static void stream_run_decoder(vox_stream_t *s)`
 
-The decoder first pre-fills an audio-conditioned prompt, then greedily advances
-tokens. Control-token classification decides caption boundaries and recovery.
-Text pieces are queued separately so Swift polling does not control inference
-progress.
+The language half, also run after every feed. The decoder cannot start until
+the adapter holds `1 + 32 + delay_tokens` rows — enough to pair one audio
+embedding with each prompt token of `[BOS] + [STREAMING_PAD]...`, since every
+decoder input is the sum of an adapter row and a token embedding. Once ready it
+performs the prefill: all prompt positions except the last run through the
+decoder in one batch purely to populate the KV cache (the per-layer key/value
+vectors that each later step's attention re-reads), then the final position
+runs as a normal step to produce the first token. After that it decodes
+greedily — each step adds the previous token's embedding to the next unconsumed
+adapter row, runs one forward pass, and takes the single highest-scoring
+vocabulary entry, never sampling — for as long as adapter rows remain,
+classifying every token so that only real text reaches the queue Swift polls
+and the non-text streak watchdog stays armed. Keeping that queue separate from
+inference means a slow or absent reader never stalls decoding.
 
 ```{.c .numberLines startFrom="970"}
 static void stream_run_decoder(vox_stream_t *s) {
@@ -3931,6 +4190,18 @@ static void stream_run_decoder(vox_stream_t *s) {
 
 ### Continuation of `static void stream_run_decoder(vox_stream_t *s)` {.unnumbered .unlisted}
 
+This page closes the generation loop and decides whether the stream must
+restart. The adapter cursor advances after every step, and an EOS token (the
+model's end-of-sequence marker: this caption is finished) breaks out of the
+loop; the timing block then accumulates decoder milliseconds and, in monitor
+mode, prints one glyph per decode batch encoding what it produced and how slow
+it was. The remainder is the watchdog ladder for continuous mode: an EOS, a KV
+cache (the stored attention history whose length sets per-step cost) past
+`max_decode_context`, a long run of non-text tokens, or twenty seconds of audio
+with no decoded token forces a decoder reset — escalated to a full front-end
+reset when the trigger was anything other than a plain EOS, or after two
+consecutive restarts that produced no text.
+
 ```{.c .numberLines startFrom="1088"}
             s->gen_pos++;
             if (s->prev_token == TOKEN_EOS) {
@@ -4039,13 +4310,17 @@ static void stream_run_decoder(vox_stream_t *s) {
 
 ### `vox_stream_t *vox_stream_init(vox_ctx_t *ctx)`
 
-Allocates a zeroed stream and initializes the incremental mel context with 32
-streaming-pad tokens of leading silence. The Tekken tokenizer is borrowed from
-the context, parsed once on the first stream and reused by every later one so a
-session restart does not re-parse the 14 MB tekken.json. Sets up the circular
-token queue, the decoder scratch, single-best alternative mode, and the default
-2-second processing interval. On any allocation failure it tears down partial
-state and returns NULL.
+Allocates a zeroed stream and prepares every per-stream resource. The tokenizer
+(the parsed table mapping the model's integer token IDs to UTF-8 text pieces)
+is borrowed from the context and parsed only for the first stream: re-parsing
+the 14 MB `tekken.json` on every session restart used to cost hundreds of
+milliseconds for identical data. The incremental mel context is created with 32
+tokens' worth of leading silence — the left padding the model was trained to
+expect before speech begins. Then come the circular token queue (256 positions),
+the decoder scratch buffers (logits, step embedding, token-embedding temporary),
+single-best alternative mode, a cleared encoder KV cache, and the default
+2-second processing interval. Any allocation failure tears down the partial
+stream and returns NULL.
 
 ```{.c .numberLines startFrom="1191"}
 vox_stream_t *vox_stream_init(vox_ctx_t *ctx) {
@@ -4103,9 +4378,13 @@ vox_stream_t *vox_stream_init(vox_ctx_t *ctx) {
 
 ### `int vox_stream_feed(vox_stream_t *s, const float *samples, int n_samples)`
 
-Feed appends waveform samples to the incremental Mel context and runs whichever
-downstream stages now have stable work. It does not imply finalization; missing
-right context remains buffered for later audio.
+The single streaming entry point for audio: append the float samples to the
+incremental mel front end, advance the absolute sample counter, then give both
+halves of the pipeline a chance to run. Feeding never implies finalization — a
+sample near the end of the buffer may still lack the future samples its
+analysis window and convolutions need (its right context), so it simply waits
+in the tail buffers until later audio arrives. NULL streams, finished streams,
+and non-positive sample counts are rejected with -1.
 
 ```{.c .numberLines startFrom="1242"}
 int vox_stream_feed(vox_stream_t *s, const float *samples, int n_samples) {
@@ -4123,11 +4402,13 @@ int vox_stream_feed(vox_stream_t *s, const float *samples, int n_samples) {
 
 ### `int vox_stream_finish(vox_stream_t *s)`
 
-Finalizes a stream: flushes the delay-window padding (shared with
-vox_stream_flush), marks finished, and closes the mel front end (right reflect
-pad plus last-frame drop). It then forces one final encoder+decoder pass so
-trailing tokens behind the delay are emitted. Returns -1 if already finished;
-afterward feed/flush are rejected but tokens may still be drained.
+Finalizes a stream: it first reuses `vox_stream_flush` to push the delay-window
+padding through, then marks the stream finished and closes the mel front end —
+`vox_mel_finish` reflect-pads on the right (mirrors the final samples so the
+last analysis windows are complete) and drops the fully computed final frame purely to match the vLLM frame-count
+convention (`stft[..., :-1]`). One last encoder+decoder pass then forces out the trailing tokens that
+were still hidden behind the configured delay. Returns -1 if already finished;
+afterward feed and flush are rejected, but queued tokens may still be drained.
 
 ```{.c .numberLines startFrom="1253"}
 int vox_stream_finish(vox_stream_t *s) {
@@ -4334,12 +4615,15 @@ char *vox_transcribe_audio(vox_ctx_t *ctx, const float *samples, int n_samples) 
 
 ### `char *vox_transcribe_stdin(vox_ctx_t *ctx)`
 
-Reads stdin, peeking the first four bytes to choose a path: a RIFF header buffers
-the whole file and transcribes it offline (parsing fmt/data chunks inline,
-downmixing to mono and resampling to 16 kHz as needed), otherwise stdin is treated
-as raw s16le 16 kHz mono and fed in 4096-sample blocks with tokens drained between
-reads. Returns a caller-owned, whitespace-trimmed string; the two peeked samples
-are fed before the read loop so no input is lost.
+Reads stdin, peeking the first four bytes to choose a path. If they spell RIFF
+(the magic bytes of the WAV container format), the whole file is buffered and
+transcribed offline: the fmt/data chunks are parsed inline, multi-channel audio
+is averaged down to mono, and other sample rates are linearly resampled to the
+model's 16 kHz. Anything else is treated as raw s16le audio (headerless signed
+16-bit little-endian samples) at 16 kHz mono and fed in 4096-sample blocks with
+tokens drained between reads; the two peeked samples are fed before the read
+loop so no input is lost. Either way the result is one caller-owned,
+whitespace-trimmed string.
 
 ```{.c .numberLines startFrom="1385"}
 char *vox_transcribe_stdin(vox_ctx_t *ctx) {
@@ -4474,6 +4758,14 @@ char *vox_transcribe_stdin(vox_ctx_t *ctx) {
 
 ### Continuation of `char *vox_transcribe_stdin(vox_ctx_t *ctx)` {.unnumbered .unlisted}
 
+The first half drains the finished WAV-path stream: token pieces are appended
+into a doubling heap string, the stream is freed, and the trimmed text is
+returned. The rest is the raw-PCM path: the four already-peeked header bytes
+are re-fed as two samples so no input is lost, then a loop reads 4096-sample
+blocks from stdin, scales each signed 16-bit sample into a float in [-1, 1),
+feeds it, and drains newly decoded pieces into the same growing string until
+end-of-file triggers `vox_stream_finish`.
+
 ```{.c .numberLines startFrom="1513"}
         const char *tokens[64];
         int n;
@@ -4583,10 +4875,16 @@ char *vox_transcribe(vox_ctx_t *ctx, const char *wav_path) {
 
 ### `int vox_stream_flush(vox_stream_t *s)`
 
-Flush asks the pipeline to expose work stable at the current boundary without
-destroying the stream. Finish additionally supplies terminal padding and marks
-the input complete. The app uses these operations for caption boundaries and
-session shutdown respectively.
+Flush exists because the model deliberately reports text `delay_tokens` behind
+the audio: at a caption boundary the app wants those withheld words now,
+without ending the stream. The trick is to synthesize the future the decoder is
+waiting for — first an alignment pad up to the next 1280-sample (80 ms) token
+boundary, then `(delay_tokens + 1) + 10` tokens' worth of zero samples, fed
+through the normal mel path in 4096-sample chunks. With that silence in place,
+the encoder threshold `min_new_mel` is temporarily dropped to 1 so everything
+buffered is processed immediately, both pipeline halves run, and the threshold
+is restored. Unlike finish, the stream stays live; the injected silence simply
+becomes part of the audio timeline.
 
 ```{.c .numberLines startFrom="1607"}
 int vox_stream_flush(vox_stream_t *s) {
@@ -4640,9 +4938,12 @@ void vox_set_processing_interval(vox_stream_t *s, float seconds) {
 
 ### `void vox_stream_set_continuous(vox_stream_t *s, int enable)`
 
-Toggles continuous (live) mode, in which the decoder is periodically restarted
-once its KV cache passes max_decode_context so per-step attention cost stays
-bounded for an unbounded lecture. Off means a single bounded utterance.
+Toggles continuous (live) mode. When on, the decoder is allowed to restart
+itself periodically — notably once its KV cache (the stored attention history
+every new token must re-read, so its length sets per-step cost) exceeds
+`max_decode_context` — keeping decode steps fast across an unbounded lecture.
+When off, the stream is a single bounded utterance that stops decoding at its
+first EOS.
 
 ```{.c .numberLines startFrom="1644"}
 void vox_stream_set_continuous(vox_stream_t *s, int enable) {
@@ -4653,9 +4954,11 @@ void vox_stream_set_continuous(vox_stream_t *s, int enable) {
 
 ### `void vox_stream_set_max_decode_context(vox_stream_t *s, int tokens)`
 
-Sets the decoder KV-cache ceiling (clamped to 250..8000 entries) that, on a
-continuous stream, triggers a forced decoder restart to bound per-step attention
-cost and keep decoding real-time. Only meaningful when continuous mode is on.
+Sets the ceiling (clamped to 250..8000 entries) on the decoder KV cache — the
+stored attention history each new decode step must scan, so this ceiling
+directly bounds worst-case per-token latency. On a continuous stream, crossing
+it triggers the forced decoder restart in `stream_run_decoder`; without
+continuous mode the value is never consulted.
 
 ```{.c .numberLines startFrom="1648"}
 void vox_stream_set_max_decode_context(vox_stream_t *s, int tokens) {
@@ -4669,10 +4972,13 @@ void vox_stream_set_max_decode_context(vox_stream_t *s, int tokens) {
 
 ### `void vox_set_delay(vox_ctx_t *ctx, int delay_ms)`
 
-Sets the streaming look-ahead delay in milliseconds (clamped 80..2400), converted
-to delay_tokens at 80 ms per token. Because the delay feeds the decoder time
-conditioning, it recomputes t_cond and every layer's ada_scale via
-vox_update_time_conditioning before returning.
+Sets the streaming look-ahead delay in milliseconds (clamped to 80..2400) and
+converts it to whole tokens at 80 ms per token, the decoder's 12.5 Hz step. The
+delay is how far behind live audio the model is allowed to report text; a
+larger value gives it more future acoustic context and steadier words at the
+cost of latency. Because the delay reaches the decoder as a learned
+conditioning signal, the function immediately recomputes `t_cond` and every
+layer's `ada_scale` via `vox_update_time_conditioning`.
 
 ```{.c .numberLines startFrom="1655"}
 void vox_set_delay(vox_ctx_t *ctx, int delay_ms) {

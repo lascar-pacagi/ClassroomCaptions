@@ -120,20 +120,23 @@ The completion arguments matter:
 
 ## Address selection and Bonjour
 
-The listener advertises `_classcaptions._tcp` through DNS Service Discovery.
-Bonjour combines multicast DNS name discovery with service records. The current
+The listener advertises `_classcaptions._tcp` through DNS (Domain Name System)
+Service Discovery.
+Bonjour combines multicast DNS name discovery (name lookup by local broadcast
+rather than a central server) with service records. The current
 browser flow does not resolve that service; it embeds a numeric IPv4 address in
 the QR. Advertisement remains useful for diagnostics and a future native app.
 
 `getifaddrs` returns a linked list of interfaces. The code accepts only entries
 that are up, non-loopback, and `AF_INET`, asks `getnameinfo` for numeric text,
 prefers `en0`, and retains a fallback. This is pragmatic rather than perfect:
-modern Macs, VPNs, USB adapters, and hotspot configurations can assign other
+modern Macs, VPNs (virtual private networks), USB adapters, and hotspot configurations can assign other
 names. Network.framework knows the selected path, but converting that path into
 the exact browser-reachable local address still requires care.
 
 Private IPv4 addressing does not imply reachability. Classroom Wi-Fi may enable
-client isolation, firewalls may reject inbound traffic, or VPN routing may
+client isolation (an access-point setting that blocks wireless devices from
+reaching each other), firewalls may reject inbound traffic, or VPN routing may
 divert packets. A personal hotspot is often more predictable.
 
 ## The implemented HTTP subset
@@ -188,7 +191,8 @@ data: {"finalized":["..."],"provisional":"...","revision":42}
 Each event ends with an empty line. Multiple `data:` lines would be joined by
 the browser with newline characters. A line beginning with `:` is a comment;
 the JavaScript receives no application event, but traffic keeps intermediate
-state active. `retry: 1000` asks `EventSource` to reconnect after one second.
+state active. `retry: 1000` asks `EventSource` (the browser's built-in SSE
+client object) to reconnect after one second.
 
 The server sends the latest snapshot immediately after stream establishment.
 Otherwise a newly opened page would remain blank until the next spoken token.
@@ -211,9 +215,10 @@ address different abuse cases:
 - many sources flooding one class;
 - unbounded dictionaries or professor queue growth.
 
-These controls are availability defenses, not strong identity. NAT can merge
-students into one source, while address changes can invalidate a legitimate
-ticket.
+These controls are availability defenses, not strong identity. NAT (Network
+Address Translation, which lets many devices share one apparent address) can
+merge students into one source, while address changes can invalidate a
+legitimate ticket.
 
 ### Operational limits at a glance
 
@@ -223,7 +228,7 @@ app model). Knowing them ahead of class avoids surprises mid-lecture:
 | Limit | Value | What happens at the limit |
 | --- | --- | --- |
 | Concurrent TCP connections | 64 | further connections are cancelled at accept |
-| Time to complete a request | 10 s | the connection is cancelled (slowloris guard) |
+| Time to complete a request | 10 s | the connection is cancelled (a guard against "slowloris" attacks, which hold connections open by sending bytes very slowly) |
 | Live caption streams | 1 | a newer authenticated viewer pre-empts the old stream |
 | Live student tickets | 256 total, 4 per source, 4-hour lifetime | `503 classroom_full` / `429 ticket_limit` |
 | Question gap per ticket | 10 s | `429` |
@@ -267,13 +272,15 @@ on QR version, then eight bits per payload byte.
 
 ### 2. Version and capacity
 
-QR versions run from 1 to 40. Version `v` has:
+QR versions run from 1 to 40; a *module* is one black or white cell of the
+printed grid. Version `v` has:
 
 ```text
 module width = 21 + 4 * (v - 1)
 ```
 
-The encoder selects the smallest version whose data-codeword capacity can hold
+The encoder selects the smallest version whose data-codeword capacity (a
+codeword is one 8-bit unit of the symbol's payload) can hold
 mode, count, payload, terminator, and byte alignment at error-correction level
 M. A longer IP address, route, or token can therefore increase module density.
 
@@ -296,7 +303,8 @@ x^8 + x^4 + x^3 + x^2 + 1
 
 For a block requiring `r` parity codewords, the data polynomial is multiplied
 by `x^r` and divided by a degree-`r` generator polynomial. The remainder is the
-parity sequence. A scanner uses the resulting syndromes to locate and correct
+parity sequence. A scanner uses the resulting syndromes (check values computed
+from the received codewords) to locate and correct
 codeword errors.
 
 “Level M corrects about 15%” is only a rule of thumb. Correctability depends on
@@ -348,7 +356,7 @@ The lowest-penalty mask is retained.
 ### 9. Format and version information
 
 Format bits encode the correction level and mask number, protected by a BCH
-code and XOR mask. They are written twice near finder patterns. Versions 7 and
+(Bose–Chaudhuri–Hocquenghem) error-correcting code and XOR mask. They are written twice near finder patterns. Versions 7 and
 above also write BCH-protected version bits in two locations.
 
 ### 10. Rasterization and quiet zone
@@ -445,6 +453,13 @@ This map gives the reading spine of the file. Line numbers refer to the original
 
 The file begins by importing `Darwin`, `Foundation`, `Network`, `Security`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
+The four imports are the file's complete dependency list: `Darwin` exposes the
+C system library (later used for `getifaddrs` interface walking), `Foundation`
+supplies the value types `Data`, `Date`, and `URL` plus the JSON coders,
+`Network` provides the `NWListener` and `NWConnection` state machines the whole
+server is built on, and `Security` contributes `SecRandomCopyBytes` for minting
+random tokens.
+
 ```{.swift .numberLines startFrom="1"}
 import Darwin
 import Foundation
@@ -455,11 +470,15 @@ import Security
 
 ### `struct RemoteCaptionSnapshot: Codable, Equatable, Sendable`
 
-The Codable wire payload sent over Server-Sent Events to each phone: the
-finalized caption lines, an optional in-progress provisional line, a flag for
-whether a capture session is live, and a monotonically rising revision.
-Equatable lets the publisher skip redundant sends. It is a plain value type, so
-encoding it with JSONEncoder is the entire serialization contract.
+The wire payload pushed to the phone over the Server-Sent Events stream (the
+long-lived one-way HTTP response described in the chapter intro): the finalized
+caption lines, an optional still-changing provisional line, whether a capture
+session is live, and a revision number that only rises. The names after the
+colon are compiler-generated abilities: `Codable` derives JSON encoding and
+decoding from the field list, `Equatable` supplies `==` for value comparison (used by
+the tests; the publisher itself sends every snapshot unconditionally), and `Sendable` marks the immutable value
+safe to hand between threads. Encoding it with `JSONEncoder` is the entire
+serialization contract — there is no separate schema.
 
 ```{.swift .numberLines startFrom="6"}
 struct RemoteCaptionSnapshot: Codable, Equatable, Sendable {
@@ -489,10 +508,13 @@ struct SubmittedClassroomQuestion: Equatable, Sendable {
 
 ### `enum LocalCaptionServerStatus: Equatable, Sendable`
 
-The dashboard-facing lifecycle of caption sharing. Associated `URL` values
-exist only after listener readiness; `failed` carries presentation text rather
-than a Network.framework object. Because this is a `Sendable` value, it can
-leave the server queue without exposing mutable listener state.
+The dashboard-facing lifecycle of caption sharing. A Swift enum case can carry
+a payload (like a C tagged union), and here the `URL` payloads exist only on
+the states reached after the listener is ready — the type itself makes "show a
+pairing QR before an address exists" unrepresentable. `failed` carries
+presentation text rather than a Network.framework error object, and because the
+whole value is immutable and `Sendable`, it can leave the server queue without
+exposing mutable listener state.
 
 ```{.swift .numberLines startFrom="19"}
 enum LocalCaptionServerStatus: Equatable, Sendable {
@@ -507,10 +529,12 @@ enum LocalCaptionServerStatus: Equatable, Sendable {
 
 ### `enum StudentQuestionServerStatus: Equatable, Sendable`
 
-Question intake has a separate lifecycle because it can be disabled while the
-caption viewer remains active. The ready URL contains the independent student
-capability, never the viewer token, so the type separation mirrors the security
-separation.
+Question intake has its own lifecycle because the professor can disable it
+while the caption viewer stays live. Its ready URL embeds the independent
+student capability (a capability is a secret token whose mere possession grants
+access — here, access to the question form only), never the viewer token, so
+the type separation mirrors the security separation: leaking one URL never
+grants the other URL's powers.
 
 ```{.swift .numberLines startFrom="27"}
 enum StudentQuestionServerStatus: Equatable, Sendable {
@@ -523,13 +547,15 @@ enum StudentQuestionServerStatus: Equatable, Sendable {
 
 ### `enum CaptionSharingSecurity`
 
-The caseless namespace holding every security constant and the three pure
-crypto/sanitization helpers, so limits live in one auditable place: 32-byte
-tokens, an 8 KiB request cap, a 2 KiB / 500-character question cap, 256
-concurrent tickets (at most 4 per source) with a 4-hour life, the layered
-rate-limit windows (10 s per ticket, 8 per source per 5 min, 30 global per
-minute, 100 accepted per sliding hour), and the 10 s request-completion
-timeout that defeats slowloris-style slot exhaustion.
+A Swift enum with no cases cannot be instantiated, which makes it a pure
+namespace — a header of tunable security constants kept in one auditable place.
+It holds the 32-byte token size, an 8 KiB request cap, a 2 KiB / 500-character
+question cap, 256 concurrent tickets (at most 4 per source) with a 4-hour life,
+the layered rate-limit windows (10 s between questions per ticket, 8 per source
+per 5 minutes, 30 globally per minute, 100 accepted per sliding hour), and a
+10 s request-completion timeout. That timeout defeats the slowloris attack, in
+which a client opens connections and feeds bytes one at a time, never finishing
+a request, until every one of the 64 connection slots is occupied.
 
 ```{.swift .numberLines startFrom="33"}
 enum CaptionSharingSecurity {
@@ -553,10 +579,15 @@ enum CaptionSharingSecurity {
 
 ### `static func makeToken() throws -> String`
 
-Mints a 256-bit secret by drawing tokenByteCount bytes from the system CSPRNG
-via SecRandomCopyBytes and hex-encoding them, so the pairing/student tokens and
-per-student tickets are unguessable. It throws rather than falling back to a weak
-source if the draw fails, so a caller never proceeds with a predictable token.
+Mints a 256-bit secret: it draws `tokenByteCount` random bytes from the system
+CSPRNG (a cryptographically secure random generator whose output cannot be
+predicted from earlier output) via `SecRandomCopyBytes`, then hex-encodes them
+with `%02x` formatting. The attack this defeats is guessing: an attacker on the
+classroom Wi-Fi who knows the URL shape still faces 2^256 equally likely
+tokens, so brute-forcing the viewer, student, or ticket credential is hopeless.
+If the random draw fails the function throws (raises a Swift error) instead of
+falling back to a weaker source, so a caller can never proceed with a
+predictable token.
 
 ```{.swift .numberLines startFrom="50"}
     static func makeToken() throws -> String {
@@ -572,10 +603,14 @@ source if the draw fails, so a caller never proceeds with a predictable token.
 
 ### `static func tokensMatch(_ candidate: String, _ expected: String) -> Bool`
 
-Constant-time-ish token comparison: it UTF-8-encodes both strings, rejects
-immediately on a length mismatch, then ORs the XOR of every byte pair into an
-accumulator that is only zero when all bytes match. Avoiding an early return
-inside the loop denies a timing oracle that could leak the token byte-by-byte.
+Compares a presented token with the expected one without leaking timing
+information. A naive `strcmp`-style comparison returns at the first differing
+byte, so an attacker timing responses could learn how many leading characters
+were correct and recover the token one byte at a time, like feeling a lock's
+pins. This version UTF-8-encodes both strings, rejects immediately on a length
+mismatch (lengths are public anyway), then XORs every byte pair and ORs the
+results into one accumulator that is zero only when all bytes match — the loop
+always runs to the end, so every wrong guess takes the same time.
 
 ```{.swift .numberLines startFrom="59"}
     static func tokensMatch(_ candidate: String, _ expected: String) -> Bool {
@@ -593,11 +628,14 @@ inside the loop denies a timing oracle that could leak the token byte-by-byte.
 
 ### `static func normalizedQuestion(_ text: String) -> String?`
 
-Sanitizes untrusted student text before it is ever surfaced: it splits on
-whitespace and newlines, drops empties, rejoins with single spaces, then rejects
-the result if it is empty, exceeds maximumQuestionCharacters, or contains any
-Unicode control character. Returning nil signals the caller to answer 422, so
-control bytes and oversized input never reach the moderation queue or the model.
+Sanitizes untrusted student text before anyone sees it: split on whitespace and
+newlines, drop the empty pieces, and rejoin with single spaces, then reject the
+result if it is empty, longer than `maximumQuestionCharacters`, or contains any
+Unicode control character (invisible codes such as escape or backspace that can
+corrupt terminal output or spoof what a reader sees). Returning `nil` tells the
+caller to answer `422 Unprocessable Content` — HTTP's numeric verdict for
+"well-formed request, unacceptable content" — so control bytes and oversized
+input never reach the professor's moderation queue or the model.
 
 ```{.swift .numberLines startFrom="70"}
     static func normalizedQuestion(_ text: String) -> String? {
@@ -656,10 +694,14 @@ final class LocalCaptionServer: @unchecked Sendable {
 
 ### `private struct StudentTicket`
 
-Queue-confined authorization state issued after the page capability is
-presented. It records the source observed by the Mac, an absolute expiry, and
-that ticket's accepted submission times. Tickets are neither persisted nor
-forwarded to the application model.
+The queue-confined record behind one issued ticket: the source the Mac observed
+when issuing it, an absolute expiry, and that ticket's own accepted-submission
+times. Tickets are never persisted or forwarded to the application model, so
+nothing here can deanonymize a student after class. The same block declares the
+ledgers the `CaptionSharingSecurity` limits are enforced against — per-ticket
+dates live inside each ticket, while per-source, global, and accepted-question
+dates are separate queue-owned tables — plus one `JSONEncoder` reused across
+snapshot publishes.
 
 ```{.swift .numberLines startFrom="112"}
     private struct StudentTicket {
@@ -705,9 +747,14 @@ callbacks keep caption-only construction free of optional closure branches.
 
 ### `func start()`
 
-Start generates fresh independent capabilities, creates Wi-Fi-constrained TCP
-parameters, installs listener callbacks on the server queue, and publishes
-URLs only after listener readiness and local-address selection.
+The public entry point only hops onto the server's serial queue: `queue.async`
+submits a closure (a function value capturing `self` weakly, so a destroyed
+server is silently skipped) to run later on that queue, where `startOnQueue`
+does the real work — generating a fresh viewer capability (the student capability is minted separately when questions are enabled), creating
+Wi-Fi-constrained TCP parameters, installing listener callbacks on the server
+queue, and publishing URLs only after listener readiness and local-address
+selection. The hop is what makes the no-locks design sound: mutable state is
+touched only from the queue.
 
 ```{.swift .numberLines startFrom="141"}
     func start() {
@@ -735,9 +782,13 @@ deterministic because every operation enters the same serial queue.
 
 ### `func publish(_ snapshot: RemoteCaptionSnapshot)`
 
-SSE framing JSON-encodes one immutable snapshot, prefixes protocol fields, and
-ends the event with a blank line. Slow or failed connections are removed by the
-queue owner rather than blocking the app model.
+Called by the app model for every new caption snapshot. On the server queue it
+first records the value in `lastSnapshot` — the stored copy `beginEventStream`
+replays so a phone that connects late is not blank — and then sends it to the
+single live SSE stream, if one exists. SSE framing JSON-encodes the immutable
+snapshot, prefixes the protocol's `event:` and `data:` fields, and ends the
+event with a blank line; slow or failed connections are removed by the queue
+owner rather than blocking the app model.
 
 ```{.swift .numberLines startFrom="153"}
     func publish(_ snapshot: RemoteCaptionSnapshot) {
@@ -752,9 +803,11 @@ queue owner rather than blocking the app model.
 
 ### `func setQuestionSubmissionsEnabled(_ enabled: Bool)`
 
-Transfers one Boolean command to the queue-owned implementation. Credential
-rotation and ticket clearing therefore cannot race an incoming question request
-with a main-actor write to `questionsEnabled`.
+Transfers one Boolean command from whatever thread the app model calls on
+(typically the main UI thread) to the queue-owned implementation. Because the
+flag flip, credential rotation, and ticket clearing all execute on the serial
+queue, they cannot race an incoming question request being handled on that same
+queue.
 
 ```{.swift .numberLines startFrom="161"}
     func setQuestionSubmissionsEnabled(_ enabled: Bool) {
@@ -926,9 +979,17 @@ failure/cancel, and starts the incremental request read.
 
 ### `private func receiveRequest(…)`
 
-Each receive callback appends arbitrary TCP bytes to a bounded accumulator.
-Routing starts only after a complete header and declared body are present.
-Header and body limits are checked before allocation can grow without bound.
+The framing loop that turns TCP's raw byte stream into one whole HTTP request.
+TCP guarantees byte order but knows nothing about message boundaries, so a
+single receive callback may deliver half a header, a header plus part of a
+body, or several lines at once; the function therefore appends each chunk (at
+most 2,048 bytes per callback) to the `accumulated` buffer and re-arms itself
+until enough has arrived. "Enough" means the four-byte header terminator
+`CR LF CR LF` has appeared and the buffer holds at least the header plus the
+body length declared by `Content-Length`. Every exit is bounded — more than
+8 KiB total earns `431`, a declared body over 2 KiB earns `413`, a peer that
+closes early earns `400` — so a hostile client cannot grow the buffer without
+limit, and only a complete request ever reaches the router.
 
 ```{.swift .numberLines startFrom="286"}
     private func receiveRequest(
@@ -1025,9 +1086,17 @@ Header and body limits are checked before allocation can grow without bound.
 
 ### `private func handleRequest(…)`
 
-Routing authenticates capabilities before exposing protected route behavior.
-Unknown routes and wrong credentials deliberately share a response shape.
-Viewer routes cannot submit questions; student routes cannot control captions.
+The router. It splits the HTTP request line — the message's first line, such as
+`GET /events?token=abc HTTP/1.1`, holding method, target, and protocol
+version — into three parts, parses the target's path and query with
+`URLComponents`, lowercases the header names, and slices off the body. Student
+routes get first claim; everything else must be a `GET` whose `token` query
+value passes `tokensMatch` against the viewer capability before the path is
+even examined. Wrong credentials and unknown routes deliberately receive the
+same `404 Not Found`, denying a probing attacker the oracle that would separate
+"route exists but my token is wrong" from "no such route". The viewer token
+unlocks only the caption page and `/events`; it can never submit questions,
+just as student credentials can never read captions.
 
 ```{.swift .numberLines startFrom="376"}
     private func handleRequest(
@@ -1433,6 +1502,14 @@ forwarded with a 202.
 
 ### `private func respondNotFound(on connection: NWConnection)`
 
+Funnels the student router's refusals — a wrong capability token on `/student`
+or `/student-ticket`, or an unsupported method — into the byte-identical
+`404 Not Found` that unknown paths receive. The attack this blunts is
+enumeration: if a bad token earned a distinctive `401` while a missing route
+earned `404`, an attacker sweeping guessed URLs could map which routes exist
+and whether questions are enabled; one shared response shape removes that
+signal.
+
 ```{.swift .numberLines startFrom="718"}
     private func respondNotFound(on connection: NWConnection) {
         respond(
@@ -1580,11 +1657,18 @@ cleanup.
 
 ### `private func respond(…)`
 
-Writes a complete one-shot HTTP/1.1 response and closes: it frames the body with
-Content-Length, Connection: close, and no-store caching, and stamps a strict
-security header set on every reply, including a CSP that forbids remote
-script/style/img/object and pins base-uri and frame-ancestors to none, plus
-nosniff and X-Frame-Options DENY.
+Writes one complete HTTP/1.1 response and closes the connection.
+`Content-Length` tells the browser exactly where the body ends,
+`Connection: close` declares the one-request-per-connection policy, and
+`Cache-Control: no-store` keeps token-bearing pages out of caches. Every reply
+also carries defensive browser instructions: the `Content-Security-Policy`
+forbids the page from loading scripts, styles, or images from anywhere else, so
+even if hostile text reached a page it could not pull in attacker code;
+`X-Content-Type-Options: nosniff` stops the browser from reinterpreting a
+response as a different type than declared; and `X-Frame-Options: DENY` (with
+`frame-ancestors 'none'`) blocks embedding the page inside another site's frame
+to trick taps. The send-completion callback then frees the connection's
+tracking slots.
 
 ```{.swift .numberLines startFrom="817"}
     private func respond(
@@ -1757,10 +1841,17 @@ guarantees the C allocation is released on every exit path.
 
 ### `private static func studentQuestionPage(token: String) -> String`
 
-Returns the complete HTML/CSS/JavaScript student client, embedding the student
-capability through JSON encoding rather than string concatenation. JavaScript
-exchanges it for a source-bound ticket and POSTs question JSON; no route exposes
-caption, microphone, overlay, or model control.
+Returns the entire student client — HTML structure, CSS styling, and JavaScript
+behavior — as one Swift multiline string, with the student capability spliced
+in by `\(token)` interpolation; that is safe only because `makeToken` emits
+pure hex characters, which cannot break out of the JavaScript string literal.
+For a non-web reader: `fetch` is the browser function a page's script uses to
+issue its own HTTP requests. On load the script POSTs to `/student-ticket`,
+exchanging the page capability for a short-lived ticket, and only then enables
+the submit button; submitting POSTs the question as JSON to
+`/questions?ticket=...` and maps the status code to a message — `202` clears
+the box, `429` asks the student to wait. No route reachable from this page
+exposes captions, microphone, overlay, or model control.
 
 ```{.swift .numberLines startFrom="935"}
     private static func studentQuestionPage(token: String) -> String {
@@ -1876,10 +1967,17 @@ caption, microphone, overlay, or model control.
 
 ### `private static func browserPage(token: String) -> String`
 
-Returns the read-only caption viewer. Its JavaScript opens an `EventSource`
-carrying the viewer capability, replaces the rendered snapshot on each event,
-and relies on browser reconnection. The embedded page and Swift routes therefore
-form one protocol implementation that evolves together.
+Returns the read-only caption viewer page. Its script uses `EventSource`, the
+browser object implementing the client half of Server-Sent Events: it opens one
+long-lived HTTP request to `/events?token=...`, fires a callback for each
+`event: captions` record the Mac pushes, and reconnects on its own (honoring
+the server's one-second `retry` hint) when the connection drops. Each callback
+parses the JSON snapshot and rebuilds the caption list from scratch — simpler
+than diffing and harmless at caption sizes. Every line is inserted through
+`textContent`, which treats the string as plain characters rather than HTML
+markup, so caption text could not inject script even if it contained tags; a
+final `scrollTop` assignment keeps the newest line visible. The embedded page
+and the Swift routes form one protocol implementation that evolves together.
 
 ```{.swift .numberLines startFrom="1044"}
     private static func browserPage(token: String) -> String {

@@ -6,9 +6,11 @@ The local runtime loads several cooperating components:
 - strided convolutional stem;
 - audio transformer encoder;
 - modality adapter projecting/grouping audio features;
-- text decoder with autoregressive KV cache;
+- text decoder (autoregressive: it emits one token at a time, each conditioned
+  on everything emitted before) with its KV cache;
 - tokenizer mapping token IDs to byte pieces;
-- time/delay conditioning used by the realtime checkpoint.
+- time/delay conditioning used by the realtime checkpoint (a saved set of
+  trained weights).
 
 Weights are immutable after load. Stream state is separate so one model context
 could conceptually support multiple streams, although ClassroomCaptions uses
@@ -25,21 +27,26 @@ this file:
    window into a 128-bin Mel vector, one per 10 ms hop.
 3. **Convolution positions — ~50 Hz.** A two-layer causal **convolutional stem**
    consumes Mel frames: `conv0` (kernel 3, stride 1, 128 -> 1280 channels) then
-   `conv1` (kernel 3, **stride 2**, 1280 -> 1280), each followed by GELU. The
+   `conv1` (kernel 3, **stride 2**, 1280 -> 1280), each followed by GELU (a
+   smooth nonlinear activation function). The
    stride-2 layer halves the time axis, so 100 Mel frames become ~50 convolution
-   positions of width 1280. Because the convolutions are causal (left-padded) and
+   positions of width 1280. Because the convolutions are causal (left-padded, so
+   each output depends only on present and past input) and
    run on chunks, the runtime keeps a Mel-frame tail and a one-position
    `conv0_residual`, so a chunk boundary yields exactly the outputs a
    whole-lecture pass would, and it discards the positions nearest a boundary that
    the zero padding would otherwise contaminate.
 4. **Encoder positions — ~50 Hz.** The 32-layer audio transformer (Chapter 9)
-   refines those 1280-d vectors with sliding-window self-attention, consuming only
+   refines those 1280-d vectors with sliding-window self-attention (each position
+   blends in information from a bounded window of earlier positions; Chapter 9
+   explains the mechanism and its parallel "heads"), consuming only
    positions that later audio can no longer change.
 5. **Adapter / decoder positions — 12.5 Hz.** The modality adapter concatenates
    every `VOX_DOWNSAMPLE = 4` consecutive encoder frames (1280 x 4 = 5120) and
    projects them into the decoder's 3072-d space, dropping the rate to 12.5 Hz.
-   The 26-layer text decoder then attends over those audio embeddings and its own
-   previous tokens to emit caption pieces autoregressively.
+   The 26-layer text decoder then attends over (selectively reads from) those
+   audio embeddings (the projected vectors that now stand for the audio) and its
+   own previous tokens to emit caption pieces autoregressively.
 
 Every arrow is a **downsample with memory**: tail buffers and absolute counters
 (samples -> Mel -> conv -> encoder -> adapter) make the streamed result identical
@@ -59,7 +66,7 @@ are in front of you. The whole engine is governed by a handful of constants
 | convolution positions | ~50 Hz | 1280 | conv1 stride 2 |
 | encoder positions | ~50 Hz | 1280 | `VOX_ENC_LAYERS 32`, 32 heads x `VOX_ENC_HEAD_DIM 64`, window `VOX_ENC_WINDOW 750` |
 | adapter / decoder input | 12.5 Hz | 3072 | `VOX_DOWNSAMPLE 4` (1280 x 4 = 5120 -> 3072) |
-| decoder hidden -> logits | 12.5 Hz | 3072 -> vocab | `VOX_DEC_LAYERS 26`, 32 query / 8 KV heads x `VOX_DEC_HEAD_DIM 128`, window `VOX_DEC_WINDOW 8192` |
+| decoder hidden -> logits (per-vocabulary-entry scores for the next token) | 12.5 Hz | 3072 -> vocab | `VOX_DEC_LAYERS 26`, 32 query / 8 KV heads x `VOX_DEC_HEAD_DIM 128`, window `VOX_DEC_WINDOW 8192` |
 
 **A worked example — two seconds of speech.** Follow one short utterance all the
 way through:
@@ -100,7 +107,8 @@ Stride alignment and causal receptive fields determine this stability.
 ## Delay conditioning
 
 Realtime Voxtral conditions generation on a configured caption delay. The C
-runtime builds a sinusoidal embedding from the delay value and feeds the
+runtime builds a sinusoidal embedding (a vector of sine and cosine values that
+encodes the delay number) from the delay value and feeds the
 adapter/model tensors expected by the checkpoint. A smaller delay requests
 earlier output but gives the model less future acoustic context; latency falls
 while recognition stability may degrade.

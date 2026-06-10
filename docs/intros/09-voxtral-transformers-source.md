@@ -10,12 +10,15 @@ is added back to the output, so a layer only has to learn a *correction*:
    every position a **key** and a **value** (three linear projections,
    `Q = X·Wq`, etc.). A position's new content is a weighted average of all
    positions' values, where the weight of position *j* for position *i* is how
-   well *i*'s query matches *j*'s key: `softmax(Q·K^T / sqrt(head_dim))`. This is
+   well *i*'s query matches *j*'s key: `softmax(Q·K^T / sqrt(head_dim))`
+   (softmax rescales a vector of match scores into positive weights that sum to
+   one). This is
    the *only* place information moves between positions. "Causal" masking forbids
    attending to the future; a "sliding window" also forbids attending too far
    into the past.
 2. **Feed-forward (FFN) — mixing across features.** An independent two-layer MLP
-   applied to each position on its own, here a gated **SwiGLU**:
+   (multilayer perceptron — two matrix multiplications with a nonlinearity
+   between them) applied to each position on its own, here a gated **SwiGLU**:
    `SiLU(X·W_gate) * (X·W_up)`, then `· W_down`.
 
 Around each, **RMSNorm** rescales a vector to unit root-mean-square so the numbers
@@ -47,7 +50,8 @@ V = X Wv
 Attention(Q,K,V) = softmax(Q K^T / sqrt(head_dim) + mask) V
 ```
 
-The implementation reshapes projections into heads, applies RoPE to Q/K,
+The implementation reshapes projections into heads (independent attention units,
+each operating on its own slice of the position's vector), applies RoPE to Q/K,
 appends K/V rows to caches, computes attention, merges heads, applies output
 projection, and adds the residual.
 
@@ -122,7 +126,8 @@ position into the cache at once. This amortizes setup over the whole prompt
 instead of paying it token by token.
 
 **Decode.** Each subsequent token comes from one call to `vox_decoder_forward`:
-one new embedding in, the 3072-d hidden state advanced through all 26 layers, and
+one new embedding in, the 3072-d hidden state (the position's evolving vector)
+advanced through all 26 layers, and
 a vocabulary logit vector out. The function takes the **greedy argmax** itself and
 returns the chosen token id, so captioning is deterministic — there is no sampling
 temperature. The full logits remain available for diagnostics.
@@ -188,7 +193,8 @@ new position's 3072-vector:
    projection, then the down projection); add the residual.
 
 After the last layer, one more RMSNorm and a matmul against the tied token
-embedding produce the vocabulary logits, and the function takes the greedy argmax.
+embedding (the same matrix that maps token ids to input vectors, reused to score
+output tokens) produce the vocabulary logits, and the function takes the greedy argmax.
 Read `voxtral_kernels.c` as the verbs of this sentence and `voxtral_decoder.c` as
 the sentence. The encoder (`voxtral_encoder.c`) is the same shape with biased
 projections, full 32/32 heads, and no autoregressive cache growth.

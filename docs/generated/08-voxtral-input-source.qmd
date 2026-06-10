@@ -12,7 +12,8 @@ They feed and describe the state consumed by the streaming runtime. Errors here 
 ### Boundary formats
 
 Audio code establishes the exact numerical representation entering the model.
-Safetensors code establishes tensor names, shapes, dtypes, mapped ownership, and
+Safetensors code establishes tensor names, shapes, dtypes (element data types
+such as BF16 or F32), mapped ownership, and
 bounds. Tokenizer code establishes the mapping between decoder IDs and bytes.
 These are not peripheral parsers: they define the model ABI on disk.
 
@@ -39,7 +40,8 @@ This chapter has three independent parts; read each beside the code it describes
 
 - **Audio front end** (`voxtral_audio.c`). Start at `vox_mel_feed`, the entry the
   streaming runtime calls with new samples: it appends them to a buffer and calls
-  `mel_compute_available`, where the per-frame *window -> DFT -> mel -> log* loop
+  `mel_compute_available`, where the per-frame *window -> DFT (Discrete Fourier
+  Transform) -> mel -> log* loop
   lives. `build_mel_filters` (called once at init) precomputes the 128 triangular
   filters; `vox_mel_finish` flushes the final padded frames. The math behind that
   loop is the next section.
@@ -74,9 +76,11 @@ across every frequency ("spectral leakage"). The taper makes the finite frame
 look periodic.
 
 **3. The Fourier transform (per frame).** Each windowed frame is moved from the
-time domain to the frequency domain. A Discrete Fourier Transform of
+time domain to the frequency domain — that is, rewritten as a sum of sinusoids,
+recording how much energy each frequency contributes. A Discrete Fourier Transform of
 `N_FFT = 400` real samples yields `N_FREQ = N_FFT/2 + 1 = 201` bins spanning 0 Hz
-to the 8 kHz Nyquist limit, about 40 Hz apart. The code computes this as a
+to the 8 kHz Nyquist limit (half the sample rate, the highest frequency a
+sampled signal can represent), about 40 Hz apart. The code computes this as a
 **direct** DFT against precomputed cosine/sine tables rather than calling an FFT
 library: at this size it is cheap, dependency-free, and reproduces the training
 pipeline bit-for-bit. What it keeps is **power**, `|FFT|^2 = real^2 + imag^2` —
@@ -102,7 +106,8 @@ clamp or scale will still mis-recognize**, because it moves the input off that
 distribution.
 
 The output is one `[frames, 128]` matrix. One last detail matches the reference
-implementation (vLLM): the **final STFT frame is dropped** (`stft[..., :-1]`), so
+implementation (vLLM, an open-source inference engine used as the reference):
+the **final STFT frame is dropped** (`stft[..., :-1]`), so
 one second of audio yields 100 frames, not 101.
 
 ### Doing it incrementally
@@ -114,7 +119,8 @@ counters survive buffer compaction — `sample_offset` (leading samples discarde
 and `mel_frame_offset` (leading frames compacted away) — so a frame's logical
 position is always recoverable even after old audio is freed (roughly every
 second, `MEL_SAMPLE_COMPACT_MIN`). At `finish`, right-edge reflection padding
-supplies the final windows so the last words are not truncated.
+(mirroring the last samples) supplies the final windows so the last words are
+not truncated.
 
 ## Safetensors as a model ABI
 
@@ -177,6 +183,11 @@ This map gives the reading spine of the file. Line numbers refer to the original
 
 This preamble contains comments and preprocessing setup that apply to the complete public header. It introduces no runtime state.
 
+The opening comment names this header's two services: loading WAV audio into
+model-ready samples, and computing the log-Mel spectrogram (the frame-by-frame
+energy-per-pitch picture built up in the chapter introduction) that Voxtral
+actually consumes.
+
 ```{.c .numberLines startFrom="1"}
 /*
  * voxtral_audio.h - WAV loading and mel spectrogram computation
@@ -186,11 +197,19 @@ This preamble contains comments and preprocessing setup that apply to the comple
 
 ### `#ifndef VOXTRAL_AUDIO_H`
 
+Standard include guard: the rest of the header is compiled only when
+`VOXTRAL_AUDIO_H` is not yet defined, so a translation unit that reaches this
+file twice — directly and through another header — sees each declaration once.
+
 ```{.c .numberLines startFrom="5"}
 #ifndef VOXTRAL_AUDIO_H
 ```
 
 ### `#define VOXTRAL_AUDIO_H`
+
+Defines the guard macro, then pulls in the only two dependencies the prototypes
+need: `<stddef.h>` for `size_t` and `<stdint.h>` for `uint8_t`. A minimal
+include list keeps every file that uses the audio API cheap to compile.
 
 ```{.c .numberLines startFrom="6"}
 #define VOXTRAL_AUDIO_H
@@ -202,6 +221,11 @@ This preamble contains comments and preprocessing setup that apply to the comple
 ```
 
 ### `extern int vox_verbose_audio;`
+
+Module-wide diagnostic switch: when nonzero, the audio code reports details
+such as resampling decisions on stderr. `extern` declares the variable without
+creating storage; the single definition lives in `voxtral_audio.c`, so every
+file that includes this header reads and writes the same flag.
 
 ```{.c .numberLines startFrom="12"}
 extern int vox_verbose_audio;
@@ -227,9 +251,12 @@ float *vox_load_wav(const char *path, int *out_n_samples);
 
 ### `float *vox_parse_wav_buffer(const uint8_t *data, size_t size, int *out_n_samples);`
 
-Parses a bounded RIFF/WAVE byte range and returns owned 16 kHz mono float
-samples. Unsupported channel, rate, encoding, or bit-depth combinations are
-rejected rather than silently resampled.
+Parses a WAV image already in memory — WAV is a RIFF container, a sequence of
+tagged chunks each carrying a four-byte type, a byte length, and a payload —
+and returns owned 16 kHz mono float samples in [-1, 1]. Non-PCM encodings and
+bit depths other than 16 are rejected; stereo is averaged down to mono and any
+other valid sample rate is resampled to 16 kHz. Splitting parsing from file
+I/O lets tests feed crafted byte buffers directly.
 
 ```{.c .numberLines startFrom="22"}
 float *vox_parse_wav_buffer(const uint8_t *data, size_t size, int *out_n_samples);
@@ -371,6 +398,8 @@ void vox_mel_free(vox_mel_ctx_t *ctx);
 
 ### `#endif /* VOXTRAL_AUDIO_H */`
 
+Closes the include guard opened at the top of the file.
+
 ```{.c .numberLines startFrom="71"}
 #endif /* VOXTRAL_AUDIO_H */
 ```
@@ -420,6 +449,14 @@ This map gives the reading spine of the file. Line numbers refer to the original
 ### Translation-unit preamble {.unnumbered .unlisted}
 
 This translation-unit preamble selects dependencies, compile-time features, and file-local constants used by the definitions that follow.
+
+The header comment pins this file to the vLLM reference pipeline it must
+reproduce, and the `#define`s freeze that contract in numbers: 16 kHz input,
+128 mel bins, a 400-sample (25 ms) window advanced 160 samples (10 ms) per
+frame, and the 1.5 log ceiling. `N_FREQ` is `N_FFT/2 + 1 = 201` because the
+DFT of real-valued audio is mirror-symmetric: bins above half the sample rate
+would repeat the ones below, so only 201 distinct frequencies exist. The
+`M_PI` fallback covers strict C modes whose `<math.h>` omits the constant.
 
 ```{.c .numberLines startFrom="1"}
 /*
@@ -489,9 +526,15 @@ static uint32_t read_u32(const uint8_t *p) { return p[0] | (p[1] << 8) | (p[2] <
 
 ### `float *vox_parse_wav_buffer(const uint8_t *data, size_t file_size, int *out_n_samples)`
 
-The parser walks RIFF chunks rather than assuming a fixed header layout. Every
-chunk length is bounds-checked, odd-byte padding is respected, and only the
-supported PCM representation is converted.
+WAV is a RIFF container: after the 12-byte `RIFF`/`WAVE` prologue, the file is
+a sequence of chunks, each a four-byte tag plus a little-endian length plus
+payload. The parser walks those chunks rather than assuming a fixed layout,
+taking format fields from `fmt ` and sample bytes from `data`; every chunk
+length is bounds-checked, odd-byte padding is respected, and the bogus
+0xFFFFFFFF data size that piped ffmpeg writes falls back to the rest of the
+buffer. Only 16-bit PCM is accepted: samples are scaled by 1/32768 into
+[-1, 1], multi-channel frames are averaged to mono, and any rate other than
+16 kHz is linearly interpolated to the model's required rate.
 
 ```{.c .numberLines startFrom="49"}
 float *vox_parse_wav_buffer(const uint8_t *data, size_t file_size, int *out_n_samples) {
@@ -691,8 +734,14 @@ float *vox_read_pcm_stdin(int *out_n_samples) {
 
 ### `static float hertz_to_mel(float freq)`
 
-Maps physical frequency to the Mel coordinate used for filter placement.
-Changing this formula changes the checkpoint's expected feature distribution.
+Maps a frequency in hertz onto the Mel scale — the perceptual pitch axis from
+the chapter walk-through on which the 128 filters are spaced evenly. The
+Slaney convention implemented here is piecewise: below 1000 Hz the mapping is
+linear (3 mels per 200 Hz), and above it becomes logarithmic
+(`min_log_mel + log(f/1000) * 27/log(6.4)`), mirroring how human pitch
+resolution stays roughly constant at low frequencies and coarsens at high
+ones. Changing this formula moves every filter and therefore shifts the
+feature distribution away from what the checkpoint was trained on.
 
 ```{.c .numberLines startFrom="224"}
 static float hertz_to_mel(float freq) {
@@ -1257,8 +1306,10 @@ void vox_mel_discard_before(vox_mel_ctx_t *ctx, int keep_from_frame) {
 
 ### `void vox_mel_free(vox_mel_ctx_t *ctx)`
 
-Null-safe destruction of every allocation and Accelerate setup owned by the
-incremental front end.
+Null-safe destruction of everything the incremental front end owns: the mel
+filter bank, the DFT cosine/sine tables, the sample buffer, the mel frame
+buffer, and the context struct itself. Every pointer previously borrowed
+through `vox_mel_data` becomes invalid here.
 
 ```{.c .numberLines startFrom="667"}
 void vox_mel_free(vox_mel_ctx_t *ctx) {
@@ -1300,6 +1351,13 @@ This map gives the reading spine of the file. Line numbers refer to the original
 
 This preamble contains comments and preprocessing setup that apply to the complete public header. It introduces no runtime state.
 
+The comment scopes this API to decoding only. The model emits token IDs —
+plain integers indexing a fixed vocabulary of pieces, where each piece is a
+short byte sequence from a byte-pair vocabulary (frequent strings earn their
+own piece; anything rare is spelled out from several smaller pieces) — and
+captioning only needs to map integers back to bytes. Nothing in the app turns
+text into tokens, so no encoder is built.
+
 ```{.c .numberLines startFrom="1"}
 /*
  * voxtral_tokenizer.h - Tekken tokenizer (decode only)
@@ -1312,11 +1370,16 @@ This preamble contains comments and preprocessing setup that apply to the comple
 
 ### `#ifndef VOXTRAL_TOKENIZER_H`
 
+Include guard, the same compile-once idiom used by `voxtral_audio.h`.
+
 ```{.c .numberLines startFrom="8"}
 #ifndef VOXTRAL_TOKENIZER_H
 ```
 
 ### `#define VOXTRAL_TOKENIZER_H`
+
+Marks the guard taken; `<stdint.h>` is the header's lone include, since the
+API otherwise trades only in plain `int` IDs and `char` pointers.
 
 ```{.c .numberLines startFrom="9"}
 #define VOXTRAL_TOKENIZER_H
@@ -1387,7 +1450,10 @@ int vox_tokenizer_eos(vox_tokenizer_t *tok);  /* End of sequence */
 
 ### `int vox_tokenizer_vocab_size(vox_tokenizer_t *tok);`
 
-Returns the loaded ID-table extent for range checks, not a word count.
+Returns the extent of the token-ID space — how many distinct integer IDs the
+model may legally emit — for range-checking decoder output. It is not a word
+count, and (as the implementation shows) not the number of entries actually
+loaded: it reports the fixed Tekken ID space.
 
 ```{.c .numberLines startFrom="34"}
 int vox_tokenizer_vocab_size(vox_tokenizer_t *tok);
@@ -1395,6 +1461,8 @@ int vox_tokenizer_vocab_size(vox_tokenizer_t *tok);
 ```
 
 ### `#endif /* VOXTRAL_TOKENIZER_H */`
+
+Closes the include guard.
 
 ```{.c .numberLines startFrom="36"}
 #endif /* VOXTRAL_TOKENIZER_H */
@@ -1404,7 +1472,8 @@ int vox_tokenizer_vocab_size(vox_tokenizer_t *tok);
 
 **Role.** This file is reproduced completely below. Read declarations in source order because later helpers rely on ownership and invariants established earlier.
 
-The tokenizer loader parses the Tekken vocabulary representation used by the
+The tokenizer loader parses the Tekken vocabulary representation (Mistral's
+JSON tokenizer format) used by the
 model and builds an ID-to-byte-piece table. Decoder output may split a UTF-8
 character across tokens, so consumers must concatenate bytes before assuming a
 complete displayed character. Control token IDs are model protocol, not text.
@@ -1434,6 +1503,15 @@ This map gives the reading spine of the file. Line numbers refer to the original
 ### Translation-unit preamble {.unnumbered .unlisted}
 
 This translation-unit preamble selects dependencies, compile-time features, and file-local constants used by the definitions that follow.
+
+The format comment is the file's real specification. tekken.json stores the
+regular vocabulary as base64-encoded byte strings, each carrying a `rank` that
+becomes its table position, plus a separate special-token list; a token ID is
+just an integer, with 0..999 selecting special (control) tokens and 1000+rank
+selecting the regular piece at that rank. The constants size the fixed tables
+(130072 regular pieces, 1000 specials, 256 bytes per piece), and
+`extern int vox_verbose` borrows the engine-wide logging level defined in
+`voxtral.c`.
 
 ```{.c .numberLines startFrom="1"}
 /*
@@ -1509,10 +1587,13 @@ static const int b64_table[256] = {
 
 ### `static int b64_decode(const char *in, char *out, int max_out)`
 
-Minimal base64 decoder over a 256-entry lookup table: accumulates 6-bit groups
-and emits bytes into out, stopping at '=' padding and skipping any non-alphabet
-character. Used to turn each vocab entry's token_bytes field into raw token
-bytes, which may legitimately include embedded NULs.
+Base64 is a text encoding that lets JSON carry arbitrary bytes: each character
+contributes 6 bits drawn from a 64-symbol alphabet, so four characters
+reconstruct three raw bytes. This minimal decoder looks each input character
+up in the 256-entry table, accumulates 6-bit groups in `val`, and emits a byte
+whenever 8 bits are available, stopping at `=` padding and skipping any
+non-alphabet character. It turns each vocab entry's `token_bytes` field into
+the token's raw bytes, which may legitimately include embedded NULs.
 
 ```{.c .numberLines startFrom="61"}
 static int b64_decode(const char *in, char *out, int max_out) {
@@ -1873,8 +1954,12 @@ const char *vox_tokenizer_decode(vox_tokenizer_t *tok, int token_id) {
 
 ### `char *vox_tokenizer_decode_seq(vox_tokenizer_t *tok, const int *tokens, int n_tokens)`
 
-Totals piece lengths, allocates once, copies in token order, and appends NUL.
-Invalid IDs cannot index outside the tables.
+Two passes: the first totals piece lengths so the result is allocated exactly
+once, the second copies the pieces in token order and appends the final NUL.
+Both passes skip IDs below 1000 — control tokens such as BOS, EOS, and the
+streaming pads are model protocol and must never surface as caption text.
+Invalid IDs decode to NULL and contribute nothing, so they cannot index
+outside the tables.
 
 ```{.c .numberLines startFrom="355"}
 char *vox_tokenizer_decode_seq(vox_tokenizer_t *tok, const int *tokens, int n_tokens) {
@@ -1930,7 +2015,11 @@ int vox_tokenizer_eos(vox_tokenizer_t *tok) {
 
 ### `int vox_tokenizer_vocab_size(vox_tokenizer_t *tok)`
 
-Returns the context's vocabulary-table size for decoder range validation.
+Reports the fixed Tekken ID space — 1000 specials plus 130072 regular ranks,
+131072 in all, matching the `default_vocab_size` recorded in tekken.json —
+rather than the count of entries actually loaded, so range checks always
+cover every ID the model could emit. The `(void)tok` cast tells the compiler
+the unused parameter is deliberate.
 
 ```{.c .numberLines startFrom="390"}
 int vox_tokenizer_vocab_size(vox_tokenizer_t *tok) {
@@ -1976,6 +2065,12 @@ This map gives the reading spine of the file. Line numbers refer to the original
 
 This preamble contains comments and preprocessing setup that apply to the complete public header. It introduces no runtime state.
 
+The comment is the complete format map: an 8-byte little-endian count, then
+that many bytes of JSON metadata, then nothing but raw tensor bytes. Because
+all structure lives in the small JSON header and the bulk data is located
+purely by byte offset, the reader stays small and tensors can be served
+straight out of the memory-mapped file.
+
 ```{.c .numberLines startFrom="1"}
 /*
  * voxtral_safetensors.h - Safetensors file format reader
@@ -1990,11 +2085,17 @@ This preamble contains comments and preprocessing setup that apply to the comple
 
 ### `#ifndef VOXTRAL_SAFETENSORS_H`
 
+Include guard for the weights-reader API.
+
 ```{.c .numberLines startFrom="10"}
 #ifndef VOXTRAL_SAFETENSORS_H
 ```
 
 ### `#define VOXTRAL_SAFETENSORS_H`
+
+Marks the guard taken and includes `<stddef.h>` and `<stdint.h>`: byte counts
+(`size_t`), shape dimensions (`int64_t`), and 16-bit element views
+(`uint16_t`) are the currency of this API.
 
 ```{.c .numberLines startFrom="11"}
 #define VOXTRAL_SAFETENSORS_H
@@ -2007,6 +2108,10 @@ This preamble contains comments and preprocessing setup that apply to the comple
 
 ### `#define SAFETENSORS_MAX_TENSORS 1024`
 
+Fixed capacity of the per-file metadata table. The descriptors live inline
+inside the file handle, so the table needs no per-tensor allocation and frees
+with the handle; `parse_header` simply stops accepting entries at this limit.
+
 ```{.c .numberLines startFrom="17"}
 #define SAFETENSORS_MAX_TENSORS 1024
 
@@ -2014,6 +2119,14 @@ This preamble contains comments and preprocessing setup that apply to the comple
 ```
 
 ### `typedef enum safetensor_dtype_t`
+
+A dtype tags how each stored element's bits are interpreted and how many bytes
+it occupies. `F32` is the ordinary 32-bit float; `F16` is IEEE half precision;
+`BF16` is bfloat16 — a 16-bit format that keeps float32's full 8-bit exponent
+(same numeric range) but only 7 mantissa bits (less precision), the format
+Voxtral's weights ship in. `DTYPE_UNKNOWN = -1` keeps an unrecognized header
+string representable: the open still succeeds, and only the typed accessor
+that later touches such a tensor rejects it.
 
 ```{.c .numberLines startFrom="20"}
 typedef enum {
@@ -2031,6 +2144,13 @@ typedef enum {
 
 ### `typedef struct safetensor_t`
 
+The descriptor for one tensor: a bounded name, its dtype, `ndim` (how many
+dimensions) with up to eight dimension lengths, and the byte interval that
+locates its data. `data_offset` is measured from the start of the data region
+— the bytes after the 8-byte length and the JSON header — not from the start
+of the file; `safetensors_data` adds those bases back. The struct holds
+metadata only, owns no weight bytes, and never needs freeing on its own.
+
 ```{.c .numberLines startFrom="31"}
 typedef struct {
     char name[256];
@@ -2045,6 +2165,13 @@ typedef struct {
 ```
 
 ### `typedef struct safetensors_file_t`
+
+The open-checkpoint handle: the `mmap` base pointer with the file size needed
+to `munmap` it later, the parsed header geometry, a heap copy of the header
+JSON, and the tensor descriptors inline in a fixed array. The direct accessors (`safetensors_data`, `safetensors_get_bf16_direct`)
+hand out pointers that borrow `data`, so this object must outlive those; the
+`get_f32`/`get_bf16` accessors instead return owned copies that survive it.
+`safetensors_close` is the single point where the mapping dies.
 
 ```{.c .numberLines startFrom="41"}
 typedef struct {
@@ -2121,8 +2248,10 @@ float *safetensors_get_f32(const safetensors_file_t *sf, const safetensor_t *t);
 
 ### `uint16_t *safetensors_get_bf16(const safetensors_file_t *sf, const safetensor_t *t);`
 
-Returns a newly allocated BF16 representation, copying BF16 input or converting
-supported source values. Ownership differs from the direct accessor.
+Returns a newly allocated copy of a BF16 tensor's raw 16-bit words; any other
+dtype returns NULL — no conversion is performed. Unlike the borrowed pointer
+from `safetensors_get_bf16_direct`, the caller owns and frees this buffer, so
+it remains valid even after the file is closed.
 
 ```{.c .numberLines startFrom="69"}
 uint16_t *safetensors_get_bf16(const safetensors_file_t *sf, const safetensor_t *t);
@@ -2185,6 +2314,8 @@ void safetensors_print_all(const safetensors_file_t *sf);
 
 ### `#endif /* VOXTRAL_SAFETENSORS_H */`
 
+Closes the include guard.
+
 ```{.c .numberLines startFrom="87"}
 #endif /* VOXTRAL_SAFETENSORS_H */
 ```
@@ -2234,6 +2365,12 @@ This map gives the reading spine of the file. Line numbers refer to the original
 ### Translation-unit preamble {.unnumbered .unlisted}
 
 This translation-unit preamble selects dependencies, compile-time features, and file-local constants used by the definitions that follow.
+
+Besides the standard library, the includes pull in the POSIX machinery the
+reader stands on: `<fcntl.h>` and `<unistd.h>` for `open`/`close`,
+`<sys/stat.h>` for `fstat` (the file size the mapping needs), and
+`<sys/mman.h>` for `mmap`/`munmap`. The opening comment records that the
+reader was adapted from an earlier model-loading project.
 
 ```{.c .numberLines startFrom="1"}
 /*
@@ -2641,8 +2778,11 @@ const void *safetensors_data(const safetensors_file_t *sf, const safetensor_t *t
 
 ### `int64_t safetensor_numel(const safetensor_t *t)`
 
-Computes the product of dimensions with validity checks before the result is
-used for byte-size calculations and allocations.
+Multiplies the shape dimensions into the tensor's logical element count — a
+[128, 201] tensor holds 25728 elements. The function itself validates
+nothing; callers such as `safetensors_get_f32` reject `n <= 0` and check that
+`n` times the element size fits inside the recorded `data_size` before
+allocating or copying.
 
 ```{.c .numberLines startFrom="318"}
 int64_t safetensor_numel(const safetensor_t *t) {
@@ -2775,8 +2915,11 @@ int safetensor_is_bf16(const safetensor_t *t) {
 
 ### `uint16_t *safetensors_get_bf16(const safetensors_file_t *sf, const safetensor_t *t)`
 
-Allocates BF16 output, copying direct BF16 data or narrowing supported FP32
-values. The caller owns this buffer independently of the mapping.
+Accepts only BF16 tensors — any other dtype prints an error and returns NULL,
+with no conversion path — then allocates `numel * 2` bytes and copies the raw
+16-bit words out of the mapping. The caller owns the buffer independently of
+the mapping, unlike the borrowed pointer `safetensors_get_bf16_direct`
+returns.
 
 ```{.c .numberLines startFrom="413"}
 uint16_t *safetensors_get_bf16(const safetensors_file_t *sf, const safetensor_t *t) {

@@ -128,6 +128,12 @@ This map gives the reading spine of the file. Line numbers refer to the original
 
 The file begins by importing `ClassroomCaptionsCore`, `Foundation`, `Synchronization`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
+`ClassroomCaptionsCore` provides the shared transcription contract — the
+`TranscriptionEvent` values and configuration types this backend must honor.
+`Foundation` supplies `URLSession` with its WebSocket task plus
+`JSONSerialization`; `Synchronization` supplies the `Mutex` that guards the
+connection state.
+
 ```{.swift .numberLines startFrom="1"}
 import ClassroomCaptionsCore
 import Foundation
@@ -162,9 +168,14 @@ enum VoxtralRealtimeError: LocalizedError {
 ### `final class VoxtralRealtimeService: NSObject, StreamingTranscriptionService,`
 
 Bridges an external WebSocket protocol to the same
-`StreamingTranscriptionService` contract as embedded Voxtral. It subclasses
-`NSObject` for URLSession delegation and promises `@unchecked Sendable`; a
-`Mutex<State>` supplies the synchronization that the compiler cannot infer.
+`StreamingTranscriptionService` contract as embedded Voxtral, so the app model
+cannot tell the two backends apart. `URLSession` (Foundation's network client)
+reports connection events through a *delegate* — an object it calls back when
+the socket opens, closes, or fails — and that mechanism requires an
+Objective-C-compatible object, hence the `NSObject` subclass. `@unchecked
+Sendable` is this class's promise that it is safe to use from several threads
+even though the compiler cannot verify it; the `Mutex<State>` below is what
+actually makes the promise true.
 
 ```{.swift .numberLines startFrom="19"}
 final class VoxtralRealtimeService: NSObject, StreamingTranscriptionService,
@@ -235,9 +246,16 @@ destroy an active backend.
 
 ### `func start(configuration: TranscriptionConfiguration) async throws`
 
-Start creates one WebSocket task and installs state before resuming it so early
-delegate callbacks have a consistent owner. Connection timeout and cancellation
-must settle the same continuation at most once.
+Start validates that the endpoint scheme is `ws` or `wss` (WebSocket, plain or
+TLS-encrypted — the counterpart of http/https), stops any previous session, and
+prepares the upgrade request: a WebSocket begins life as an ordinary HTTP
+request whose headers ask the server to keep the connection open afterward as a
+two-way message channel, and the `OpenAI-Beta: realtime=v1` header opts into
+the realtime protocol. The session waits for connectivity, allows 30 seconds to
+connect, and raises the whole-transfer limit to 24 hours because one lecture is
+one long-lived connection. All connection state is installed under the mutex
+*before* `task.resume()` starts network activity, so even the earliest delegate
+callback finds a consistent owner.
 
 ```{.swift .numberLines startFrom="53"}
     func start(configuration: TranscriptionConfiguration) async throws {
@@ -304,10 +322,13 @@ size by roughly one third.
 
 ### `func commit()`
 
-Commits the audio buffer only when connected, with uncommitted audio present, and
-no generation already in flight; it atomically clears hasUncommittedAudio and sets
-generationInProgress before sending input_audio_buffer.commit, preventing
-overlapping generations.
+The realtime protocol is append-then-commit: `sendAudio` only accumulates audio
+in the server's input buffer, and the commit message asks the server to
+transcribe what has accumulated. This method sends that commit only when
+connected, with uncommitted audio actually present, and no generation already
+in flight; it atomically clears `hasUncommittedAudio` and sets
+`generationInProgress` inside the lock before sending, so racing commit calls
+cannot start overlapping generations.
 
 ```{.swift .numberLines startFrom="103"}
     func commit() {
@@ -375,9 +396,12 @@ session harmless.
 
 ### `func urlSession(…)`
 
-Converts WebSocket close code and optional UTF-8 reason into the shared terminal
-path. Normal closure and going-away are not reported as failures; abnormal codes
-retain their numeric value for diagnosis before disconnection is emitted.
+Converts the WebSocket close handshake into the shared terminal path. Every
+WebSocket close carries a numeric close code defined by the protocol;
+`normalClosure` and `goingAway` are routine endings and produce no failure
+message, while any other code keeps its numeric value plus the optional UTF-8
+reason text so an abnormal disconnect can be diagnosed before the
+`disconnected` event is emitted.
 
 ```{.swift .numberLines startFrom="144"}
     func urlSession(
@@ -448,9 +472,13 @@ failure it enters terminal handling. This explicit re-arming is how
 
 ### `private func handle(_ message: URLSessionWebSocketTask.Message)`
 
-Normalizes text and binary WebSocket messages to `Data`, then asks
-`JSONSerialization` for a dictionary. Unknown future message cases and malformed
-JSON are ignored rather than crashing the stream or fabricating caption events.
+WebSocket messages arrive as either text or binary frames; this normalizes both
+to `Data` bytes and parses them with `JSONSerialization`, Foundation's dynamic
+JSON parser, which yields untyped dictionaries and arrays rather than the fixed
+`Codable` structs the Gemma client uses — the right tool here because the
+server's message shapes vary. Unknown future message kinds and malformed JSON
+are silently ignored rather than crashing the stream or fabricating caption
+events.
 
 ```{.swift .numberLines startFrom="188"}
     private func handle(_ message: URLSessionWebSocketTask.Message) {
@@ -683,7 +711,9 @@ duration, inference time, real-time factor, first-token latency, the transcript,
 and optional word accuracy. It does not emit decoder token counts or
 tokens-per-second; those diagnostics exist only on the embedded in-app path.
 
-Word accuracy uses word-level Levenshtein distance normalized by reference
+Word accuracy uses word-level Levenshtein distance (the minimum number of word
+insertions, deletions, and substitutions turning one transcript into the other)
+normalized by reference
 length. It is a diagnostic metric, not a replacement for listening tests.
 
 Length: 421 lines. SHA-256: `64b5b4895f614a134a10a1f1abd5793601169e25d2e8640f72b06423919251d6`.
@@ -713,6 +743,10 @@ This map gives the reading spine of the file. Line numbers refer to the original
 
 The file begins by importing `CVoxtralEngine`, `Foundation`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
+`CVoxtralEngine` exposes the project's C bridge — the `ccv_*` functions and
+status codes the benchmark drives directly, bypassing the app. `Foundation`
+supplies file loading, `Data`, and string formatting.
+
 ```{.swift .numberLines startFrom="1"}
 import CVoxtralEngine
 import Foundation
@@ -741,8 +775,10 @@ private struct Arguments {
 
 ### `private struct PCMRecording`
 
-Owned mono PCM16 bytes plus derived duration, guaranteeing the benchmark feeds
-the bridge's required format.
+Owned mono PCM16 samples plus the sample rate, guaranteeing the benchmark feeds
+the bridge's required format. `duration` derives the recording length the
+obvious way — sample count divided by samples per second — and the real-time
+factor printed later divides inference time by exactly this value.
 
 ```{.swift .numberLines startFrom="16"}
 private struct PCMRecording {
@@ -758,7 +794,11 @@ private struct PCMRecording {
 
 ### `private enum BenchmarkError: LocalizedError`
 
-Typed usage and WAV-format failures rendered through `LocalizedError`.
+The three benchmark failure families, each carrying a human-readable message:
+`usage` for bad command-line arguments, `invalidWAV` for unsupported audio
+input, and `engine` for any non-OK status from the C bridge. `LocalizedError`
+lets the top-level catch print whichever message applies, and the single switch
+pattern binds all three associated strings to one name.
 
 ```{.swift .numberLines startFrom="25"}
 private enum BenchmarkError: LocalizedError {
@@ -924,8 +964,14 @@ private func loadPCMRecording(path: String) throws -> PCMRecording {
 
 ### `private func drainText(…)`
 
-Polls bridge text until `NO_TEXT`, resizes on `BUFFER_TOO_SMALL`, concatenates
-UTF-8 pieces, and records first-text latency exactly once.
+Empties the stream's pending text queue using the classic C sizing handshake:
+call `ccv_stream_read_text` with a guess-sized buffer, and on
+`BUFFER_TOO_SMALL` retry once with the exact byte count the bridge reported
+through `required`. Each piece is decoded as UTF-8 up to the NUL terminator,
+appended to the transcript, and echoed immediately so progress is visible. The
+function returns whether any text appeared, which is how the caller records
+first-token latency exactly once; `NO_TEXT` is the normal empty-queue answer,
+and any other status is a real engine error.
 
 ```{.swift .numberLines startFrom="143"}
 private func drainText(
@@ -975,9 +1021,14 @@ private func words(_ text: String) -> [String] {
 
 ### `private func wordAccuracy(reference: String, transcript: String) -> Double`
 
-Computes word accuracy as one minus the word-level Levenshtein distance normalized
-by the reference length, using a rolling two-row DP. An empty reference scores 1
-only if the transcript is also empty, and the result is floored at zero.
+Scores the transcript against the reference in plain terms: the word-level
+Levenshtein distance is the minimum number of single-word insertions,
+deletions, and substitutions needed to turn the reference word list into the
+transcript, and accuracy is one minus that distance divided by the reference
+length. The classic dynamic-programming table is kept as a rolling pair of
+rows, so memory stays linear instead of quadratic. An empty reference scores 1
+only against an empty transcript, and the result is floored at zero so heavy
+over-generation cannot yield a negative score.
 
 ```{.swift .numberLines startFrom="178"}
 private func wordAccuracy(reference: String, transcript: String) -> Double {
@@ -1005,6 +1056,11 @@ private func wordAccuracy(reference: String, transcript: String) -> Double {
 
 ### `private func seconds(_ duration: Duration) -> Double`
 
+Converts a Swift `Duration` to floating-point seconds for printing. `Duration`
+stores time as integer components — whole seconds plus attoseconds (10⁻¹⁸ s) —
+so interval arithmetic never accumulates floating-point drift; this helper
+performs the lossy conversion only at the reporting boundary.
+
 ```{.swift .numberLines startFrom="199"}
 private func seconds(_ duration: Duration) -> Double {
     Double(duration.components.seconds)
@@ -1018,6 +1074,16 @@ private func seconds(_ duration: Duration) -> Double {
 ```
 
 ### `private func runRestartTest(…)`
+
+Measures what the app's stop/start cycle costs once the model weights are
+already in memory. Each of two cycles repeats the application's session
+sequence against the one loaded model: create a stream, prime it with the same
+3.2 seconds of silence the app feeds before reporting "connected", feed the
+recording in chunks of the configured size while draining text, then finish and
+free the stream. Every phase is bracketed with `ContinuousClock` timestamps and
+printed as per-cycle `stream_create`, `prime`, `feed`, and `stop` seconds, so
+the cost of restarting captioning mid-lecture can be compared against the
+one-time model load.
 
 ```{.swift .numberLines startFrom="208"}
 private func runRestartTest(
@@ -1095,9 +1161,19 @@ private func runRestartTest(
 
 ### `private func run() throws`
 
-The benchmark constructs the same bridge options used by the app, feeds timed
-chunks, repeatedly drains text until `NO_TEXT`, finishes the stream, prints
-metrics, and frees handles on every exit path.
+The whole benchmark, with every phase timed. It loads the model (the
+multi-second weight read reported as `model_load_seconds`), optionally branches
+into the restart test, then creates a stream with the same delay and
+processing-interval options the app uses; an optional silent preroll warms the
+pipeline without contributing transcript text. The feed loop pushes the WAV in
+fixed-size chunks, drains text after each chunk, notes `first_token_seconds`
+the first time any text appears, and with `--realtime` sleeps so audio arrives
+no faster than a live microphone would deliver it. After `ccv_stream_finish`
+and a final drain it prints the metrics — `inference_seconds` is wall-clock
+processing time, `realtime_factor` divides that by audio duration (below 1.0
+means faster than live speech), and `word_accuracy` compares against an
+optional reference file — while `defer` blocks free the stream and model on
+every exit path.
 
 ```{.swift .numberLines startFrom="279"}
 private func run() throws {

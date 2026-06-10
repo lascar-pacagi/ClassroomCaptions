@@ -67,20 +67,23 @@ The completion arguments matter:
 
 ## Address selection and Bonjour
 
-The listener advertises `_classcaptions._tcp` through DNS Service Discovery.
-Bonjour combines multicast DNS name discovery with service records. The current
+The listener advertises `_classcaptions._tcp` through DNS (Domain Name System)
+Service Discovery.
+Bonjour combines multicast DNS name discovery (name lookup by local broadcast
+rather than a central server) with service records. The current
 browser flow does not resolve that service; it embeds a numeric IPv4 address in
 the QR. Advertisement remains useful for diagnostics and a future native app.
 
 `getifaddrs` returns a linked list of interfaces. The code accepts only entries
 that are up, non-loopback, and `AF_INET`, asks `getnameinfo` for numeric text,
 prefers `en0`, and retains a fallback. This is pragmatic rather than perfect:
-modern Macs, VPNs, USB adapters, and hotspot configurations can assign other
+modern Macs, VPNs (virtual private networks), USB adapters, and hotspot configurations can assign other
 names. Network.framework knows the selected path, but converting that path into
 the exact browser-reachable local address still requires care.
 
 Private IPv4 addressing does not imply reachability. Classroom Wi-Fi may enable
-client isolation, firewalls may reject inbound traffic, or VPN routing may
+client isolation (an access-point setting that blocks wireless devices from
+reaching each other), firewalls may reject inbound traffic, or VPN routing may
 divert packets. A personal hotspot is often more predictable.
 
 ## The implemented HTTP subset
@@ -135,7 +138,8 @@ data: {"finalized":["..."],"provisional":"...","revision":42}
 Each event ends with an empty line. Multiple `data:` lines would be joined by
 the browser with newline characters. A line beginning with `:` is a comment;
 the JavaScript receives no application event, but traffic keeps intermediate
-state active. `retry: 1000` asks `EventSource` to reconnect after one second.
+state active. `retry: 1000` asks `EventSource` (the browser's built-in SSE
+client object) to reconnect after one second.
 
 The server sends the latest snapshot immediately after stream establishment.
 Otherwise a newly opened page would remain blank until the next spoken token.
@@ -158,9 +162,10 @@ address different abuse cases:
 - many sources flooding one class;
 - unbounded dictionaries or professor queue growth.
 
-These controls are availability defenses, not strong identity. NAT can merge
-students into one source, while address changes can invalidate a legitimate
-ticket.
+These controls are availability defenses, not strong identity. NAT (Network
+Address Translation, which lets many devices share one apparent address) can
+merge students into one source, while address changes can invalidate a
+legitimate ticket.
 
 ### Operational limits at a glance
 
@@ -170,7 +175,7 @@ app model). Knowing them ahead of class avoids surprises mid-lecture:
 | Limit | Value | What happens at the limit |
 | --- | --- | --- |
 | Concurrent TCP connections | 64 | further connections are cancelled at accept |
-| Time to complete a request | 10 s | the connection is cancelled (slowloris guard) |
+| Time to complete a request | 10 s | the connection is cancelled (a guard against "slowloris" attacks, which hold connections open by sending bytes very slowly) |
 | Live caption streams | 1 | a newer authenticated viewer pre-empts the old stream |
 | Live student tickets | 256 total, 4 per source, 4-hour lifetime | `503 classroom_full` / `429 ticket_limit` |
 | Question gap per ticket | 10 s | `429` |
@@ -214,13 +219,15 @@ on QR version, then eight bits per payload byte.
 
 ### 2. Version and capacity
 
-QR versions run from 1 to 40. Version `v` has:
+QR versions run from 1 to 40; a *module* is one black or white cell of the
+printed grid. Version `v` has:
 
 ```text
 module width = 21 + 4 * (v - 1)
 ```
 
-The encoder selects the smallest version whose data-codeword capacity can hold
+The encoder selects the smallest version whose data-codeword capacity (a
+codeword is one 8-bit unit of the symbol's payload) can hold
 mode, count, payload, terminator, and byte alignment at error-correction level
 M. A longer IP address, route, or token can therefore increase module density.
 
@@ -243,7 +250,8 @@ x^8 + x^4 + x^3 + x^2 + 1
 
 For a block requiring `r` parity codewords, the data polynomial is multiplied
 by `x^r` and divided by a degree-`r` generator polynomial. The remainder is the
-parity sequence. A scanner uses the resulting syndromes to locate and correct
+parity sequence. A scanner uses the resulting syndromes (check values computed
+from the received codewords) to locate and correct
 codeword errors.
 
 “Level M corrects about 15%” is only a rule of thumb. Correctability depends on
@@ -295,7 +303,7 @@ The lowest-penalty mask is retained.
 ### 9. Format and version information
 
 Format bits encode the correction level and mask number, protected by a BCH
-code and XOR mask. They are written twice near finder patterns. Versions 7 and
+(Bose–Chaudhuri–Hocquenghem) error-correcting code and XOR mask. They are written twice near finder patterns. Versions 7 and
 above also write BCH-protected version bits in two locations.
 
 ### 10. Rasterization and quiet zone

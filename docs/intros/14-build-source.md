@@ -26,7 +26,9 @@ ClassroomCaptions.app/
 
 The packaging script builds release code, creates this hierarchy, copies the
 executable/property list, and ad-hoc code-signs the bundle with
-`codesign --force --deep --sign -`. Model weights are
+`codesign --force --deep --sign -` (an ad-hoc signature carries no developer
+identity; it is the minimum signing Apple-silicon macOS requires to run an
+executable). Model weights are
 not copied into the bundle because they are tens of gigabytes and have an
 independent download/update lifecycle.
 
@@ -40,6 +42,8 @@ nominally compatible.
 ## Documentation build
 
 The book build first regenerates source chapters and verifies byte-for-byte
-coverage, then asks Quarto to render HTML and Typst/PDF. Generated chapters are
+coverage, then asks Quarto (the publishing system that builds this book) to
+render HTML and Typst/PDF (Typst is the typesetting engine used for the PDF
+output). Generated chapters are
 artifacts; human explanations live in generator metadata, introductions, and
 figures so rebuilding does not erase them.

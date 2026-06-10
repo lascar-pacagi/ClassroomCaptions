@@ -175,6 +175,12 @@ This map gives the reading spine of the file. Line numbers refer to the original
 
 The file begins by importing `AudioToolbox`, `CoreAudio`, `Foundation`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
+`AudioToolbox` supplies the Audio Unit C API used to configure AUHAL,
+`CoreAudio` supplies the C API for enumerating hardware devices and querying
+their properties, and `Foundation` is Swift's base library (strings, sorting,
+basic value types). Nothing executes here; the imports only make those APIs
+visible to the declarations below.
+
 ```{.swift .numberLines startFrom="1"}
 import AudioToolbox
 import CoreAudio
@@ -209,10 +215,14 @@ enum AudioDeviceCatalog {
 
 ### `static func inputDevices() -> [MicrophoneDevice]`
 
-Enumerates all CoreAudio devices, keeps those exposing an input stream, and maps
-each to a MicrophoneDevice keyed by its stable device UID (falling back to the
-name), sorted case-insensitively. The UID, not the transient AudioObjectID, is
-what the app persists.
+Enumerates every Core Audio device, keeps those exposing an input stream, and
+maps each to a `MicrophoneDevice` keyed by its stable device UID, sorted
+case-insensitively by name. The chained calls are Swift's pipeline style:
+`filter` keeps matching elements, and `compactMap` (a map that silently drops
+`nil` results) turns each numeric ID into a value — so a device whose UID query
+fails simply disappears from the menu instead of aborting the whole listing,
+and a missing name falls back to "Microphone". The UID, not the transient
+`AudioObjectID`, is what the app stores and uses to re-resolve the device at capture start.
 
 ```{.swift .numberLines startFrom="11"}
     static func inputDevices() -> [MicrophoneDevice] {
@@ -292,9 +302,13 @@ transaction can attach the failing setup step.
 
 ### `private static func defaultInputDeviceID() -> AudioObjectID?`
 
-Queries the system object for `kAudioHardwarePropertyDefaultInputDevice`.
-Selector, global scope, and main element identify the property; success still
-requires a nonzero device ID because zero is not usable hardware.
+Queries the system object (`kAudioObjectSystemObject`, the root Core Audio
+object that represents the audio hardware system itself) for
+`kAudioHardwarePropertyDefaultInputDevice`. Selector, global scope, and main
+element identify the property, and Swift's `&` passes a variable's address
+exactly like C's address-of operator, so `deviceID` and `size` act as in/out
+parameters. Success still requires a nonzero device ID because zero is not
+usable hardware.
 
 ```{.swift .numberLines startFrom="55"}
     private static func defaultInputDeviceID() -> AudioObjectID? {
@@ -320,10 +334,13 @@ requires a nonzero device ID because zero is not usable hardware.
 
 ### `private static func allDeviceIDs() -> [AudioObjectID]`
 
-Implements Core Audio's two-call variable-size pattern: ask for byte count,
-allocate an exactly sized Swift array, then fill it through an unsafe mutable
-buffer pointer. Any status failure returns an empty catalog rather than partially
-initialized identifiers.
+Implements Core Audio's two-call variable-size pattern, an idiom C programmers
+will recognize: first ask only for the byte count, then allocate exactly that
+much and ask again for the data. The Swift array lends its backing store
+through `withUnsafeMutableBufferPointer`, which exposes the array's contiguous
+storage as a raw C-style pointer valid only inside the closure — this is how a
+safe Swift array is handed to a C out-parameter. Any status failure returns an
+empty catalog rather than partially initialized identifiers.
 
 ```{.swift .numberLines startFrom="74"}
     private static func allDeviceIDs() -> [AudioObjectID] {
@@ -364,9 +381,15 @@ initialized identifiers.
 
 ### `private static func deviceHasInput(_ deviceID: AudioObjectID) -> Bool`
 
-Reads the input-scope `AudioBufferList` and accepts a device only when at least
-one buffer reports channels. The raw allocation is aligned for the C structure
-and released with `defer`, including every early return.
+Reads the device's input-scope stream configuration to decide whether it can
+record at all — this is the test that keeps output-only hardware (speakers,
+displays) out of the microphone menu. `AudioBufferList` is a variable-length C
+struct whose true size is known only at runtime, so the code allocates raw
+bytes with the struct's alignment and fills them via the property call; `defer`
+(a Swift block that runs when the enclosing scope exits by any path) frees that
+allocation on every early return. `UnsafeMutableAudioBufferListPointer` is the
+Swift wrapper that makes the struct's trailing buffer array iterable, and the
+device qualifies when at least one buffer reports channels.
 
 ```{.swift .numberLines startFrom="108"}
     private static func deviceHasInput(_ deviceID: AudioObjectID) -> Bool {
@@ -412,9 +435,14 @@ and released with `defer`, including every early return.
 
 ### `private static func stringProperty(…)`
 
-Fetches a Core Foundation string property such as UID or name. Core Audio owns
-the returned `CFString`, so `takeUnretainedValue` borrows it rather than
-consuming a reference count; bridging then produces a Swift `String`.
+Fetches a Core Foundation string property such as the UID or the display name.
+The value arrives as `Unmanaged<CFString>` — a reference deliberately left
+outside ARC's automatic retain/release so the programmer must state explicitly
+who owns it. The API contract actually hands ownership to the caller; this code reads it
+with `takeUnretainedValue` and never releases it, accepting a tiny one-off leak
+per device query, and the `as String` bridge then yields an ordinary Swift
+string. Empty strings are reported as `nil` so a
+blank device name is treated like a missing one.
 
 ```{.swift .numberLines startFrom="147"}
     private static func stringProperty(
@@ -488,6 +516,13 @@ This map gives the reading spine of the file. Line numbers refer to the original
 ### Imports and file preamble {.unnumbered .unlisted}
 
 The file begins by importing `AVFoundation`, `AudioToolbox`, `CoreAudio`, `Foundation`, `Synchronization`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
+
+`AVFoundation` provides the audio formats, the converter, and the
+microphone-permission API; the `@preconcurrency` prefix imports it with Swift's
+newer concurrency checks relaxed because the framework predates those
+annotations. `AudioToolbox` and `CoreAudio` expose the AUHAL C interface,
+`Foundation` is Swift's base library, and `Synchronization` supplies the
+`Mutex` type used inside `convert`.
 
 ```{.swift .numberLines startFrom="1"}
 @preconcurrency import AVFoundation
@@ -589,10 +624,18 @@ in `configure`, which can unwind before ownership is published.
 
 ### `private func microphoneInputCallback(…)`
 
-This function has a C callback ABI. `reference` is the opaque retained Swift
-context. The callback allocates/render-converts one chunk and immediately
-dispatches owned bytes. Returning `OSStatus` follows Audio Unit convention;
-Swift errors cannot cross this C function boundary.
+This function has a C callback ABI: AUHAL invokes it on the real-time audio
+thread to announce that the hardware has produced `frameCount` new frames. For
+an *input* callback the trailing buffer-list argument carries no samples — the
+code must pull them itself, which is why it allocates an `AVAudioPCMBuffer` and
+calls `AudioUnitRender` to copy the hardware frames into storage it owns.
+`reference` is the opaque retained Swift context; `takeUnretainedValue`
+recovers it without any atomic retain/release, so the audio thread never
+contends on reference counts. The converted, owned `Data` chunk is handed to
+the processing queue with `queue.async`, moving all further work off the
+deadline thread. Returning `OSStatus` follows Audio Unit convention — Swift
+errors cannot cross this C boundary — and a failed buffer allocation returns
+`noErr` so one dropped chunk does not surface as a stream error.
 
 ```{.swift .numberLines startFrom="59"}
 private func microphoneInputCallback(
@@ -640,9 +683,12 @@ private func microphoneInputCallback(
 
 ### `final class MicrophoneCaptureService: @unchecked Sendable`
 
-Owns one AUHAL capture instance and one retained callback context. A lock
-protects publication/removal of those two lifetime roots; the processing queue
-owns ordinary delivery after the real-time callback has copied audio bytes.
+Owns one AUHAL capture instance and one retained callback context. An `NSLock`
+(a plain mutual-exclusion lock, the moral equivalent of `pthread_mutex_t`)
+protects publication and removal of those two lifetime roots, while a serial
+`DispatchQueue` (a first-in-first-out work queue whose closures run one at a
+time on a system-managed thread) owns all ordinary delivery once the real-time
+callback has copied the audio bytes.
 
 ```{.swift .numberLines startFrom="100"}
 final class MicrophoneCaptureService: @unchecked Sendable {
@@ -673,10 +719,14 @@ state and cannot release either resource twice.
 
 ### `init()`
 
-Constructs the model's fixed target format: interleaved signed PCM16, mono,
-16 kHz. Failure is a programming/platform invariant violation and therefore a
-precondition failure, not a recoverable per-session error. A dispatch-specific
-key later prevents synchronously waiting on the processing queue from itself.
+Constructs the model's fixed target format — interleaved signed 16-bit PCM,
+mono, 16 kHz. Failure here would mean the platform cannot express a basic PCM
+format: a broken invariant rather than a recoverable per-session error, hence
+`preconditionFailure` (Swift's deliberate crash with a message, like an
+`assert` that ships in release builds). `setSpecific` tags the processing queue
+with a private key so that `stop` can later ask "is this code already running
+on that queue?" and skip the synchronous wait that would otherwise deadlock on
+itself.
 
 ```{.swift .numberLines startFrom="115"}
     init() {
@@ -748,10 +798,15 @@ blocking the main thread.
 
 ### `func start(…)`
 
-Start is transactional. Any failure after Audio Unit creation disposes the
-partially constructed instance. A successful return means device selection,
-format negotiation, callback installation, initialization, and hardware start
-all completed.
+Start is transactional. `AudioComponentDescription` is a search key into
+macOS's registry of audio plug-ins: type output, subtype HALOutput,
+manufacturer Apple names AUHAL (the system's hardware-abstraction audio unit),
+and `AudioComponentFindNext` returns the matching component so
+`AudioComponentInstanceNew` can instantiate it. Any failure after that creation
+disposes the partially constructed instance before rethrowing, so no
+half-configured Audio Unit survives. A successful return means device
+selection, format negotiation, callback installation, initialization, and
+hardware start all completed.
 
 ```{.swift .numberLines startFrom="153"}
     func start(
@@ -792,9 +847,16 @@ all completed.
 
 ### `func stop()`
 
-State is removed under the lock before external teardown. Repeated stop calls
-are therefore harmless. Queue synchronization occurs only when the caller is
-not already on that queue, avoiding self-deadlock.
+State is removed under the lock before any external teardown, so repeated
+`stop` calls find nothing and are harmless. The teardown order matters:
+stopping, uninitializing, and disposing the Audio Unit silences the real-time
+callback first, and only then does `context?.release()` balance the single
+retain taken by `passRetained` at setup — releasing earlier could free the
+context while a callback still uses it. The final empty
+`processingQueue.sync {}` is a drain barrier (it returns only after every chunk
+already queued has been handled) and is skipped when the caller is already on
+that queue — detected via the dispatch-specific key — to avoid waiting on
+itself, a self-deadlock.
 
 ```{.swift .numberLines startFrom="187"}
     func stop() {
@@ -819,10 +881,18 @@ not already on that queue, avoiding self-deadlock.
 
 ### `private func configure(…)`
 
-Completes AUHAL setup as a transaction: enable input bus 1, disable output bus
-0, select hardware, read and install the callback-side format, create the
-converter/context, install the C callback, initialize, and start. The retained
-context is published only after every fallible step succeeds.
+Completes AUHAL setup as a transaction. Each `AudioUnitSetProperty` call is the
+property dance from the chapter intro — selector, scope, element, value
+pointer, byte size, exactly as a C API: input is enabled on element 1 (the
+hardware-input bus), output disabled on element 0, and the chosen device
+attached. The code then *reads* the device's native format from the input
+scope of element 1 and *installs the same format* on the output
+(callback-facing) scope, so AUHAL performs no hidden conversion and the
+callback receives raw hardware frames; the `AVAudioConverter` built here does
+the real resampling to the fixed 16 kHz mono target. The context is retained
+with `passRetained` for the C callback, released again if installation,
+initialization, or start fails, and published under the lock only after every
+fallible step succeeds.
 
 ```{.swift .numberLines startFrom="205"}
     private func configure(
@@ -948,10 +1018,16 @@ sequence linear and ensures one catch block performs rollback.
 
 ### `fileprivate static func convert(…)`
 
-The converter input closure may be called more than once. The mutex-backed flag
-supplies the source buffer exactly once and then reports `.noDataNow`.
-Frame-capacity calculation allows resampling expansion plus a small margin.
-The returned `Data` copies PCM bytes out of the temporary AVAudio buffer.
+`AVAudioConverter` performs the actual signal conversion — resampling from
+whatever rate and sample layout the device produces down to 16 kHz mono
+`Int16`. It works in pull style: the closure passed to `convert` is the
+converter's input source and may be called more than once, so a `Mutex`-backed
+flag (a lock that wraps the value it guards) supplies the source buffer exactly
+once and answers `.noDataNow` afterwards. The output capacity is the input
+frame count scaled by the sample-rate ratio plus a small margin, allowing for
+resampling expansion. The final `Data(bytes:count:)` copies the PCM bytes out
+of the temporary AVAudio buffer, producing the owned chunk that may safely
+outlive the callback.
 
 ```{.swift .numberLines startFrom="315"}
     fileprivate static func convert(
@@ -1011,7 +1087,8 @@ actual data size, closes the handle, then writes transcript text, JSON, and
 metadata. Cancellation closes resources and removes partial state.
 
 The generic `perform` bridge converts callback/queue work into Swift
-continuations. Its ownership contract matters: exactly one continuation resume
+continuations (handles that resume a suspended `async` caller with a result or
+error). Its ownership contract matters: exactly one continuation resume
 must occur, and mutable file state remains queue-confined despite the class's
 `@unchecked Sendable` declaration.
 
@@ -1039,6 +1116,11 @@ This map gives the reading spine of the file. Line numbers refer to the original
 
 The file begins by importing `ClassroomCaptionsCore`, `Foundation`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
+`ClassroomCaptionsCore` is the app's own domain library, providing the session
+model, the transcript document, and the `PCM16WAVHeader` helper used below;
+`Foundation` supplies file I/O (`FileManager`, `FileHandle`), JSON encoding,
+and date formatting.
+
 ```{.swift .numberLines startFrom="1"}
 import ClassroomCaptionsCore
 import Foundation
@@ -1047,9 +1129,12 @@ import Foundation
 
 ### `struct SessionArchiveMetadata: Codable`
 
-The stable JSON summary written beside audio and transcripts. It records domain
-identity/times plus latched runtime choices and final byte count, without
-embedding model weights, mutable services, or provisional caption state.
+The stable JSON summary written beside the audio and transcripts. `Codable`
+asks the compiler to derive serialization for the struct's fields
+automatically, so the type converts to and from JSON without hand-written
+encoding code. It records domain identity and times plus latched runtime
+choices and the final audio byte count — and deliberately omits model weights,
+mutable services, and the unstable provisional caption state.
 
 ```{.swift .numberLines startFrom="4"}
 struct SessionArchiveMetadata: Codable {
@@ -1183,10 +1268,15 @@ nils it so later appends are no-ops and finalize can surface the error.
 
 ### `func finalize(…)`
 
-On the archive queue, propagates any earlier write failure, enforces the 4 GB PCM
-limit, rewrites the WAV header with the true data byte count, then writes
-transcript.txt, transcript.json, and a pretty-printed session.json before clearing
-state. Returns the directory, or nil if no session was started.
+On the archive queue, this propagates any earlier write failure, enforces the
+4 GB PCM limit, and then repairs the WAV header: the 44-byte header written at
+start carried sizes for an empty file because the two size fields (the overall
+RIFF chunk size, stored as data bytes + 36, and the data chunk's byte count)
+are unknowable while recording. The handle seeks back to offset 0, rewrites the
+header with the true count, and `synchronize()` flushes it to disk
+(Foundation's `fsync`) before closing. It then writes transcript.txt,
+transcript.json, and a pretty-printed session.json, clears state, and returns
+the directory — or `nil` if no session was ever started.
 
 ```{.swift .numberLines startFrom="85"}
     func finalize(
@@ -1289,10 +1379,13 @@ instead of closing a stale copied handle independently.
 
 ### `private func perform<T: Sendable>(…)`
 
-Bridges serial dispatch work into Swift `async throws` with a checked
-continuation. Exactly one queue closure resumes the continuation with either the
-operation value or error; the generic result must be `Sendable` because it
-crosses back from the archive queue.
+Bridges serial dispatch-queue work into Swift `async throws`. A continuation
+is the suspended caller reified as a value: `withCheckedThrowingContinuation`
+pauses the awaiting task, hands the closure a one-shot handle, and `resume`
+restarts the task with either the operation's value or its error ("checked"
+means the runtime traps if the handle is resumed twice, and logs a warning if it is discarded without ever being resumed). Exactly one
+resume occurs per queued closure, and the generic result must be `Sendable`
+because it crosses from the archive queue back to the caller's task.
 
 ```{.swift .numberLines startFrom="163"}
     private func perform<T: Sendable>(

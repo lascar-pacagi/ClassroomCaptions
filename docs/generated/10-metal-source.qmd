@@ -14,7 +14,8 @@ All higher Voxtral layers depend on this implementation for throughput. Nothing 
 The CPU validates dimensions, chooses a cached pipeline, fills small parameter
 structures, encodes work, and decides when completion is required. Metal
 buffers contain large tensors; command buffers order GPU operations; pipeline
-state objects are compiled shader entry points. Metal Performance Shaders (MPS)
+state objects are compiled entry points into shaders (the small programs that
+run on the GPU). Metal Performance Shaders (MPS)
 provide a tuned dense matrix multiply (`MPSMatrixMultiplication`) where a custom
 kernel is unnecessary.
 
@@ -139,7 +140,8 @@ projection 25 MB, the merged gate/up FFN weights 113 MB, and the down projection
 for the final logits matmul against the tied token-embedding table. Call it
 **~7 GB of weight reads per token**.
 
-The arithmetic per token is tiny by GPU standards (one position, matvecs), so
+The arithmetic per token is tiny by GPU standards (one position, matvecs —
+matrix-vector products), so
 the GPU's compute units are mostly waiting on memory. Tokens per second is
 therefore approximately *memory bandwidth ÷ bytes per token*: at the ~12.5
 tokens/s the realtime checkpoint targets, the runtime sustains on the order of
@@ -223,6 +225,10 @@ This map gives the reading spine of the file. Line numbers refer to the original
 
 This preamble contains comments and preprocessing setup that apply to the complete public header. It introduces no runtime state.
 
+The opening comment is the file's one-paragraph contract: MPS-accelerated
+matrix multiplication with BF16-to-FP16 weight caching, plus compute shaders
+for element-wise work, ported from the author's earlier flux-2-4b project.
+
 ```{.c .numberLines startFrom="1"}
 /*
  * voxtral_metal.h - Metal GPU acceleration for Voxtral inference
@@ -236,11 +242,19 @@ This preamble contains comments and preprocessing setup that apply to the comple
 
 ### `#ifndef VOXTRAL_METAL_H`
 
+Standard include guard: together with the `#define` on the next line, the
+header's declarations are compiled at most once per translation unit no matter
+how many files include it.
+
 ```{.c .numberLines startFrom="9"}
 #ifndef VOXTRAL_METAL_H
 ```
 
 ### `#define VOXTRAL_METAL_H`
+
+Defines the guard macro and pulls in the header's only two dependencies:
+`stddef.h` for `size_t` and `stdint.h` for the `uint16_t` in which raw BF16
+weight words are passed across this API.
 
 ```{.c .numberLines startFrom="10"}
 #define VOXTRAL_METAL_H
@@ -252,12 +266,22 @@ This preamble contains comments and preprocessing setup that apply to the comple
 
 ### `#ifdef __cplusplus`
 
+If a C++ (or Objective-C++) file ever includes this header, `extern "C"`
+disables C++ name mangling so the declarations keep the plain C symbol names
+that `voxtral_metal.m` exports; under plain C the preprocessor drops the
+wrapper entirely.
+
 ```{.c .numberLines startFrom="15"}
 #ifdef __cplusplus
 extern "C" {
 ```
 
 ### `#endif`
+
+Ends the conditional section that opened the `extern "C"` block. From here to
+the bottom of the file, every declaration is preceded by a comment stating its
+contract — return values, ownership, required call order — and those comments
+are the documentation the C engine code is written against.
 
 ```{.c .numberLines startFrom="17"}
 #endif
@@ -325,7 +349,11 @@ void vox_metal_sgemm_bf16(int M, int N, int K,
 
 ### `void vox_metal_sgemm(…)`
 
-Float dense product against row-major transposed weights through Metal/MPS.
+The all-float32 sibling of `vox_metal_sgemm_bf16`: C[M,N] = A[M,K] @ B[N,K]^T
+with no precision conversion. B is uploaded once into the float weight cache
+and reused on every later call, so only the activations A travel to the GPU
+each time; the product itself runs through the same cached
+`MPSMatrixMultiplication` path.
 
 ```{.c .numberLines startFrom="47"}
 void vox_metal_sgemm(int M, int N, int K,
@@ -344,7 +372,11 @@ void vox_metal_sgemm(int M, int N, int K,
 
 ### `void vox_metal_fused_qkv_bf16(…)`
 
-Encodes Q, K, and V projections in one command buffer with shared input.
+Computes the three attention projections Q, K, and V from one shared input by
+recording all three matmuls into a single command buffer (the unit of work the
+CPU submits to the GPU). The input is uploaded once and the CPU blocks once
+instead of three times — the comment above prices this at two saved
+round-trips per call.
 
 ```{.c .numberLines startFrom="59"}
 void vox_metal_fused_qkv_bf16(int M, int K,
@@ -362,8 +394,11 @@ void vox_metal_fused_qkv_bf16(int M, int K,
 
 ### `void vox_metal_fused_norm_qkv_bf16(…)`
 
-Adds RMS normalization before fused Q/K/V projection while intermediates remain
-on GPU.
+Extends the fused QKV call by running RMS normalization first, inside the same
+command buffer: the rms_norm kernel writes the normalized vector into a GPU
+scratch buffer and the three projection matmuls read it from there. The
+intermediate never returns to the CPU, so norm plus projections cost one
+submission and one wait.
 
 ```{.c .numberLines startFrom="70"}
 void vox_metal_fused_norm_qkv_bf16(int M, int K,
@@ -412,8 +447,12 @@ void vox_metal_fused_ffn_bf16(int M, int dim, int hidden,
 
 ### `void vox_metal_fused_wo_ffn_bf16(…)`
 
-Fuses attention output projection, residual, conditioned norm, SwiGLU, and the
-second residual.
+One call covers the whole second half of a transformer layer: project the
+attention result through wo, add it into the residual `x`, re-normalize,
+optionally scale by the adaptive conditioning vector (1 + ada_scale), run the
+SwiGLU feed-forward, and add its output into `x` again. `x` is updated in
+place, and because every step is encoded into one command buffer the layer
+tail costs a single CPU/GPU synchronization.
 
 ```{.c .numberLines startFrom="104"}
 void vox_metal_fused_wo_ffn_bf16(int M, int dim, int q_dim, int hidden,
@@ -440,8 +479,12 @@ void vox_metal_fused_wo_ffn_bf16(int M, int dim, int q_dim, int hidden,
 
 ### `void vox_metal_batched_attention(…)`
 
-Computes all masked/windowed heads with strided matrix views, including mapping
-many query heads onto fewer K/V heads.
+Full attention — QK^T, causal/window-masked softmax, scores @ V — for every
+head in one command buffer. Instead of copying each head's columns out of the
+packed [seq, heads*head_dim] arrays, it builds strided matrix views (MPS
+matrix descriptors whose row stride is the full packed row, so a head's slice
+is addressed in place). When there are fewer K/V heads than query heads
+(grouped-query attention), several query heads read the same K/V slice.
 
 ```{.c .numberLines startFrom="124"}
 void vox_metal_batched_attention(float *out,
@@ -460,7 +503,10 @@ void vox_metal_batched_attention(float *out,
 
 ### `void vox_metal_encoder_attention(…)`
 
-Encoder-specialized single-dispatch attention with the same tensor contract.
+Same arguments and tensor layout as `vox_metal_batched_attention`, but the
+whole computation is a single custom-kernel dispatch instead of dozens of
+per-head MPS matmul encodes. For the encoder's 32 heads that removes most of
+the CPU-side encoding cost; the masking and grouped-query rules are identical.
 
 ```{.c .numberLines startFrom="136"}
 void vox_metal_encoder_attention(float *out,
@@ -479,8 +525,11 @@ void vox_metal_encoder_attention(float *out,
 
 ### `int vox_metal_fused_logits_bf16(…)`
 
-Applies final norm, vocabulary projection, and argmax on GPU; logits output is
-optional.
+The decoding head in one submission: final RMS norm, the logits matmul against
+the token-embedding matrix, and an argmax kernel that leaves the winning token
+id in a four-byte buffer. The function returns that id; `logits_out` may be
+NULL, in which case the vocabulary-sized logits array is never copied back —
+greedy decoding only needs the four bytes.
 
 ```{.c .numberLines startFrom="148"}
 int vox_metal_fused_logits_bf16(int dim, int vocab_size,
@@ -560,7 +609,11 @@ void vox_metal_decoder_wo_ffn_next_qkv(int dim, int q_dim, int hidden,
 
 ### `int vox_metal_decoder_wo_ffn_logits(…)`
 
-Final-layer fusion ending with vocabulary projection and selected token.
+Closes a persistent-x token step: encodes the last layer's wo+FFN update of
+the GPU-resident `x`, then the final norm, the vocabulary matmul, and the GPU
+argmax, all in one command buffer. Returns the chosen token id; as with
+`vox_metal_fused_logits_bf16`, passing NULL for `logits_out` skips the large
+logits download.
 
 ```{.c .numberLines startFrom="192"}
 int vox_metal_decoder_wo_ffn_logits(int dim, int q_dim, int hidden, int vocab_size,
@@ -711,6 +764,9 @@ size_t vox_metal_memory_used(void);
 
 ### `#ifdef __cplusplus`
 
+The closing brace of the `extern "C" {` region opened near the top of the
+header, again emitted only when a C++ compiler is reading the file.
+
 ```{.c .numberLines startFrom="260"}
 #ifdef __cplusplus
 }
@@ -718,12 +774,16 @@ size_t vox_metal_memory_used(void);
 
 ### `#endif`
 
+Ends the C++-only conditional around that closing brace.
+
 ```{.c .numberLines startFrom="262"}
 #endif
 
 ```
 
 ### `#endif /* VOXTRAL_METAL_H */`
+
+Terminates the include guard opened on line 9.
 
 ```{.c .numberLines startFrom="264"}
 #endif /* VOXTRAL_METAL_H */
@@ -808,6 +868,15 @@ This map gives the reading spine of the file. Line numbers refer to the original
 ### Translation-unit preamble {.unnumbered .unlisted}
 
 This translation-unit preamble selects dependencies, compile-time features, and file-local constants used by the definitions that follow.
+
+The imports bring in the three Apple frameworks (Foundation, Metal, and Metal
+Performance Shaders), this runtime's own headers — including the embedded
+shader source array — and `pthread.h`/`mach_time.h` for cache mutexes and
+timing. The rest of the preamble holds the first slice of the file's global state:
+the device and command queue, one pipeline-state global per compiled kernel,
+the persistent decoder hidden-state buffer `g_dec_x`, and the eight-slot table
+that maps shared allocations' CPU pointers back to their `MTLBuffer`s (the
+weight and activation caches add more globals further down the file).
 
 ```{.objective-c .numberLines startFrom="1"}
 /*
@@ -927,6 +996,18 @@ static inline uint16_t bf16_to_f16(uint16_t bf16) {
 ```
 
 ### `static void convert_bf16_to_f16(uint16_t *dst, const uint16_t *src, size_t n)`
+
+Bulk BF16-to-FP16 conversion behind every weight cache. The arm64 path
+exploits the formats' kinship — a bfloat16 word is exactly the top half of a
+float32 — so the loop widens eight values per iteration — two `vshll_n_u16` calls of
+four lanes each shift them 16 bits left into f32 lanes, and `vcvt_f16_f32` rounds them to f16 in hardware
+(round-to-nearest, slightly more accurate than the truncating scalar
+`bf16_to_f16`). Because this conversion dominates model-load time, tensors of
+two million elements or more are split into one-million-element chunks across
+cores with `dispatch_apply`, Grand Central Dispatch's parallel for-loop; the
+`^(size_t c){ ... }` argument is a C block (a function value that captures the
+surrounding variables), and each chunk re-enters this function below the
+threshold. Leftover elements and non-ARM builds use the scalar helper.
 
 ```{.objective-c .numberLines startFrom="104"}
 static void convert_bf16_to_f16(uint16_t *dst, const uint16_t *src, size_t n) {
@@ -2471,9 +2552,13 @@ int vox_metal_fused_logits_bf16(int dim, int vocab_size,
 
 ### `void vox_metal_fused_wo_ffn_bf16(…)`
 
-Allocates the complete residual/normalization/hidden scratch set, encodes output
-projection through the second residual in one command buffer, copies updated x
-back, and releases every pooled buffer.
+The standalone (non-persistent-x) form of a layer's second half: ten encoded
+steps in one command buffer. This page allocates the scratch set and encodes
+steps 1-4: proj = attn_out @ wo^T (an MPS matmul), x += proj (the residual
+add), x_norm = rms_norm(x, ffn_norm), and, when conditioning is present,
+x_norm *= (1 + ada_scale). Both `x` and `attn_out` are uploaded on entry; the
+continuation page carries the SwiGLU FFN, the second residual, the single
+commit/wait, and the copy of the updated `x` back to the caller.
 
 ```{.objective-c .numberLines startFrom="1397"}
 void vox_metal_fused_wo_ffn_bf16(int M, int dim, int q_dim, int hidden,
@@ -2599,6 +2684,13 @@ void vox_metal_fused_wo_ffn_bf16(int M, int dim, int q_dim, int hidden,
 ```
 
 ### Continuation of `void vox_metal_fused_wo_ffn_bf16(…)` {.unnumbered .unlisted}
+
+Steps 5-10, the SwiGLU feed-forward on the normalized vector: two MPS matmuls
+compute gate = x_norm @ w1^T and up = x_norm @ w3^T, two element-wise
+dispatches apply silu(gate) and gate *= up, a third matmul produces
+ffn_out = gate @ w2^T, and add_inplace folds it into x as the layer's second
+residual. One commit/wait then copies the updated x back to the caller and
+returns every scratch buffer to the pool.
 
 ```{.objective-c .numberLines startFrom="1517"}
         /* Step 5: gate = x_norm @ w1^T */
@@ -2775,11 +2867,15 @@ void vox_metal_decoder_end(void) {
 
 ### `static void encode_wo_ffn_steps(…)`
 
-Helper that appends the wo+FFN block for one layer onto an already-open command
-buffer, reading attn_out and updating g_dec_x in place. It prefers fused custom
-kernels when available (decoder_wo_residual, decoder_ffn_gate, decoder_w2_residual)
-and otherwise falls back to MPS matmuls with separate silu/mul/add dispatches.
-Uses memoryBarrierWithScope between dependent dispatches in the same encoder.
+Helper that appends the wo+FFN block for one layer onto an already-open
+command buffer, reading attn_out and updating the GPU-resident g_dec_x in
+place. It prefers the fused custom kernels when their pipelines compiled —
+decoder_wo_residual, decoder_ffn_gate, and decoder_w2_residual each perform a
+matrix-vector product and its surrounding residual/activation work in a single
+pass — and otherwise falls back to MPS matmuls with separate silu/mul/add
+dispatches. Dependent dispatches inside one compute encoder are ordered with
+`memoryBarrierWithScope`, a fence guaranteeing that earlier dispatches' buffer
+writes are visible to later ones.
 
 ```{.objective-c .numberLines startFrom="1669"}
 static void encode_wo_ffn_steps(id<MTLCommandBuffer> cmdBuffer,
@@ -2888,6 +2984,14 @@ static void encode_wo_ffn_steps(id<MTLCommandBuffer> cmdBuffer,
 ```
 
 ### Continuation of `static void encode_wo_ffn_steps(…)` {.unnumbered .unlisted}
+
+The FFN half, with a fast and a fallback path at each end. If the fused
+decoder_ffn_gate pipeline exists, one dispatch reads the merged [w1;w3]
+weights and writes silu(x_norm @ w1^T) * (x_norm @ w3^T) straight into
+bufGate; otherwise a single merged matmul fills [gate; up] and separate
+silu/mul dispatches combine the buffer's two halves through byte offsets. The
+down projection mirrors this: decoder_w2_residual folds gate @ w2^T into
+g_dec_x in one pass, or an MPS matmul plus add_inplace does it in two.
 
 ```{.objective-c .numberLines startFrom="1772"}
     /* Step 5+6+7+8: FFN gate in one kernel (fallback to old path if unavailable). */
@@ -3361,10 +3465,13 @@ int vox_metal_decoder_wo_ffn_logits(int dim, int q_dim, int hidden, int vocab_si
 
 ### `void vox_metal_batched_attention(…)`
 
-Classic three-stage attention in one command buffer using MPS matmuls: per-head
-strided QK^T into a scores buffer, one causal_softmax compute dispatch over all
-(head, query) rows, then per-head scores@V. Q/K/V/out use strided MPSMatrix views
-into packed buffers via per-head byte offsets, with GQA mapping kv_h = h/gqa_ratio.
+Classic three-stage attention in one command buffer using MPS matmuls: a
+per-head strided QK^T fills a scores buffer, one causal_softmax compute
+dispatch normalizes all (head, query) rows, then per-head scores @ V produces
+the output. Q/K/V/out are never deinterleaved: each head is addressed through
+a strided MPSMatrix view (a descriptor whose row stride is the full packed
+row, plus a per-head byte offset). Grouped-query attention — more query heads
+than K/V heads — is handled by pointing head h at K/V head h / gqa_ratio.
 
 ```{.objective-c .numberLines startFrom="2201"}
 void vox_metal_batched_attention(float *out,
@@ -3538,8 +3645,12 @@ void vox_metal_batched_attention(float *out,
 
 ### `void vox_metal_encoder_attention(…)`
 
-Uploads Q/K/V, dispatches one tiled compute grid across all encoder heads and
-query blocks, downloads output after one completion wait, and releases scratch.
+Uploads Q/K/V and runs the entire attention as one compute dispatch instead of
+the per-head MPS encodes of `vox_metal_batched_attention` — the section
+comment prices the old path at 64 matmul encodes for the encoder's heads. The
+grid is one 64-thread threadgroup per (head, block of 8 query rows), matching
+the shader's ATTN_BQ tiling; after a single commit/wait the output is copied
+back and the scratch buffers return to the pool.
 
 ```{.objective-c .numberLines startFrom="2368"}
 void vox_metal_encoder_attention(float *out,
@@ -3825,6 +3936,17 @@ int vox_metal_decoder_full_step(void *ctx_ptr, const float *rope_freqs, float *l
 ```
 
 ### Continuation of `int vox_metal_decoder_full_step(void *ctx_ptr, const float *rope_freqs, float *logits_out)` {.unnumbered .unlisted}
+
+Still inside each layer's compute encoder: the rotated K and V rows are copied
+into the shared KV cache at this layer's slot for the current position (using
+the f16 copy kernel when the half-precision cache is active), a second barrier
+publishes those writes, and decoder_attention computes the whole single-token
+attention with one 32-thread threadgroup per head reading the cache in place.
+After the 26-layer loop the code appends the last layer's wo+FFN, the final
+rms_norm of g_dec_x, the logits matmul against the cached f16 token-embedding
+matrix, and argmax_f32, then commits once and waits; the CPU reads back the
+4-byte token id (plus full logits only on request) and records the new cache
+length pos + 1.
 
 ```{.objective-c .numberLines startFrom="2604"}
                 /* Write K to KV cache (from bufQKV at off_k) */
@@ -4116,6 +4238,16 @@ int vox_metal_encoder_full_step(void *ctx_ptr, float *x, int new_len,
 
 ### Continuation of `int vox_metal_encoder_full_step(…)` {.unnumbered .unlisted}
 
+The interior of each encoder layer's combined Q/K/V pass — one compute encoder
+with barriers between phases: strided bias adds put wq_bias on the Q columns
+and wv_bias on the V columns of the packed QKV rows (the encoder, unlike the
+decoder, carries bias vectors), batched RoPE rotates the Q then K slices with
+one thread per (position, head, dimension-pair), strided copy kernels append
+the M new K and V rows to this layer's region of the shared cache, and
+encoder_attention_qstrided runs all heads with one 64-thread group per
+(head, 8-query block). q_offset is the physical cache index, because window
+masking must use the same coordinates the cache rows are stored under.
+
 ```{.objective-c .numberLines startFrom="2877"}
                 /* Q slice += wq_bias */
                 int total_q = M * qkv_dim;
@@ -4239,6 +4371,14 @@ int vox_metal_encoder_full_step(void *ctx_ptr, float *x, int new_len,
 ```
 
 ### Continuation of `int vox_metal_encoder_full_step(…)` {.unnumbered .unlisted}
+
+Per-layer steps 4 and 5, plus the start of the FFN: an MPS matmul applies the
+output projection wo, then one encoder adds wo_bias, folds the projection into
+the residual x, and re-normalizes into bufXnorm, with barriers because each
+dispatch reads its predecessor's output. Step 6 opens with a single matmul
+against the merged [w1;w3] buffer — each output row holds gate and up side by
+side, hidden*2 wide — and silu_mul_merged collapses every pair to
+silu(gate) * up in place.
 
 ```{.objective-c .numberLines startFrom="2996"}
             /* Step 4: wo projection */
@@ -4372,6 +4512,15 @@ int vox_metal_encoder_full_step(void *ctx_ptr, float *x, int new_len,
 ```
 
 ### Continuation of `int vox_metal_encoder_full_step(…)` {.unnumbered .unlisted}
+
+The down projection reads bufGate through a strided matrix descriptor —
+rowBytes is hidden*2 floats, so the matmul consumes only each row's combined
+gate half without compacting the buffer first — and a final encoder adds
+w2_bias plus the second residual into x. After the 32-layer loop one more
+rms_norm writes the result into bufXnorm, and the single commit/wait runs,
+timed with mach_absolute_time and reported at verbose level 2 as encode versus
+commit+wait milliseconds. The output is copied back from bufXnorm because that
+is where the final norm wrote.
 
 ```{.objective-c .numberLines startFrom="3124"}
                 /* ffn_out = gate @ w2^T (strided read: rowBytes = hidden*2) */
@@ -4629,6 +4778,16 @@ void vox_metal_decoder_prefill_step(void *ctx_ptr, float *x, int seq_len,
 
 ### Continuation of `void vox_metal_decoder_prefill_step(…)` {.unnumbered .unlisted}
 
+Inside each layer's RoPE/cache/attention encoder: batched RoPE rotates the Q
+and K slices of the packed QKV rows in place, a barrier publishes the
+rotation, strided copy kernels append the M new K and V rows to this layer's
+region of the decoder cache (f16 variants when the half-precision cache is
+enabled), and after another barrier the attention dispatch reuses the
+encoder's q-strided kernel with one 128-thread group per (head, 8-query
+block). q_offset is kv_pos_offset + start_pos, so causal and sliding-window
+masks see absolute token positions rather than buffer indices. The page ends
+with the wo projection matmul and the opening of the residual/norm encoder.
+
 ```{.objective-c .numberLines startFrom="3364"}
                 /* Batched RoPE on packed Q slice */
                 [enc_cmd setComputePipelineState:g_batched_rope_apply_strided_pipeline];
@@ -4763,6 +4922,16 @@ void vox_metal_decoder_prefill_step(void *ctx_ptr, float *x, int seq_len,
 ```
 
 ### Continuation of `void vox_metal_decoder_prefill_step(…)` {.unnumbered .unlisted}
+
+The layer's tail: add_inplace folds the wo projection into the residual x,
+rms_norm re-normalizes into bufXnorm, and when the model carries an ada_scale
+conditioning table the normalized rows are multiplied by
+(1 + ada_scale[layer]) — the same conditioned-norm sequence the single-token
+path uses. The FFN then repeats the merged pattern ([gate;up] matmul,
+silu_mul_merged, strided w2 read, residual add), the 26-layer loop closes, and
+after the one commit/wait the updated hidden states are copied back and
+ctx->kv_cache_len advances by seq_len, so the next decode step appends behind
+the prefilled positions.
 
 ```{.objective-c .numberLines startFrom="3494"}
                 /* x += proj_out */
@@ -5107,6 +5276,14 @@ void vox_metal_warmup_decoder_ops(void *ctx_ptr) {
 
 ### Continuation of `void vox_metal_warmup_decoder_ops(void *ctx_ptr)` {.unnumbered .unlisted}
 
+The decoder half of the dummy-matmul warmup: it materializes layer 0's merged
+QKV, wo, merged [w1;w3], and w2 weight buffers, then encodes one matmul of
+each shape at the prefill width M=38 and waits — actually executing a shape is
+what triggers Metal's GPU pipeline compilation, so the cost lands here instead
+of in the first real prefill. The closing loop pre-uploads every encoder
+layer's attention and FFN norm vectors, plus the final encoder norm, into the
+f32 weight cache.
+
 ```{.objective-c .numberLines startFrom="3799"}
             id<MTLBuffer> dwQKV = get_merged_f16_3(
                 dl->wq_weight_bf16, (size_t)q_dim * dim,
@@ -5258,6 +5435,13 @@ Line numbers refer to the decoded Metal source listed below.
 
 This translation-unit preamble selects dependencies, compile-time features, and file-local constants used by the definitions that follow.
 
+The header comment states the file's job: small GPU kernels for the element-wise
+work between MPS matrix multiplications, so intermediate tensors never detour
+through the CPU. `#include <metal_stdlib>` pulls in Metal's standard library
+(math functions, the 16-bit `half` type, the SIMD reduction intrinsics), and
+`using namespace metal` makes those names usable without a `metal::` prefix —
+the only setup the whole shader file needs.
+
 ```{.cpp .numberLines startFrom="1"}
 /*
  * voxtral_shaders.metal - Metal compute shaders for Voxtral inference
@@ -5278,11 +5462,20 @@ using namespace metal;
 
 ### `kernel void rms_norm(…)`
 
-Computes out = x * rsqrt(mean(x^2)+eps) * weight with one threadgroup per row.
-Each thread strides over the hidden dimension accumulating a partial sum of
-squares into shared memory, then a 256-wide tree reduction yields the row sum; the
-row is rescaled by weight in a second strided pass. The two barriers bracket the
-reduction, and the threadgroup width need not divide hidden.
+Computes RMSNorm — out = x * rsqrt(mean(x²)+eps) * weight — with one threadgroup
+(a block of threads sharing a small fast on-chip memory and able to synchronize)
+per sequence row; `row` is `threadgroup_position_in_grid` (which group this is),
+`tid` the thread's index inside the group, and the `[[buffer(n)]]` attributes
+number the argument slots the host binds each tensor to. Each of the 256 threads
+strides over the row accumulating a private sum of squares into the `shared_sum`
+scratch array; the halving loop is a tree reduction — after each
+`threadgroup_barrier` (a checkpoint no thread passes until all arrive, which
+makes the scratch writes visible) the live half of the threads fold their
+neighbor's slot into their own until slot 0 holds the whole row's sum. Every
+thread then reads that total, forms the inverse root-mean-square, and rescales
+its strided slice by it and the learned per-channel weight. The two barriers
+bracket the reduction, and the strided loops mean the group width need not
+divide `hidden`.
 
 ```{.cpp .numberLines startFrom="16"}
 kernel void rms_norm(
@@ -5330,9 +5523,14 @@ kernel void rms_norm(
 
 ### `kernel void silu(…)`
 
-In-place SiLU activation x = x/(1+exp(-x)), one thread per element with a gid < n
-bounds guard so an over-dispatched grid leaves the tail untouched. Plain
-elementwise map over a flat buffer.
+In-place SiLU activation x = x/(1+exp(-x)), the feed-forward gate nonlinearity.
+The grid is one thread per array element: `gid` is `thread_position_in_grid` —
+this thread's own index across the whole dispatch — and doubles as the element
+index, while the `[[buffer(n)]]` numbers are the argument slots the host fills.
+The `gid < n` guard is defensive: this host dispatches exactly n threads
+(`dispatchThreads`, Metal's non-uniform threadgroups API), so no out-of-range
+thread is ever launched; the guard only matters if a future host rounded the
+grid up to whole threadgroups.
 
 ```{.cpp .numberLines startFrom="57"}
 kernel void silu(
@@ -5354,9 +5552,14 @@ kernel void silu(
 
 ### `kernel void gelu(…)`
 
-In-place tanh-approximation GELU, one thread per element with a gid < n guard.
-Uses the standard 0.5*x*(1+tanh(sqrt(2/pi)*(x+0.044715*x^3))) form with the
-sqrt(2/pi) constant baked in as 0.7978845608.
+In-place GELU (a smooth bell-curve gating nonlinearity used in transformer
+feed-forward layers, similar in role to SiLU) in its standard tanh
+approximation 0.5*x*(1+tanh(sqrt(2/pi)*(x+0.044715*x³))), with the sqrt(2/pi)
+constant baked in as 0.7978845608. One thread per element: `gid`
+(`thread_position_in_grid`, the thread's index across the dispatch) selects the
+element, and the `gid < n` guard is defensive (this kernel's pipeline is
+compiled but the current host never dispatches it — GELU runs on the CPU and
+inside fused kernels instead).
 
 ```{.cpp .numberLines startFrom="72"}
 kernel void gelu(
@@ -5380,8 +5583,11 @@ kernel void gelu(
 
 ### `kernel void add_inplace(…)`
 
-Elementwise a[i] += b[i] over n elements, one thread per index with a bounds
-guard. Used between MPS matmuls to fold residual adds without a CPU round-trip.
+Elementwise a[i] += b[i] over n elements, one thread per index (`gid`, the
+thread's position in the dispatch grid) with a bounds guard. Its reason to exist
+is the residual add: transformer layers compute x = x + f(x), and running this
+trivial kernel between MPS matmuls folds that add on the GPU instead of copying
+both tensors back to the CPU just to sum two arrays.
 
 ```{.cpp .numberLines startFrom="89"}
 kernel void add_inplace(
@@ -5397,8 +5603,11 @@ kernel void add_inplace(
 
 ### `kernel void mul_inplace(…)`
 
-Elementwise a[i] *= b[i] over n elements, one thread per index with a bounds
-guard. Used to apply the SwiGLU gate*up product on the GPU.
+Elementwise a[i] *= b[i], the same one-thread-per-element shape as add_inplace.
+It applies the SwiGLU product (the feed-forward design where one projection
+"gates" another by elementwise multiplication): a holds the silu-activated gate
+and b the up projection, so after this kernel a is ready for the down
+projection — all without leaving the GPU.
 
 ```{.cpp .numberLines startFrom="98"}
 kernel void mul_inplace(
@@ -5415,9 +5624,12 @@ kernel void mul_inplace(
 
 ### `kernel void ada_scale_mul(…)`
 
-Adaptive-RMSNorm conditioning: x[i] *= (1 + scale[i % stride]), so a per-channel
-scale vector of length stride is broadcast across rows. One thread per element
-with a bounds guard.
+Adaptive-RMSNorm conditioning: x[i] *= (1 + scale[i % stride]). The scale
+vector is one entry per channel (length `stride`) and the modulo replays it
+across every row, so a whole [rows, stride] tensor is conditioned in one
+dispatch with one thread per element (`gid`, the thread's grid position, with a
+bounds guard). The "1 +" makes a zero scale the identity — the model learns a
+correction around "leave it unchanged" rather than an absolute gain.
 
 ```{.cpp .numberLines startFrom="108"}
 kernel void ada_scale_mul(
@@ -5439,10 +5651,15 @@ kernel void ada_scale_mul(
 
 ### `kernel void argmax_f32(…)`
 
-Single-threadgroup argmax over a float array. Each lane scans a strided slice
-tracking its local best value and index into parallel shared arrays, then a
-256-wide tree reduction keeps the (value, index) pair with the larger value. Lane
-0 writes the winning index to out[0].
+Finds the index of the largest float in an array — greedy token selection done
+on the GPU so only the winning index, not the whole logits row, returns to the
+CPU at the end of a decode step. A single threadgroup (a block of cooperating
+threads with shared scratch memory) does the whole job: each thread scans a
+strided slice keeping its private best (value, index) pair in the parallel
+shared arrays, then a tree reduction — repeatedly halving the live thread count
+with a `threadgroup_barrier` (an all-arrive checkpoint) between rounds — keeps
+whichever pair holds the larger value. Thread 0 writes the surviving index to
+out[0].
 
 ```{.cpp .numberLines startFrom="123"}
 kernel void argmax_f32(
@@ -5493,11 +5710,18 @@ kernel void argmax_f32(
 
 ### `kernel void causal_softmax(…)`
 
-Numerically stable masked softmax over attention scores, one threadgroup per
-(query, head) flattened as group_id = head*seq_q + qi. Phase 1 masks each key
-outside [valid_start, valid_end] to -INFINITY (causal limit plus optional sliding
-window) and reduces the row max; phase 2 exponentiates and reduces the sum; phase
-3 normalizes by 1/(sum+1e-10). All three passes stride over seq_k.
+Turns rows of raw attention scores into probabilities for the path that
+materializes the full score matrix (vox_metal_batched_attention). Softmax must
+subtract the row maximum before exponentiating or exp() overflows, so each row
+runs three phases with tree reductions in shared scratch between them: phase 1
+overwrites every key outside [valid_start, valid_end] with -INFINITY — the
+causal rule (a query may only attend to keys at or before its own position)
+plus the optional sliding window (keys more than window_size-1 positions back
+are also hidden) — while reducing the row max; phase 2 replaces each entry with
+exp(x - max) while reducing the sum; phase 3 multiplies by 1/(sum+1e-10), the
+epsilon protecting a fully masked row. One threadgroup (cooperating thread
+block with barriers) per (query, head) pair, decoded from group_id =
+head*seq_q + qi; every phase strides over seq_k so any row length works.
 
 ```{.cpp .numberLines startFrom="167"}
 kernel void causal_softmax(
@@ -5567,10 +5791,13 @@ kernel void causal_softmax(
 
 ### `kernel void rope_apply(…)`
 
-Applies rotary position embedding in place to one position's [n_heads, head_dim]
-vector, one thread per (head, half-dim) pair. Each thread rotates the adjacent
-pair at indices 2i, 2i+1 by the (cos,sin) read from freqs. Threads beyond
-n_heads*head_dim/2 return early.
+Applies RoPE — rotary position embedding, which encodes "where in the sequence
+this token sits" by rotating each adjacent pair of vector components through an
+angle that grows with position — to one token's [n_heads, head_dim] block of Q
+or K, in place. freqs supplies the precomputed (cos, sin) for each pair index
+at this position; one thread per (head, pair) applies the standard 2-D rotation
+to elements 2i and 2i+1. Threads past n_heads*head_dim/2 return immediately — a defensive guard, since
+this host dispatches exactly that many threads via `dispatchThreads`.
 
 ```{.cpp .numberLines startFrom="230"}
 kernel void rope_apply(
@@ -5607,10 +5834,13 @@ kernel void rope_apply(
 
 ### `kernel void kv_cache_copy(…)`
 
-Writes kv_dim freshly projected f32 K (or V) values into the large cache buffer at
-float_offset+gid, one thread per element with a gid < kv_dim guard. The host
-computes float_offset from layer, position, and kv_dim so each token lands at its
-slot.
+Appends one token's freshly projected K (or V) vector to the KV cache — the
+per-layer store of every earlier position's key/value vectors, which attention
+re-reads on every later step. One thread per element copies data[gid] to
+cache[float_offset+gid], with a defensive gid < kv_dim guard (the host dispatches exactly kv_dim
+threads via `dispatchThreads`); the host computes float_offset from layer, position, and kv_dim so each token lands
+in its own slot. Doing the copy as a kernel keeps the cache write inside the
+same GPU command stream as the matmul that produced the data.
 
 ```{.cpp .numberLines startFrom="260"}
 kernel void kv_cache_copy(
@@ -5629,8 +5859,11 @@ kernel void kv_cache_copy(
 
 ### `kernel void kv_cache_copy_f16(…)`
 
-Same as kv_cache_copy but narrows each f32 value to half on store into an f16
-cache, halving KV memory bandwidth and footprint. Bounds-guarded by kv_dim.
+The same single-token cache append, but the destination is `device half *` —
+half is 16-bit floating point, two bytes instead of float's four — and
+half(data[gid]) rounds each value on store. This halves both the cache's
+footprint and the bytes attention must stream back per step; the precision loss
+is confined to the cached K/V, since arithmetic elsewhere stays f32.
 
 ```{.cpp .numberLines startFrom="272"}
 kernel void kv_cache_copy_f16(
@@ -5657,12 +5890,29 @@ kernel void kv_cache_copy_f16(
 
 ### `kernel void decoder_attention(…)`
 
-Single-token (seq_q=1) attention, one threadgroup of 32 threads (one SIMD group)
-per query head, with head_dim=128 so each lane owns 4 dims. It walks keys in
-[valid_start, valid_end] (causal plus sliding window) in one online-softmax pass:
-each step computes a SIMD-reduced q.k dot, rescales the running max/sum/accumulators
-by exp(old_max-new_max), and adds the weighted V. Keeping everything in one SIMD
-group avoids any threadgroup barriers.
+The hot kernel of decoding: attention for one new token (seq_q=1) against the
+whole KV cache (the stored key/value vectors of every earlier position). Each
+query head gets one threadgroup of exactly 32 threads — a single SIMD group,
+the bundle the hardware runs in lockstep, whose lanes can combine values with
+simd_sum without barriers or shared memory; that is why this kernel needs no
+threadgroup_barrier at all. head_dim is 128, so lane `tid` owns dimensions tid,
+tid+32, tid+64, tid+96 and preloads its four Q components; kv_head maps the
+query head to its cache head, because grouped-query attention (GQA) lets
+gqa_ratio query heads share one cached K/V head to shrink the cache.
+
+The loop is a single pass over the valid keys — causal (j ≤ q_pos) plus the
+optional sliding window. Per key j: each lane multiplies its four Q components
+with the matching K components and simd_sum folds the 32 partials into the full
+128-term dot product, scaled by the host-supplied scale (1/sqrt(head_dim)).
+Softmax needs the row maximum before any exp, which a streaming pass cannot
+know in advance, so the kernel keeps an *online softmax*: a running max, a
+running sum of exp(score-max), and four output accumulators. Whenever a new
+score raises the max, correction = exp(old_max-new_max) shrinks the sum and
+accumulators so earlier work stays measured against the new reference; then
+weight = exp(score-max) joins the sum and weight*V[j] joins the accumulators.
+After the loop the accumulators hold exactly the weighted V sum, so dividing by
+running_sum (+1e-10 against an all-masked row) yields the softmax average, and
+each lane writes its four output dimensions.
 
 ```{.cpp .numberLines startFrom="292"}
 kernel void decoder_attention(
@@ -5749,9 +5999,15 @@ kernel void decoder_attention(
 
 ### `kernel void decoder_attention_f16(…)`
 
-Identical online-softmax single-token attention to decoder_attention but reads the
-K and V caches as half and converts to float in the dot product and V accumulation.
-Q stays f32. Used when ctx->kv_cache_fp16 selects the f16 KV path.
+The identical algorithm to decoder_attention — one 32-thread SIMD group (the
+hardware's lockstep bundle) per query head, four dimensions per lane, one
+online-softmax pass (running max and sum, with exp(old_max-new_max) rescaling)
+over the causally valid keys — except K_cache and V_cache are typed
+`device const half *` (16-bit floats) and every load is widened with float()
+before the dot product and the V accumulation, so all arithmetic still runs in
+f32. Q and the output stay f32 throughout. The host dispatches this variant
+when ctx->kv_cache_fp16 selected the half-precision KV cache; the benefit is
+purely bandwidth — half the cache bytes streamed per generated token.
 
 ```{.cpp .numberLines startFrom="372"}
 kernel void decoder_attention_f16(
@@ -5846,11 +6102,31 @@ kernel void decoder_attention_f16(
 
 ### `kernel void encoder_attention(…)`
 
-Q-tiled batched attention: one threadgroup per (head, query-block of ATTN_BQ=8
-queries). Each thread holds one head_dim element of all 8 queries; per key it
-computes 8 cooperative SIMD dot products, reduces across SIMD groups into 8 scaled
-scores, then updates each query's online-softmax state and accumulates V. Per-query
-causal/window masking is applied inside the loop. Supports head_dim 64 or 128.
+Batched attention for whole sequences (encoder layers and decoder prefill),
+tiled so memory traffic is shared: one threadgroup (a thread block with common
+scratch memory and barriers) per (head, block of ATTN_BQ=8 consecutive
+queries), so every K and V vector fetched serves eight queries instead of one.
+The group has one thread per head_dim element — 64 threads (2 SIMD groups) or
+128 (4), a SIMD group being a 32-thread lockstep bundle with its own register
+level reduction, simd_sum. Each thread preloads its single component of all
+eight query vectors (q_vals) and keeps eight independent online-softmax states:
+running max rmax, running sum rsum, and one output-component accumulator acc
+per query. The loop bounds are the union of the eight queries' causal/window
+key ranges.
+
+Per key j, three sub-steps. Dot products: every thread multiplies its K
+component by each of its eight Q components; simd_sum folds each product across
+a SIMD group's 32 lanes, and lane 0 parks the per-group partial in the tg_simd
+scratch array. After a threadgroup_barrier (the all-arrive checkpoint that
+makes scratch writes visible), the first eight threads each finish one score by
+summing across SIMD groups and applying scale (1/sqrt(head_dim)) into
+tg_scores; a second barrier publishes them. Masking and accumulation: each
+thread loads its V component once, then for each query — skipping keys outside
+that query's own causal/window range — runs the online-softmax update: if the
+score raises rmax, corr = exp(old_max-new_max) rescales rsum and acc so earlier
+contributions stay consistent, then exp(score-max) joins the sum and, times the
+V component, the accumulator. Finally each thread writes its component of all
+eight output rows, dividing by rsum + 1e-10.
 
 ```{.cpp .numberLines startFrom="460"}
 kernel void encoder_attention(
@@ -5968,9 +6244,13 @@ kernel void encoder_attention(
 
 ### `kernel void encoder_attention_kv_f16(…)`
 
-Same Q-tiled batched attention as encoder_attention but with half-precision K and
-V (converted to float on load); Q and output stay f32. Used for the f16 KV-cache
-encoder/prefill path.
+The same Q-tiled batched attention as encoder_attention — eight queries per
+threadgroup, two-barrier cooperative score reduction, per-query online softmax
+(running max/sum with exp-rescaling) — but K and V are `device const half *`
+(16-bit floats), widened with float() as each component is loaded, so the
+arithmetic and the output remain f32. Q stays f32 too. This serves the
+half-precision KV-cache encoder/prefill path, where halving the cached bytes
+halves the memory traffic the loop spends streaming K and V.
 
 ```{.cpp .numberLines startFrom="571"}
 kernel void encoder_attention_kv_f16(
@@ -6079,11 +6359,14 @@ kernel void encoder_attention_kv_f16(
 
 ### `kernel void encoder_attention_qstrided(…)`
 
-Q-tiled batched attention variant that reads Q from a strided/offset layout, so Q
-can be a column slice of a wider packed QKV buffer while output is written to its
-own contiguous tensor. Otherwise identical online-softmax, GQA, and masking logic
-to encoder_attention. This lets the monolithic encoder/prefill steps feed the
-merged QKV buffer directly without deinterleaving Q.
+The same Q-tiled attention as encoder_attention with two extra constants,
+q_stride and q_col_offset, that change only where Q is read: query row qi
+starts at qi*q_stride + q_col_offset instead of qi*(n_heads*head_dim). That
+lets Q stay in place as a column slice of the merged QKV matmul output (one
+wide row holding Q, K, and V side by side), so the monolithic encoder/prefill
+steps skip the deinterleave copy that would otherwise extract Q into its own
+tensor first. The output is still written contiguously, and the masking, GQA
+head sharing, and online-softmax phases are unchanged.
 
 ```{.cpp .numberLines startFrom="673"}
 kernel void encoder_attention_qstrided(
@@ -6194,9 +6477,14 @@ kernel void encoder_attention_qstrided(
 
 ### `kernel void encoder_attention_kv_f16_qstrided(…)`
 
-Encoder attention variant reading strided Q projections and FP16 cached K/V.
-The grid tiles query rows per head and converts half cache values during float
-accumulation.
+The fourth member of the encoder_attention family combines both variations: Q
+is read through q_stride/q_col_offset directly out of the packed QKV buffer (no
+deinterleave copy), and K/V are half (16-bit floats) widened with float() on
+load, with all arithmetic and the output still f32. The eight-query tiling, the
+two-barrier cooperative score reduction, and the per-query online-softmax
+updates are byte-for-byte the same as encoder_attention; only the Q addressing
+and the K/V element type differ. The host selects it when the KV cache is kept
+in f16.
 
 ```{.cpp .numberLines startFrom="777"}
 kernel void encoder_attention_kv_f16_qstrided(
@@ -6312,9 +6600,12 @@ kernel void encoder_attention_kv_f16_qstrided(
 
 ### `kernel void bias_add(…)`
 
-Adds a per-column bias to a row-major [seq_len, dim] tensor as data[gid] +=
-bias[gid % dim], one thread per element with a bounds guard. The modulo broadcasts
-the dim-length bias across all rows.
+Adds a learned per-channel bias to every row of a [seq_len, dim] tensor: thread
+gid (its index in the dispatch grid) owns one element and adds bias[gid % dim],
+the modulo replaying the dim-length bias vector across all rows; the total
+guard covers the rounded-up grid. The host uses it to finish a linear layer's
++b term right after the MPS matmul that computed x*W, keeping the whole layer
+on the GPU.
 
 ```{.cpp .numberLines startFrom="886"}
 kernel void bias_add(
@@ -6333,10 +6624,12 @@ kernel void bias_add(
 
 ### `kernel void bias_add_strided(…)`
 
-Bias-add restricted to a column slice of a wider row stride: thread gid maps to
-(row, col) within chunk_cols and writes data[row*row_stride + col_offset + col] +=
-bias[col]. Lets the host add wq/wv biases to just the Q or V slice of a packed QKV
-buffer without touching the other slices.
+The slice-aware bias add for the packed QKV layout: gid maps to (row, col)
+within a chunk_cols-wide window, and the write lands at
+row*row_stride + col_offset + col. Because the merged QKV matmul leaves Q, K,
+and V side by side in one wide row, the host points col_offset at just the Q or
+V columns and adds wq's or wv's bias there without disturbing the neighboring
+slices.
 
 ```{.cpp .numberLines startFrom="898"}
 kernel void bias_add_strided(
@@ -6364,10 +6657,13 @@ kernel void bias_add_strided(
 
 ### `kernel void batched_rope_apply(…)`
 
-Applies RoPE to a whole [seq_len, n_heads, head_dim] batch, one thread per
-(position, head, half-dim) triple decoded from a flat gid. Per-position (cos,sin)
-pairs are indexed from freqs, and the adjacent pair is rotated. Over-dispatched
-threads past total return early.
+The whole-sequence version of rope_apply, for when many positions are processed
+at once (encoder and prefill): one thread per (position, head, component-pair)
+triple, all decoded by division and modulo from the flat grid index gid. Unlike
+the single-token kernel, freqs holds a (cos, sin) pair per position per pair
+index, so each row is rotated by its own position's angles — RoPE encodes
+position by rotating adjacent component pairs through position-dependent
+angles. Threads past the total return early.
 
 ```{.cpp .numberLines startFrom="919"}
 kernel void batched_rope_apply(
@@ -6403,10 +6699,11 @@ kernel void batched_rope_apply(
 
 ### `kernel void batched_rope_apply_strided(…)`
 
-Batched RoPE that targets a column slice of a strided buffer: the element base
-becomes pos*row_stride + col_offset + head*head_dim, so Q or K can be rotated in
-place inside a packed QKV layout. Frequency indexing and the pairwise rotation
-match batched_rope_apply.
+Batched RoPE re-addressed for the packed QKV buffer: the element base becomes
+pos*row_stride + col_offset + head*head_dim, so the Q (or K) columns can be
+rotated in place inside the wide merged row — Q, K, and V sitting side by side
+after one matmul — instead of being copied out first. The frequency lookup and
+the pairwise rotation are exactly batched_rope_apply's.
 
 ```{.cpp .numberLines startFrom="948"}
 kernel void batched_rope_apply_strided(
@@ -6449,9 +6746,12 @@ kernel void batched_rope_apply_strided(
 
 ### `kernel void batched_kv_cache_copy(…)`
 
-Copies a contiguous [seq_len, kv_dim] block of new K or V into the cache at
-cache_offset+gid, one thread per element over total with a guard. The host
-computes cache_offset from layer and starting position.
+Bulk version of kv_cache_copy: appends a whole [seq_len, kv_dim] block of new K
+or V rows to the KV cache (the store of every earlier position's key/value
+vectors that attention re-reads) in one dispatch, one thread per element with a
+guard over total. The host computes cache_offset from layer and starting
+position; prefill and the encoder use it whenever many positions arrive at
+once.
 
 ```{.cpp .numberLines startFrom="984"}
 kernel void batched_kv_cache_copy(
@@ -6470,8 +6770,10 @@ kernel void batched_kv_cache_copy(
 
 ### `kernel void batched_kv_cache_copy_f16(…)`
 
-Copies contiguous batched K/V float projections into FP16 cache rows at the
-specified start position, one thread per scalar.
+The same bulk cache append with the destination typed half (16-bit floating
+point, two bytes per value instead of four): half(data[gid]) rounds each f32 on
+store. One thread per scalar; the rounding halves the cache's memory and the
+bandwidth every later attention step spends streaming it back.
 
 ```{.cpp .numberLines startFrom="996"}
 kernel void batched_kv_cache_copy_f16(
@@ -6490,11 +6792,13 @@ kernel void batched_kv_cache_copy_f16(
 
 ### `kernel void batched_kv_cache_copy_strided(…)`
 
-Gathers a column slice from a strided source (the K or V slice of a packed QKV
-buffer) into a contiguous cache region: thread gid maps to (row, col) within
-chunk_cols and reads from the strided source, writing cache[cache_offset+gid].
-Lets the monolithic steps write K and V to cache directly from the merged QKV
-buffer.
+Bulk cache append that gathers its source from a column slice: gid maps to
+(row, col) inside a chunk_cols window, reads
+data[row*src_stride + src_col_offset + col], and writes the cache contiguously
+at cache_offset+gid. This lets the monolithic steps copy the K and V slices
+straight out of the merged QKV matmul output — where Q, K, and V share one wide
+row — into the cache, the strided read doing the deinterleave for free during
+the copy.
 
 ```{.cpp .numberLines startFrom="1008"}
 kernel void batched_kv_cache_copy_strided(
@@ -6517,8 +6821,12 @@ kernel void batched_kv_cache_copy_strided(
 
 ### `kernel void batched_kv_cache_copy_strided_f16(…)`
 
-Same float-to-FP16 cache write when K and V occupy slices of a larger merged QKV
-row; explicit source strides/offsets avoid deinterleaving on CPU.
+Combines the slice gather and the precision narrowing in one kernel: each
+thread reads its K or V element out of the wide merged QKV row
+(row*src_stride + src_col_offset + col) and stores it rounded to half (16-bit
+float) in the contiguous cache. The f16-cache path thus needs neither a
+separate deinterleave pass nor a separate conversion pass — one dispatch does
+both on the way into the cache.
 
 ```{.cpp .numberLines startFrom="1024"}
 kernel void batched_kv_cache_copy_strided_f16(
@@ -6548,10 +6856,13 @@ kernel void batched_kv_cache_copy_strided_f16(
 
 ### `kernel void deinterleave(…)`
 
-Extracts one contiguous column slice [M, chunk_cols] from a wider [M, src_stride]
-source: thread gid maps to (row, col) and copies src[row*src_stride + col_offset +
-col] into a packed dst[gid]. A generic strided-to-contiguous gather used to
-separate a packed projection into its component matrices.
+The general strided-to-contiguous gather that the _strided cache kernels
+specialize: copies the chunk_cols-wide column slice starting at col_offset out
+of an [M, src_stride] matrix into a packed [M, chunk_cols] destination, one
+thread per output element with (row, col) decoded from the flat gid. The host
+uses it to split a merged projection result — several matrices computed as one
+wide matmul for efficiency — back into its component tensors when a consumer
+needs them contiguous.
 
 ```{.cpp .numberLines startFrom="1047"}
 kernel void deinterleave(
@@ -6580,10 +6891,13 @@ kernel void deinterleave(
 
 ### `kernel void silu_mul_merged(…)`
 
-Fused SwiGLU activation over a merged [M, hidden*2] row where columns [0:hidden)
-are the gate and [hidden:2*hidden) the up projection. Each thread computes silu on
-its gate element and multiplies by the matching up element, writing back into the
-gate half in place. Avoids two separate silu and mul passes.
+Fused SwiGLU activation (the feed-forward design where silu(gate) multiplies an
+"up" projection elementwise) for the merged-weights layout: one matmul produced
+rows of width hidden*2 holding [gate | up] side by side. Each thread owns one
+gate element, applies silu, multiplies by the up element sitting hidden columns
+to its right, and writes the product back into the gate half in place — one
+dispatch instead of separate silu and mul_inplace passes, with no copy to
+separate the halves first.
 
 ```{.cpp .numberLines startFrom="1069"}
 kernel void silu_mul_merged(
@@ -6612,11 +6926,18 @@ kernel void silu_mul_merged(
 
 ### `kernel void decoder_ffn_gate(…)`
 
-M=1 fused FFN gate: one threadgroup per output channel row computes both
-dot(x, w1[row]) and dot(x, w3[row]) from the merged w1/w3 buffer. Threads
-cooperatively load x and half weights as float4/half4, SIMD-reduce each partial,
-combine across SIMD groups, and lane 0 writes out[row] = silu(d1)*d3. Replaces a
-matmul plus separate silu and mul for the single-token decode path.
+The single-token (M=1) feed-forward front half as one matrix-vector kernel:
+threadgroup `row` (one cooperating thread block per output channel) produces
+out[row] = silu(x·w1[row]) * (x·w3[row]), reading both weight rows from the
+merged buffer where w3's rows sit hidden rows below w1's. The threads stride
+the dim-long dot products in vectorized float4/half4 chunks — half is the
+16-bit float the weights are stored in, widened to f32 inside the dot — then
+simd_sum folds each thread's partial across its 32-thread SIMD group (the
+hardware's lockstep bundle, which can reduce in registers), per-group results
+land in threadgroup scratch, and after a barrier (the all-arrive checkpoint)
+thread 0 sums the groups, applies silu to the w1 dot, multiplies by the w3 dot,
+and writes the single output. For one token this replaces an MPS matmul plus
+separate silu and mul dispatches.
 
 ```{.cpp .numberLines startFrom="1091"}
 kernel void decoder_ffn_gate(
@@ -6686,10 +7007,15 @@ kernel void decoder_ffn_gate(
 
 ### `kernel void decoder_w2_residual(…)`
 
-M=1 fused down-projection with residual: one threadgroup per output dim row
-computes dot(gate[0:hidden], w2[row]) via cooperative float4/half4 loads and a
-SIMD-plus-threadgroup reduction, then lane 0 does x[row] += dot. Folds the w2
-matmul and the residual add into a single dispatch over g_dec_x.
+The matching single-token back half: threadgroup `row` computes the
+down-projection dot(gate[0:hidden], w2[row]) with the same cooperative pattern
+— strided float4/half4 loads (half being the 16-bit weight storage, widened in
+the dot), simd_sum across each 32-thread SIMD group, per-group partials parked
+in threadgroup scratch, one barrier, thread 0 summing the groups — but it
+finishes with x[row] += dot: the residual add (transformers update the hidden
+state as x = x + f(x)) is folded into the same dispatch. x is the persistent
+on-GPU hidden state g_dec_x, so the FFN completes without the vector ever
+visiting the CPU.
 
 ```{.cpp .numberLines startFrom="1154"}
 kernel void decoder_w2_residual(
@@ -6743,10 +7069,15 @@ kernel void decoder_w2_residual(
 
 ### `kernel void decoder_wo_residual(…)`
 
-M=1 fused attention output projection with residual: one threadgroup per dim row
-computes dot(attn[0:q_dim], wo[row]) using cooperative loads and a reduction, then
-lane 0 adds it into x[row]. Folds the wo matmul and residual add into one dispatch,
-the first step of the persistent-x decoder block.
+The same fused matvec-plus-residual shape applied to attention output:
+threadgroup `row` computes dot(attn[0:q_dim], wo[row]) — projecting the
+concatenated per-head attention results back to the model dimension — via
+cooperative float4/half4 loads, simd_sum within each 32-thread SIMD group (the
+lockstep bundle that reduces in registers), threadgroup scratch plus one
+barrier, and a final sum by thread 0 that performs x[row] += dot. It is the
+first kernel of the persistent-x decoder block: attention's contribution joins
+the resident hidden state in a single dispatch, with no separate matmul and
+add_inplace.
 
 ```{.cpp .numberLines startFrom="1201"}
 kernel void decoder_wo_residual(

@@ -21,7 +21,8 @@ Unit. SiLU means Sigmoid Linear Unit. RoPE means Rotary Position Embedding.
 RMSNorm means Root Mean Square Layer Normalization.
 
 Shape errors compile successfully in C and usually become memory corruption or
-plausible but incorrect logits rather than a useful type error.
+plausible but incorrect logits (the per-vocabulary-entry scores from which the
+next token is chosen) rather than a useful type error.
 
 ![A transformer layer appends only the new K/V rows, then attention reuses the complete retained cache before the residual feed-forward path.](../figures/transformer-cache-flow.svg){#fig-transformer-cache-flow width=96%}
 
@@ -44,12 +45,15 @@ is added back to the output, so a layer only has to learn a *correction*:
    every position a **key** and a **value** (three linear projections,
    `Q = X·Wq`, etc.). A position's new content is a weighted average of all
    positions' values, where the weight of position *j* for position *i* is how
-   well *i*'s query matches *j*'s key: `softmax(Q·K^T / sqrt(head_dim))`. This is
+   well *i*'s query matches *j*'s key: `softmax(Q·K^T / sqrt(head_dim))`
+   (softmax rescales a vector of match scores into positive weights that sum to
+   one). This is
    the *only* place information moves between positions. "Causal" masking forbids
    attending to the future; a "sliding window" also forbids attending too far
    into the past.
 2. **Feed-forward (FFN) — mixing across features.** An independent two-layer MLP
-   applied to each position on its own, here a gated **SwiGLU**:
+   (multilayer perceptron — two matrix multiplications with a nonlinearity
+   between them) applied to each position on its own, here a gated **SwiGLU**:
    `SiLU(X·W_gate) * (X·W_up)`, then `· W_down`.
 
 Around each, **RMSNorm** rescales a vector to unit root-mean-square so the numbers
@@ -81,7 +85,8 @@ V = X Wv
 Attention(Q,K,V) = softmax(Q K^T / sqrt(head_dim) + mask) V
 ```
 
-The implementation reshapes projections into heads, applies RoPE to Q/K,
+The implementation reshapes projections into heads (independent attention units,
+each operating on its own slice of the position's vector), applies RoPE to Q/K,
 appends K/V rows to caches, computes attention, merges heads, applies output
 projection, and adds the residual.
 
@@ -156,7 +161,8 @@ position into the cache at once. This amortizes setup over the whole prompt
 instead of paying it token by token.
 
 **Decode.** Each subsequent token comes from one call to `vox_decoder_forward`:
-one new embedding in, the 3072-d hidden state advanced through all 26 layers, and
+one new embedding in, the 3072-d hidden state (the position's evolving vector)
+advanced through all 26 layers, and
 a vocabulary logit vector out. The function takes the **greedy argmax** itself and
 returns the chosen token id, so captioning is deterministic — there is no sampling
 temperature. The full logits remain available for diagnostics.
@@ -222,7 +228,8 @@ new position's 3072-vector:
    projection, then the down projection); add the residual.
 
 After the last layer, one more RMSNorm and a matmul against the tied token
-embedding produce the vocabulary logits, and the function takes the greedy argmax.
+embedding (the same matrix that maps token ids to input vectors, reused to score
+output tokens) produce the vocabulary logits, and the function takes the greedy argmax.
 Read `voxtral_kernels.c` as the verbs of this sentence and `voxtral_decoder.c` as
 the sentence. The encoder (`voxtral_encoder.c`) is the same shape with biased
 projections, full 32/32 heads, and no autoregressive cache growth.
@@ -279,6 +286,13 @@ This map gives the reading spine of the file. Line numbers refer to the original
 
 This translation-unit preamble selects dependencies, compile-time features, and file-local constants used by the definitions that follow.
 
+The banner comment is the file's contract: the exact architecture recipe — conv
+stem, 32 causal transformer layers with a sliding window of 750, final norm, 4x
+downsample, adapter — that the code below implements step by step. The includes
+pull in the engine context (`voxtral.h`), the math kernels, the safetensors
+weight loader, and optionally Metal; `ENC_PREFIX` is the long checkpoint-name
+prefix shared by every encoder weight lookup.
+
 ```{.c .numberLines startFrom="1"}
 /*
  * voxtral_encoder.c - Audio encoder (causal transformer)
@@ -315,8 +329,12 @@ This translation-unit preamble selects dependencies, compile-time features, and 
 
 ### `static float *load_f32(safetensors_file_t *sf, const char *name)`
 
-Materializes a named encoder tensor as owned float storage when computation
-cannot use the mapped BF16 bytes directly.
+Looks up one tensor (a weights array identified by its checkpoint name) and
+returns an owned f32 copy. The small encoder weights — conv kernels, biases,
+norm scales — are loaded this way because the compute kernels read them as
+plain `float`; the huge matmul weights instead stay in their mapped bf16 form
+via `load_bf16_direct`. A missing name logs an error and returns NULL, which
+`vox_encoder_load` turns into load failure.
 
 ```{.c .numberLines startFrom="32"}
 static float *load_f32(safetensors_file_t *sf, const char *name) {
@@ -332,8 +350,12 @@ static float *load_f32(safetensors_file_t *sf, const char *name) {
 
 ### `static uint16_t *load_bf16_direct(safetensors_file_t *sf, const char *name)`
 
-Returns a borrowed mapped BF16 weight pointer, avoiding a multi-gigabyte
-conversion and tying encoder lifetime to the open safetensors file.
+Returns a pointer straight into the mmap'd safetensors file for a bf16 tensor
+(bfloat16: the top 16 bits of an IEEE-754 float, so half the bytes at reduced
+precision). Nothing is copied or converted — gigabytes of weight data stay
+backed by the file mapping — so the pointer is borrowed, valid only while the
+safetensors file stays open; the encoder's lifetime is therefore tied to that
+mapping.
 
 ```{.c .numberLines startFrom="41"}
 static uint16_t *load_bf16_direct(safetensors_file_t *sf, const char *name) {
@@ -349,10 +371,14 @@ static uint16_t *load_bf16_direct(safetensors_file_t *sf, const char *name) {
 
 ### `int vox_encoder_load(vox_encoder_t *enc, safetensors_file_t *sf)`
 
-Loads the 32-layer audio encoder: the conv stem and all per-layer biases/norms
-are f32, while the attention and FFN matmul weights are mmap'd bf16. Mirrors the
-model's asymmetric biasing - wq/wv/wo and FFN w2 carry biases but wk does not -
-so wk's bias is never requested.
+Loads the 32-layer audio encoder by checkpoint name: the conv stem and every
+per-layer bias and norm scale are small and materialized as f32, while the
+large attention and FFN matrices (attention being the position-mixing step,
+the FFN the per-position network — see the layer primer) stay as mmap'd bf16
+read in place. The loading mirrors the model's asymmetric biasing — wq, wv,
+wo, and FFN w2 carry biases but wk has none — so a wk bias is never even
+requested. A missing conv-stem kernel, per-layer attention matrix, or final
+norm aborts the load with -1.
 
 ```{.c .numberLines startFrom="50"}
 int vox_encoder_load(vox_encoder_t *enc, safetensors_file_t *sf) {
@@ -433,7 +459,10 @@ int vox_encoder_load(vox_encoder_t *enc, safetensors_file_t *sf) {
 
 ### `static void gelu_inplace(float *x, int n)`
 
-Applies the encoder's GELU activation over a contiguous float vector.
+A one-line wrapper that applies GELU (the smooth activation glossed in the
+chapter intro) to a flat float vector by delegating to the shared `vox_gelu`
+kernel. It exists so the stem code below reads as architecture — conv, then
+GELU — rather than as kernel plumbing.
 
 ```{.c .numberLines startFrom="124"}
 static void gelu_inplace(float *x, int n) {
@@ -444,8 +473,13 @@ static void gelu_inplace(float *x, int n) {
 
 ### `static int causal_conv1d_out_len(int length, int kernel_size, int stride)`
 
-Computes the number of stable strided causal-convolution outputs available for a
-given input length, kernel, and stride.
+Computes how many output frames the causal convolution (a sliding weighted
+window that reads only current and earlier inputs) produces for a given input
+length, kernel width, and stride: the ceiling of
+(length - kernel + padding)/stride + 1, clamped at zero, the same formula
+`vox_causal_conv1d` applies internally. The caller needs this number up front
+because C has no growable tensors — every conv output buffer is malloc'd to
+exactly this size before the convolution runs.
 
 ```{.c .numberLines startFrom="128"}
 static int causal_conv1d_out_len(int length, int kernel_size, int stride) {
@@ -459,11 +493,18 @@ static int causal_conv1d_out_len(int length, int kernel_size, int stride) {
 
 ### `float *vox_encoder_forward(…)`
 
-Full audio-encoder pass: transposes mel[frames,128] to channel-major, runs the
-two causal conv1d+GELU stem layers (the second strided by 2), then 32
-sliding-window causal MHA + SwiGLU transformer layers, and a final RMSNorm. RoPE
-positions start at 0; encoder attention biases Q and V but not K (wk has no
-bias), and uses VOX_ENC_WINDOW. Returns the [seq_len,1280] hidden state.
+The full, non-incremental audio-encoder pass. It transposes mel[frames,128] to
+channel-major for the conv stem, runs the two causal conv1d+GELU layers (the
+second strided by 2, roughly halving the sequence), then 32 transformer layers
+exactly as in the layer primer: self-attention — each position taking a
+weighted average of other positions' content, here 32 heads (independent
+attention subspaces) of 64 dims over a sliding window of the last
+VOX_ENC_WINDOW positions — then a SwiGLU feed-forward, each half wrapped in
+RMSNorm (rescale to unit root-mean-square) and a residual add. RoPE (the
+rotation that bakes position into queries and keys) starts at position 0
+because this pass always begins a fresh sequence, and the encoder's
+projections bias Q and V but not K (wk has no bias). A final RMSNorm yields
+the returned [seq_len,1280] hidden state.
 
 ```{.c .numberLines startFrom="135"}
 float *vox_encoder_forward(vox_ctx_t *ctx, const float *mel,
@@ -588,6 +629,16 @@ float *vox_encoder_forward(vox_ctx_t *ctx, const float *mel,
 
 ### Continuation of `float *vox_encoder_forward(…)` {.unnumbered .unlisted}
 
+The second half of every layer iteration: the attention result (the
+per-position mix computed just above) is projected from 2048 back to 1280 by
+wo — Metal and CPU twins, the GPU path adding the f32 bias on the CPU — and
+added onto `x`, the residual add of the layer primer. The FFN half then
+repeats the pattern: RMSNorm (rescale each row to unit root-mean-square),
+SwiGLU (SiLU-gated product of the w1 and w3 projections, then w2), and a
+second residual add. After the 32nd layer the epilogue applies the final
+RMSNorm in place, frees the nine scratch buffers plus the RoPE tables, and
+returns `x` as the [seq_len,1280] encoder output.
+
 ```{.c .numberLines startFrom="253"}
         /* Output projection + residual */
 #ifdef USE_METAL
@@ -660,7 +711,11 @@ float *vox_encoder_forward(vox_ctx_t *ctx, const float *mel,
 
 ### `static float *enc_kv_cache_k_at(vox_ctx_t *ctx, int layer, int pos)`
 
-Addresses one encoder key-cache row from layer and local cache position.
+Pointer arithmetic for one row of the encoder's key cache (the per-layer store
+of key vectors that attention re-reads for every earlier audio position): the
+layout is [layer][capacity][2048], so the row sits at
+(layer * capacity + pos) * 2048. The stride uses capacity `enc_kv_cache_max`,
+not the current length, so addresses stay stable as the cache fills.
 
 ```{.c .numberLines startFrom="320"}
 static float *enc_kv_cache_k_at(vox_ctx_t *ctx, int layer, int pos) {
@@ -671,7 +726,10 @@ static float *enc_kv_cache_k_at(vox_ctx_t *ctx, int layer, int pos) {
 
 ### `static float *enc_kv_cache_v_at(vox_ctx_t *ctx, int layer, int pos)`
 
-Addresses the matching value-cache row.
+The same row arithmetic for the value cache — values being the stored content
+vectors attention averages, where keys are what it scores against. Keeping K
+and V in two parallel buffers rather than interleaved lets each be moved and
+copied as contiguous per-layer blocks during compaction and growth.
 
 ```{.c .numberLines startFrom="324"}
 static float *enc_kv_cache_v_at(vox_ctx_t *ctx, int layer, int pos) {
@@ -682,8 +740,12 @@ static float *enc_kv_cache_v_at(vox_ctx_t *ctx, int layer, int pos) {
 
 ### `int vox_encoder_kv_cache_preallocate(vox_ctx_t *ctx, int max_pos)`
 
-Allocates encoder caches to a known maximum before live audio, moving allocation
-latency out of the first classroom utterance.
+Reserves the encoder KV cache (the per-layer key/value store attention
+re-reads each step) at a known maximum before live audio arrives, moving the
+multi-megabyte allocation out of the first classroom utterance. On a Metal
+system the buffers come from `vox_metal_shared_alloc` — memory visible to both
+CPU and GPU, which the monolithic GPU encoder step requires — otherwise from
+zeroed calloc. Idempotent: an already-allocated cache returns 0 untouched.
 
 ```{.c .numberLines startFrom="328"}
 int vox_encoder_kv_cache_preallocate(vox_ctx_t *ctx, int max_pos) {
@@ -712,10 +774,13 @@ int vox_encoder_kv_cache_preallocate(vox_ctx_t *ctx, int max_pos) {
 
 ### `static int enc_kv_cache_grow(vox_ctx_t *ctx, int required)`
 
-Grows the encoder's incremental K/V cache by doubling enc_kv_cache_max and
-re-packing existing rows across the new per-layer stride. Refuses to grow
-Metal-shared buffers (which cannot be resized), so shared mode relies on
-preallocation being large enough.
+Grows the encoder's incremental KV cache (the per-layer key/value rows
+attention re-reads) by doubling `enc_kv_cache_max` until the requirement fits,
+then re-packing: each layer's region is `capacity * 2048` floats, so a larger
+capacity moves every layer's base address, and the valid rows of all 32 layers
+are memcpy'd into their new strided homes rather than realloc'd flat.
+Metal-shared buffers cannot be resized, so shared mode refuses with an error
+and relies on preallocation having been large enough.
 
 ```{.c .numberLines startFrom="350"}
 static int enc_kv_cache_grow(vox_ctx_t *ctx, int required) {
@@ -760,10 +825,14 @@ static int enc_kv_cache_grow(vox_ctx_t *ctx, int required) {
 
 ### `static void enc_kv_cache_compact(vox_ctx_t *ctx)`
 
-Sliding-window eviction for the encoder cache: keeps the last VOX_ENC_WINDOW rows
-per layer via memmove to position 0 and bumps enc_kv_pos_offset by the discarded
-count, leaving baked-in RoPE valid. Mirrors the decoder's kv_cache_compact but
-always operates on f32 rows.
+Sliding-window eviction — the encoder only ever attends to the most recent
+VOX_ENC_WINDOW positions, so older rows are dead weight. It keeps the last
+VOX_ENC_WINDOW key/value rows per layer via memmove to position 0 and bumps
+`enc_kv_pos_offset` by the discarded count. The offset is the critical half:
+RoPE (each key's position baked in as a rotation) is already applied to the
+cached keys, so rows may move physically but their logical positions must keep
+counting upward — the cache invariant from the chapter intro. Mirrors the
+decoder's kv_cache_compact but always operates on f32 rows.
 
 ```{.c .numberLines startFrom="388"}
 static void enc_kv_cache_compact(vox_ctx_t *ctx) {
@@ -790,8 +859,10 @@ static void enc_kv_cache_compact(vox_ctx_t *ctx) {
 
 ### `static int enc_realloc_float(float **ptr, size_t elems)`
 
-Overflow-aware helper for growing float scratch arrays while preserving existing
-contents.
+realloc through a temporary so the original buffer survives allocation
+failure: assigning `realloc`'s result directly to `*ptr` would lose (and leak)
+the old block when it returns NULL. Returns 0 on success and -1 on failure,
+with existing contents preserved as realloc guarantees.
 
 ```{.c .numberLines startFrom="408"}
 static int enc_realloc_float(float **ptr, size_t elems) {
@@ -805,7 +876,9 @@ static int enc_realloc_float(float **ptr, size_t elems) {
 
 ### `static int enc_realloc_int(int **ptr, size_t elems)`
 
-Equivalent growth helper for absolute-position arrays.
+The same fail-safe realloc idiom for the int arrays holding absolute positions
+— the ever-increasing indices that RoPE (position encoded as rotation) is
+computed from as audio keeps streaming in.
 
 ```{.c .numberLines startFrom="415"}
 static int enc_realloc_int(int **ptr, size_t elems) {
@@ -857,12 +930,16 @@ static int enc_inc_ensure_buffers(vox_ctx_t *ctx, int new_len) {
 
 ### `static float *encoder_forward_incremental_batch(…)`
 
-One bounded encoder step: compacts/grows the KV cache for the incoming frames,
-runs RoPE at logical positions enc_kv_pos_offset+cache_len, projects Q/K/V only
-for the new positions, appends K/V to the cache, and attends each new query over
-the full window. After 32 layers and the final norm it returns the new positions'
-[batch,1280] output; the GPU path runs all layers in one command buffer when
-the cache is shared.
+One bounded encoder step over a chunk of new conv-stem frames, reusing all
+earlier work through the KV cache (the per-layer store of key/value vectors
+attention re-reads instead of recomputing). It compacts/grows the cache to
+fit, computes RoPE (position baked in as rotation) at logical positions
+`enc_kv_pos_offset + cache_len` onward — counting absolute audio position, not
+cache slot — projects Q/K/V for the new positions only, appends the new K/V
+rows, and lets each new query attend over the full retained window. After 32
+layers and the final norm it returns just the new positions' [new_len,1280]
+output; when the cache is Metal-shared, the GPU path runs all 32 layers in one
+command buffer and skips the CPU loop entirely.
 
 ```{.c .numberLines startFrom="452"}
 static float *encoder_forward_incremental_batch(vox_ctx_t *ctx,
@@ -999,6 +1076,14 @@ static float *encoder_forward_incremental_batch(vox_ctx_t *ctx,
 
 ### Continuation of `static float *encoder_forward_incremental_batch(…)` {.unnumbered .unlisted}
 
+The same per-layer second half as the full pass, restricted to the `new_len`
+fresh positions: wo projection plus residual add, RMSNorm (rescale to unit
+root-mean-square), SwiGLU feed-forward, second residual. After all 32 layers
+the final norm runs and — the incremental difference — `enc_kv_cache_len`
+advances to `cache_len + new_len`, committing the key/value rows appended
+earlier in the loop (the cached attention inputs) so the next chunk attends
+over them; only the new positions' [new_len,1280] output is returned.
+
 ```{.c .numberLines startFrom="582"}
         /* Output projection + residual */
 #ifdef USE_METAL
@@ -1066,9 +1151,12 @@ static float *encoder_forward_incremental_batch(vox_ctx_t *ctx,
 ### `float *vox_adapter_forward(…)`
 
 Bridges encoder to decoder: downsamples 4x by concatenating every group of 4
-encoder frames into one 5120-d vector, then applies Linear(5120->3072) -> GELU ->
-Linear(3072->3072) with bf16 weights to produce decoder-dimension embeddings.
-Returns the [ds_len,3072] result.
+consecutive encoder frames into one 5120-wide vector — trading sequence length
+for width, so the decoder runs far fewer, fatter positions — then applies
+Linear(5120->3072) -> GELU -> Linear(3072->3072) with bf16 weights to reach
+the decoder's 3072 dimension. The returned [ds_len,3072] rows enter the
+decoder exactly like token embeddings (the vectors a token id would otherwise
+look up).
 
 ```{.c .numberLines startFrom="643"}
 float *vox_adapter_forward(vox_ctx_t *ctx, const float *enc_out,
@@ -1117,10 +1205,12 @@ float *vox_adapter_forward(vox_ctx_t *ctx, const float *enc_out,
 ### `float *vox_encoder_forward_incremental(…)`
 
 Public entry that feeds new positions to the encoder in batches of at most
-VOX_ENC_INC_MAX_BATCH. The shared (Metal) KV cache is preallocated at
-VOX_ENC_WINDOW plus that batch size and cannot grow, so a single oversized call
-would fail and silently discard audio; batching keeps results identical to
-separate smaller feeds while concatenating their outputs into one buffer.
+VOX_ENC_INC_MAX_BATCH. The shared (Metal) KV cache — the per-layer key/value
+store attention re-reads, preallocated at VOX_ENC_WINDOW plus that batch size
+— cannot grow, so a single oversized call would fail and silently discard that
+audio. Batching keeps results identical to separate smaller feeds (each batch
+compacts, appends, and attends exactly as a smaller call would) while
+concatenating their outputs into one buffer.
 
 ```{.c .numberLines startFrom="684"}
 float *vox_encoder_forward_incremental(vox_ctx_t *ctx, const float *x_new,
@@ -1199,6 +1289,13 @@ This map gives the reading spine of the file. Line numbers refer to the original
 
 This translation-unit preamble selects dependencies, compile-time features, and file-local constants used by the definitions that follow.
 
+The banner records the decoder recipe — 26 layers of grouped-query attention
+plus SwiGLU feed-forward — and documents `ada_rms_norm_t_cond`, the small
+time-conditioning MLP whose effect is precomputed once into `ctx->ada_scale`
+at load time, so the forward paths only multiply by `1 + ada_scale`. The
+includes are the same engine/kernels/safetensors/optional-Metal set as the
+encoder.
+
 ```{.c .numberLines startFrom="1"}
 /*
  * voxtral_decoder.c - LLM decoder (26 layers, GQA)
@@ -1234,8 +1331,10 @@ This translation-unit preamble selects dependencies, compile-time features, and 
 
 ### `static float *load_f32(safetensors_file_t *sf, const char *name)`
 
-Finds a named tensor and materializes an owned FP32 copy for decoder fields that
-require float storage. Missing or incompatible weights fail model load.
+Decoder twin of the encoder's loader: finds a tensor (a named weights array)
+in the checkpoint and materializes an owned f32 copy for the fields the CPU
+kernels read as plain `float` — the norm scales and the small ada-MLP weights.
+A missing name logs an error and returns NULL, failing model load.
 
 ```{.c .numberLines startFrom="31"}
 static float *load_f32(safetensors_file_t *sf, const char *name) {
@@ -1251,8 +1350,10 @@ static float *load_f32(safetensors_file_t *sf, const char *name) {
 
 ### `static uint16_t *load_bf16_direct(safetensors_file_t *sf, const char *name)`
 
-Finds a named BF16 tensor and stores a zero-copy pointer into the safetensors
-mapping. Mapping lifetime therefore dominates decoder lifetime.
+Returns a zero-copy pointer into the mmap'd safetensors file for a bf16 tensor
+(bfloat16: the high 16 bits of an IEEE-754 float). Because the bytes are never
+copied, the mapping must outlive the decoder — close the file and every large
+weight pointer dangles.
 
 ```{.c .numberLines startFrom="40"}
 static uint16_t *load_bf16_direct(safetensors_file_t *sf, const char *name) {
@@ -1270,6 +1371,14 @@ static uint16_t *load_bf16_direct(safetensors_file_t *sf, const char *name) {
 ```
 
 ### `static uint16_t *load_bf16_direct_checked(…)`
+
+Like `load_bf16_direct`, but also validates the tensor's element count against
+what the architecture requires. It guards the one tensor indexed by runtime
+values: the token-embedding table (one 3072-wide vector per vocabulary id),
+which the runtime indexes by token id — with an undersized tensor from a
+malformed checkpoint, a large id would silently read past the end of the
+mapping instead of failing at load time. A mismatch logs both counts and
+returns NULL.
 
 ```{.c .numberLines startFrom="52"}
 static uint16_t *load_bf16_direct_checked(safetensors_file_t *sf,
@@ -1294,11 +1403,14 @@ static uint16_t *load_bf16_direct_checked(safetensors_file_t *sf,
 
 ### `int vox_decoder_load(vox_decoder_t *dec, safetensors_file_t *sf)`
 
-Loads all 26 decoder layers from the safetensors file: large matmul weights
-(wq/wk/wv/wo, FFN w1/w2/w3, and the tied token embeddings) are kept as mmap'd
-bf16 read directly, while the small norms and the ada_rms_norm MLP weights are
-converted to f32. Returns -1 if any required attention weight or the final norm
-is missing.
+Loads all 26 decoder layers by name: the large matmul weights — attention's
+wq/wk/wv/wo (the four projections of the layer primer), FFN w1/w2/w3, and the
+token-embedding table (the vocabulary-sized matrix mapping each token id to
+its 3072-vector, reused "tied" as the output scoring matrix) — stay as mmap'd
+bf16, while the small per-layer norms and ada_rms_norm MLP weights are
+materialized in f32. The embedding table goes through the element-count check
+because token ids index it at runtime. Returns -1 if the embeddings, any
+layer's attention weights, or the final norm are missing.
 
 ```{.c .numberLines startFrom="70"}
 int vox_decoder_load(vox_decoder_t *dec, safetensors_file_t *sf) {
@@ -1371,10 +1483,13 @@ int vox_decoder_load(vox_decoder_t *dec, safetensors_file_t *sf) {
 
 ### `static inline float f16_to_f32(uint16_t h)`
 
-Scalar IEEE half-to-single widening used when materializing an fp16 KV cache into
-fp32, handling subnormals, inf/NaN (exp==0x1F), and the 127-15 exponent rebias.
-This is true fp16, distinct from the bf16 widening (shift-left-16) used for
-weights elsewhere.
+Scalar IEEE half-to-single widening, used when the fp16 KV cache (the stored
+key/value vectors attention re-reads, kept at half width to save memory and
+bandwidth) must be materialized as fp32 for the CPU kernels. It handles all
+three regimes: subnormals (renormalized bit by bit), inf/NaN (exp==0x1F), and
+normal numbers via the 127-15 exponent rebias. This is true IEEE fp16 —
+distinct from bf16, whose widening is a mere shift-left-16, because the two
+formats split their 16 bits differently between exponent and mantissa.
 
 ```{.c .numberLines startFrom="136"}
 static inline float f16_to_f32(uint16_t h) {
@@ -1410,8 +1525,11 @@ static inline float f16_to_f32(uint16_t h) {
 
 ### `static int kv_cache_is_allocated(const vox_ctx_t *ctx)`
 
-Checks that the decoder's selected cache representation and required layer
-pointers exist before generation begins.
+Reports whether the decoder KV cache (the per-layer store of key/value vectors
+attention re-reads for every earlier token) exists in whichever representation
+is selected: the fp16 pointer pair when `kv_cache_fp16` is set, the f32 pair
+otherwise. Prefill and the preallocation entry consult it so the cache can be
+allocated lazily instead of crashing on first use.
 
 ```{.c .numberLines startFrom="165"}
 static int kv_cache_is_allocated(const vox_ctx_t *ctx) {
@@ -1426,7 +1544,11 @@ static int kv_cache_is_allocated(const vox_ctx_t *ctx) {
 
 ### `static float *kv_cache_k_at(vox_ctx_t *ctx, int layer, int pos)`
 
-Computes the FP32 key-cache row address for one layer and logical position.
+Address of one f32 key row in the decoder KV cache (the stored key vectors
+each new query is scored against). The layout is [layer][capacity][1024],
+where 1024 = 8 KV heads (the shared key/value subspaces of grouped-query
+attention) x 128 dims; the stride uses capacity `kv_cache_max`, so addresses
+stay valid as the cache fills toward it.
 
 ```{.c .numberLines startFrom="173"}
 static float *kv_cache_k_at(vox_ctx_t *ctx, int layer, int pos) {
@@ -1438,7 +1560,9 @@ static float *kv_cache_k_at(vox_ctx_t *ctx, int layer, int pos) {
 
 ### `static float *kv_cache_v_at(vox_ctx_t *ctx, int layer, int pos)`
 
-Computes the FP32 value-cache row address using the same capacity/stride layout.
+The matching f32 value-row address — values being the content vectors
+attention averages once the key scores have set the weights. Same
+[layer][capacity][1024] arithmetic as the key side.
 
 ```{.c .numberLines startFrom="178"}
 static float *kv_cache_v_at(vox_ctx_t *ctx, int layer, int pos) {
@@ -1450,7 +1574,9 @@ static float *kv_cache_v_at(vox_ctx_t *ctx, int layer, int pos) {
 
 ### `static uint16_t *kv_cache_k_f16_at(vox_ctx_t *ctx, int layer, int pos)`
 
-Returns the FP16 key row when compact cache storage is active.
+Key-row address when the cache is stored as fp16 (16-bit floats, halving the
+bytes streamed per generated token on the GPU path); identical
+layer/capacity arithmetic over a `uint16_t` base pointer.
 
 ```{.c .numberLines startFrom="183"}
 static uint16_t *kv_cache_k_f16_at(vox_ctx_t *ctx, int layer, int pos) {
@@ -1462,7 +1588,9 @@ static uint16_t *kv_cache_k_f16_at(vox_ctx_t *ctx, int layer, int pos) {
 
 ### `static uint16_t *kv_cache_v_f16_at(vox_ctx_t *ctx, int layer, int pos)`
 
-Returns the corresponding FP16 value row.
+The fp16 counterpart for value rows, completing the four accessors so that
+every cache touch in this file goes through one audited piece of pointer
+arithmetic.
 
 ```{.c .numberLines startFrom="188"}
 static uint16_t *kv_cache_v_f16_at(vox_ctx_t *ctx, int layer, int pos) {
@@ -1474,10 +1602,15 @@ static uint16_t *kv_cache_v_f16_at(vox_ctx_t *ctx, int layer, int pos) {
 
 ### `static int kv_cache_init(vox_ctx_t *ctx, int max_seq)`
 
-Allocates the per-layer K and V caches sized VOX_DEC_LAYERS * max_seq * (8*128)
-elements, choosing fp16 vs fp32 storage and Metal-shared vs calloc memory based
-on ctx->kv_cache_fp16 and Metal availability; CPU-only builds force fp32. Sets
-kv_cache_len to 0 but leaves kv_pos_offset for the caller to manage.
+Allocates the decoder KV cache (per-layer key/value rows that attention
+re-reads each generated token) sized VOX_DEC_LAYERS * max_seq * (8*128)
+elements per side, choosing the representation by context: fp16 in
+Metal-shared memory when the GPU is present and fp16 mode is on, f32 shared
+when GPU without fp16, plain zeroed f32 heap otherwise — CPU-only builds force
+fp32 because the scalar kernels read `float`. Sets kv_cache_len to 0 but
+deliberately leaves kv_pos_offset alone: the caller manages logical positions
+across cache rebuilds so RoPE angles (position baked into keys as rotation)
+never rewind.
 
 ```{.c .numberLines startFrom="193"}
 static int kv_cache_init(vox_ctx_t *ctx, int max_seq) {
@@ -1521,9 +1654,10 @@ static int kv_cache_init(vox_ctx_t *ctx, int max_seq) {
 
 ### `int vox_decoder_kv_cache_preallocate(vox_ctx_t *ctx, int max_seq)`
 
-Idempotent wrapper that allocates the KV cache at max_seq only if not already
-present, so the caller can reserve capacity up front and avoid mid-stream grow
-copies. Returns 0 when the cache already exists.
+Idempotent public wrapper: allocates the KV cache (attention's stored
+key/value rows) at max_seq only when none exists, letting the host reserve
+full capacity up front and avoid mid-stream grow-and-copy pauses while
+captions are live. Returns 0 immediately when a cache is already present.
 
 ```{.c .numberLines startFrom="230"}
 int vox_decoder_kv_cache_preallocate(vox_ctx_t *ctx, int max_seq) {
@@ -1536,13 +1670,15 @@ int vox_decoder_kv_cache_preallocate(vox_ctx_t *ctx, int max_seq) {
 
 ### `static int kv_cache_grow(vox_ctx_t *ctx, int required)`
 
-Doubles kv_cache_max (starting from 256 if the cache was never allocated, so a
-failed initial allocation cannot loop the doubling forever) until it covers the
-requirement, allocates fresh K/V buffers
-(fp16 or fp32, shared or heap to match the current mode), and copies the first
-kv_cache_len valid rows of every layer across the changed per-layer stride. The
-per-layer stride is max*kv_dim, so growth is a strided re-pack rather than a flat
-realloc; old buffers are freed through the matching allocator.
+Capacity growth for the KV cache (the per-layer key/value rows attention
+re-reads): doubles kv_cache_max — starting from 256 if the cache was never
+allocated, so a failed initial allocation cannot loop the doubling forever —
+until the requirement fits, allocates fresh K/V buffers matching the current
+mode (fp16 or fp32, Metal-shared or heap), and copies the first kv_cache_len
+valid rows of every layer. The copy is a strided re-pack, not a flat realloc,
+because each layer's region is `capacity * kv_dim` wide: a new capacity moves
+every layer's base. Old buffers are freed through the allocator that created
+them.
 
 ```{.c .numberLines startFrom="236"}
 static int kv_cache_grow(vox_ctx_t *ctx, int required) {
@@ -1654,11 +1790,14 @@ static int kv_cache_grow(vox_ctx_t *ctx, int required) {
 
 ### `static void kv_cache_compact(vox_ctx_t *ctx)`
 
-Sliding-window eviction: when length exceeds VOX_DEC_WINDOW it memmoves the last
-VOX_DEC_WINDOW K/V rows of each layer down to position 0 and advances
-kv_pos_offset by the number discarded. Because RoPE is already baked into the
-cached K vectors, the kept rows stay valid and only the logical-position offset
-needs updating, with no re-encoding.
+Sliding-window eviction: the decoder never attends further back than
+VOX_DEC_WINDOW positions (the window that bounds both attention cost and cache
+size — see the chapter intro), so when the length exceeds it, each layer's
+last VOX_DEC_WINDOW key/value rows are memmove'd down to slot 0 and
+kv_pos_offset advances by the number discarded. RoPE (each key's position
+baked in as a rotation) is already applied to the cached keys, so the kept
+rows stay valid as-is; only the logical-position offset needs updating, never
+any re-encoding. The fp16 and f32 representations get the same row arithmetic.
 
 ```{.c .numberLines startFrom="341"}
 static void kv_cache_compact(vox_ctx_t *ctx) {
@@ -1698,10 +1837,13 @@ static void kv_cache_compact(vox_ctx_t *ctx) {
 
 ### `static int kv_cache_switch_to_fp32(vox_ctx_t *ctx)`
 
-One-way conversion from an fp16 KV cache to fp32: allocates new f32 K/V buffers,
-widens the first kv_cache_len rows of every layer via f16_to_f32, frees the fp16
-buffers and clears kv_cache_fp16. The CPU forward/prefill paths call this because
-they read the cache as float; the GPU path keeps fp16.
+One-way escape hatch from the fp16 KV cache (half-width storage of attention's
+key/value rows) to fp32: allocates f32 K/V buffers, widens the first
+kv_cache_len rows of every layer through f16_to_f32, frees the fp16 buffers,
+and clears kv_cache_fp16. The CPU prefill/forward paths call it because the
+scalar kernels read the cache as `float`; the GPU path never does, keeping the
+bandwidth savings. Row order is preserved exactly, so positions and their
+baked-in RoPE rotations stay aligned.
 
 ```{.c .numberLines startFrom="374"}
 static int kv_cache_switch_to_fp32(vox_ctx_t *ctx) {
@@ -1768,9 +1910,16 @@ static int kv_cache_switch_to_fp32(vox_ctx_t *ctx) {
 
 ### `void vox_decoder_prefill(vox_ctx_t *ctx, const float *input_embeds, int seq_len)`
 
-Prefill processes multiple prompt positions and writes their per-layer KV
-entries. It amortizes setup compared with token-by-token forward execution.
-Position and cache capacity checks must precede GPU dispatch.
+Prefill — the batched pass that pushes all prompt positions through the
+decoder at once instead of token by token — writes every prompt position's
+key/value rows into the KV cache (the per-layer store attention re-reads) in
+one sweep, amortizing setup across the whole audio-conditioned prompt. Cache
+allocation or growth and the RoPE table (rotation angles for the logical
+positions, including the offset accumulated by compactions) are prepared
+before any dispatch, because the GPU monolithic path consumes them immediately
+and returns early. The CPU fallback first forces the cache to fp32, then runs
+the 26 layers as in the layer primer, including the decoder-only ada_scale
+multiplier applied to the normalized FFN input.
 
 ```{.c .numberLines startFrom="434"}
 void vox_decoder_prefill(vox_ctx_t *ctx, const float *input_embeds, int seq_len) {
@@ -1962,10 +2111,17 @@ static void ensure_dec_buffers(vox_ctx_t *ctx) {
 
 ### `int vox_decoder_forward(vox_ctx_t *ctx, const float *input_embeds, float *logits)`
 
-Forward computes one autoregressive step from the new embedding and existing
-cache, writes the new K/V rows, performs the greedy argmax internally, and
-returns the selected token id while leaving the full logits buffer available for
-diagnostics.
+One autoregressive step — each new token conditioned on everything generated
+so far. It takes the single new 3072-d embedding, advances it through all 26
+layers against the existing KV cache (the stored key/value rows that make each
+step cheap instead of recomputing the whole history), appends this position's
+K/V rows, and multiplies the final hidden state against the tied
+token-embedding matrix to produce logits (one raw score per vocabulary token).
+It then takes the greedy argmax itself — the single highest-scoring id, no
+sampling — and returns that token id, while the caller's logits buffer stays
+filled for diagnostics. Compaction or growth runs first when the cache is
+full, and on allocation failure it returns 2, the end-of-sequence id, so
+generation degrades to a clean stop rather than a crash.
 
 ```{.c .numberLines startFrom="610"}
 int vox_decoder_forward(vox_ctx_t *ctx, const float *input_embeds, float *logits) {
@@ -2136,6 +2292,11 @@ This map gives the reading spine of the file. Line numbers refer to the original
 
 This preamble contains comments and preprocessing setup that apply to the complete public header. It introduces no runtime state.
 
+The banner states the header's three ground rules: these are the low-level
+math kernels, everything operates on float32 tensors (flat arrays interpreted
+through a shape convention) in row-major order, and the code was adapted from
+the flux-2-4b project. The include guard opens in the next block.
+
 ```{.c .numberLines startFrom="1"}
 /*
  * voxtral_kernels.h - Math kernels for Voxtral inference
@@ -2148,11 +2309,18 @@ This preamble contains comments and preprocessing setup that apply to the comple
 
 ### `#ifndef VOXTRAL_KERNELS_H`
 
+Opens the classic include guard: once the macro is defined, the preprocessor
+skips the entire header on any repeat `#include` in the same translation unit.
+
 ```{.c .numberLines startFrom="8"}
 #ifndef VOXTRAL_KERNELS_H
 ```
 
 ### `#define VOXTRAL_KERNELS_H`
+
+Defines the guard macro and pulls in the header's only two dependencies,
+`stddef.h` and `stdint.h` — the fixed-width `uint16_t` from the latter is how
+raw bf16 weights travel through these prototypes.
 
 ```{.c .numberLines startFrom="9"}
 #define VOXTRAL_KERNELS_H
@@ -2201,8 +2369,8 @@ void vox_scale(float *x, float s, int n);
 
 ### `void vox_copy(float *dst, const float *src, int n);`
 
-Copies `n` float elements from source to destination with the implementation's
-defined overlap assumptions.
+Copies `n` floats; the implementation is a plain memcpy, so source and
+destination must not overlap.
 
 ```{.c .numberLines startFrom="22"}
 void vox_copy(float *dst, const float *src, int n);
@@ -2319,7 +2487,10 @@ void vox_matmul_t_bf16(float *C, const float *A, const uint16_t *B_bf16,
 
 ### `void vox_conv1d(…)`
 
-General one-dimensional convolution over sequence/channel tensors.
+General 1-D convolution — each output sample a weighted sum over a small
+sliding window of input samples, the same weights reused at every position —
+over channel-major tensors, with explicit symmetric padding; the encoder stem
+calls only the causal variant below.
 
 ```{.c .numberLines startFrom="82"}
 void vox_conv1d(float *out, const float *in, const float *weight, const float *bias,
@@ -2335,7 +2506,10 @@ void vox_conv1d(float *out, const float *in, const float *weight, const float *b
 
 ### `void vox_causal_conv1d(…)`
 
-Causal convolution whose output position never reads future input positions.
+The convolution variant whose explicit padding (kernel_size - stride) sits on
+the left, plus implicit right zero-padding to reach the ceil-derived output
+length, so the output at time t reads only inputs at t and earlier — never the future — which is
+what lets the encoder run on still-growing live audio.
 
 ```{.c .numberLines startFrom="91"}
 void vox_causal_conv1d(float *out, const float *in, const float *weight, const float *bias,
@@ -2354,7 +2528,9 @@ void vox_causal_conv1d(float *out, const float *in, const float *weight, const f
 
 ### `void vox_rms_norm(…)`
 
-RMS normalization with learned weight and epsilon, without mean subtraction.
+RMS normalization: rescales each row to unit root-mean-square and then applies
+a learned per-element weight, keeping activations in a stable numeric range
+without the mean subtraction of full LayerNorm.
 
 ```{.c .numberLines startFrom="103"}
 void vox_rms_norm(float *out, const float *x, const float *weight,
@@ -2389,7 +2565,9 @@ void vox_gelu(float *x, int n);
 
 ### `void vox_softmax(float *x, int rows, int cols);`
 
-Normalizes each row with a max-subtracted exponential for numerical stability.
+Turns each row into a probability distribution — non-negative weights summing
+to 1 — using the max-subtracted exponential so large scores cannot overflow
+`expf`.
 
 ```{.c .numberLines startFrom="117"}
 void vox_softmax(float *x, int rows, int cols);
@@ -2417,8 +2595,12 @@ void vox_softmax(float *x, int rows, int cols);
 
 ### `void vox_causal_attention(…)`
 
-Reference causal attention over Q/K/V with head geometry and position limits
-supplied explicitly by the caller.
+Reference attention: each query position takes a softmax-weighted average of
+the visible positions' value vectors, weighted by how well its query matches
+their keys (the layer primer's core equation). The head geometry — how many
+independent attention subspaces, and how many shared key/value heads — and the
+causal/sliding-window position limits are all supplied explicitly by the
+caller.
 
 ```{.c .numberLines startFrom="138"}
 void vox_causal_attention(float *out, const float *Q, const float *K, const float *V,
@@ -2439,7 +2621,9 @@ void vox_causal_attention(float *out, const float *Q, const float *K, const floa
 
 ### `void vox_compute_rope_freqs(float *freqs, const int *pos, int seq, int dim, float theta);`
 
-Builds sine/cosine rotary frequencies from absolute positions and theta.
+Precomputes the cos/sin tables for RoPE (the scheme that encodes a token's
+position by rotating its query and key vectors) from absolute integer
+positions and the base frequency theta.
 
 ```{.c .numberLines startFrom="152"}
 void vox_compute_rope_freqs(float *freqs, const int *pos, int seq, int dim, float theta);
@@ -2453,7 +2637,9 @@ void vox_compute_rope_freqs(float *freqs, const int *pos, int seq, int dim, floa
 
 ### `void vox_apply_rope(float *x, const float *freqs, int seq, int heads, int head_dim);`
 
-Applies interleaved GPT-J-style rotary pairs to every head in place.
+Applies those rotations in place to every head (each independent attention
+subspace), pairing adjacent coordinates — the interleaved GPT-J convention.
+This is the position-injection step run on Q and K before attention.
 
 ```{.c .numberLines startFrom="159"}
 void vox_apply_rope(float *x, const float *freqs, int seq, int heads, int head_dim);
@@ -2463,11 +2649,19 @@ void vox_apply_rope(float *x, const float *freqs, int seq, int heads, int head_d
 
 ### `extern int vox_verbose;`
 
+Global verbosity level defined in voxtral.c and shared by every engine file;
+levels >= 2 gate the per-layer progress logging seen throughout the encoder
+and decoder.
+
 ```{.c .numberLines startFrom="162"}
 extern int vox_verbose;
 ```
 
 ### `extern int vox_monitor;`
+
+Global flag for the one-glyph progress monitor: when set, the streaming code
+prints a single stderr marker per pipeline event (encoder chunk, prefill, and
+so on).
 
 ```{.c .numberLines startFrom="163"}
 extern int vox_monitor;
@@ -2475,6 +2669,8 @@ extern int vox_monitor;
 ```
 
 ### `#endif /* VOXTRAL_KERNELS_H */`
+
+Closes the include guard opened at the top of the header.
 
 ```{.c .numberLines startFrom="165"}
 #endif /* VOXTRAL_KERNELS_H */
@@ -2529,6 +2725,12 @@ This map gives the reading spine of the file. Line numbers refer to the original
 ### Translation-unit preamble {.unnumbered .unlisted}
 
 This translation-unit preamble selects dependencies, compile-time features, and file-local constants used by the definitions that follow.
+
+Beyond the standard includes, the preamble selects acceleration at compile
+time: USE_METAL pulls in the GPU host API, and USE_BLAS selects Apple's
+Accelerate framework or generic cblas elsewhere. `MIN_GPU_ELEMENTS` (512*512)
+is defined as a GPU-dispatch threshold, but nothing in this file currently
+consults it.
 
 ```{.c .numberLines startFrom="1"}
 /*
@@ -2651,10 +2853,11 @@ void vox_matmul(float *C, const float *A, const float *B, int M, int K, int N) {
 
 ### `void vox_matmul_t(float *C, const float *A, const float *B, int M, int K, int N)`
 
-Computes C[M,N] = A[M,K] @ B[N,K]^T, i.e. B is stored row-major with each output
-column as a contiguous K-length row, which matches PyTorch nn.Linear weight
-layout. Both A and B rows are streamed contiguously in the inner loop, so this is
-the cache-friendly variant used for logit and projection matmuls.
+Computes C[M,N] = A[M,K] @ B[N,K]^T, i.e. B is stored row-major with each
+output column as a contiguous K-length row — exactly PyTorch's nn.Linear
+weight layout. Both A and B rows then stream contiguously in the inner loop,
+making this the cache-friendly variant used for projections and for the logits
+(the raw per-vocabulary-token scores a decoder step ends with).
 
 ```{.c .numberLines startFrom="71"}
 void vox_matmul_t(float *C, const float *A, const float *B, int M, int K, int N) {
@@ -2731,7 +2934,10 @@ void vox_linear_nobias(float *y, const float *x, const float *W,
 
 ### `static void bf16_to_f32_buf(float *dst, const uint16_t *src, size_t n)`
 
-Expands a BF16 array into caller-provided float storage for fallback kernels.
+Expands a bf16 array into caller-provided f32 storage. Because bf16 is
+literally the top half of an IEEE-754 float, widening is a single 16-bit left
+shift per element — no arithmetic, just bit placement — which the loop
+performs by writing through a uint32_t view of the destination.
 
 ```{.c .numberLines startFrom="124"}
 static void bf16_to_f32_buf(float *dst, const uint16_t *src, size_t n) {
@@ -2831,10 +3037,12 @@ static void bf16_matvec_fused(float *y, const float *x, const uint16_t *W_bf16,
 
 ### `void vox_linear_nobias_bf16(…)`
 
-Bias-free linear with bf16 weights: dispatches to Metal if available, uses the
-fused bf16 matvec for seq_len==1, and otherwise expands W into the shared
-bf16_scratch f32 buffer before calling the f32 vox_linear_nobias. The scratch
-buffer is reused across calls so multi-token prefill avoids per-call malloc.
+Bias-free linear with bf16 weights, dispatched three ways: Metal when
+available, the fused bf16 matvec when seq_len == 1 (the per-token decode
+case), and otherwise widening W into the shared bf16_scratch f32 buffer before
+calling the f32 vox_linear_nobias. The scratch is reused across calls, so
+multi-token prefill (the batched pass over all prompt positions) avoids a
+malloc per projection.
 
 ```{.c .numberLines startFrom="197"}
 void vox_linear_nobias_bf16(float *y, const float *x, const uint16_t *W_bf16,
@@ -2860,9 +3068,11 @@ void vox_linear_nobias_bf16(float *y, const float *x, const uint16_t *W_bf16,
 
 ### `void vox_linear_bf16(…)`
 
-Same dispatch as the nobias variant but threads the optional bias through:
-Metal/seq==1 paths add it inline, the multi-row path passes it to vox_linear
-after converting W to f32. Used for the encoder's biased Q/V/out/w2 projections.
+Same three-way dispatch as the nobias variant but threading the optional bias
+through: the Metal and seq==1 paths add it inline, the multi-row path hands it
+to vox_linear after widening W to f32. The encoder is the customer — its
+query, value, output, and FFN-w2 projections (the per-layer matmuls of the
+layer primer) carry biases, where the decoder's projections carry none.
 
 ```{.c .numberLines startFrom="216"}
 void vox_linear_bf16(float *y, const float *x, const uint16_t *W_bf16,
@@ -2895,10 +3105,11 @@ void vox_linear_bf16(float *y, const float *x, const uint16_t *W_bf16,
 
 ### `void vox_matmul_t_bf16(…)`
 
-bf16-weight version of vox_matmul_t computing C[M,N] = A[M,K] @ B_bf16[N,K]^T.
-For M==1 it uses the fused matvec directly; for M>1 it widens B into the shared
-scratch and calls vox_matmul_t. This is how decoder logits are produced from the
-tied bf16 token-embedding matrix.
+bf16-weight version of vox_matmul_t computing C[M,N] = A[M,K] @ B_bf16[N,K]^T:
+M == 1 goes straight to the fused matvec with no intermediate buffer, larger M
+widens B into the shared scratch and calls vox_matmul_t. This is how the
+decoder's logits — one raw score per vocabulary token — are produced from the
+tied bf16 token-embedding matrix, the same table used to embed input tokens.
 
 ```{.c .numberLines startFrom="242"}
 void vox_matmul_t_bf16(float *C, const float *A, const uint16_t *B_bf16,
@@ -2933,10 +3144,11 @@ void vox_matmul_t_bf16(float *C, const float *A, const uint16_t *B_bf16,
 
 ### `void vox_conv1d(…)`
 
-Direct 1D convolution with explicit symmetric padding: out length is
-(length + 2*padding - kernel_size)/stride + 1, weights are [out_ch, in_ch, k] and
-both in and out are channel-major [C, L]. Out-of-range taps are skipped rather
-than read, so no input padding buffer is materialized.
+Direct 1-D convolution — each output a weighted sum over a sliding kernel_size
+window of the input — with explicit symmetric padding: out length is
+(length + 2*padding - kernel_size)/stride + 1, weights are [out_ch, in_ch, k],
+and both in and out are channel-major [C, L]. Out-of-range taps are skipped
+rather than read, so no padded copy of the input is ever materialized.
 
 ```{.c .numberLines startFrom="270"}
 void vox_conv1d(float *out, const float *in, const float *weight, const float *bias,
@@ -2966,11 +3178,12 @@ void vox_conv1d(float *out, const float *in, const float *weight, const float *b
 
 ### `void vox_causal_conv1d(…)`
 
-Causal (left-padded) conv1d matching vLLM's WhisperCausalConv1d, with
-padding_total = kernel_size - stride applied entirely on the left. It builds an
-im2col matrix then runs a single cblas_sgemm against the [out_ch, in_ch*k]
-weights, adding bias afterward. This is the conv front end of the audio encoder
-stem.
+Causal (left-padded) conv1d matching vLLM's WhisperCausalConv1d:
+padding_total = kernel_size - stride sits entirely on the left, so outputs
+never read future samples. For speed it builds an im2col matrix (unrolling
+each input window into a column, which turns convolution into one big matrix
+multiply) and runs a single cblas_sgemm against the [out_ch, in_ch*k] weights,
+adding bias afterward. This is the conv front end of the audio encoder stem.
 
 ```{.c .numberLines startFrom="293"}
 void vox_causal_conv1d(float *out, const float *in, const float *weight, const float *bias,
@@ -3030,10 +3243,11 @@ void vox_causal_conv1d(float *out, const float *in, const float *weight, const f
 
 ### `void vox_rms_norm(…)`
 
-Per-row RMSNorm over [seq,hidden]: divides each row by sqrt(mean(x^2)+eps) then
-scales elementwise by the learned weight vector. eps is added inside the sqrt (to
-the mean-square), not to the rms, and there is no mean-subtraction or bias since
-this is RMS rather than LayerNorm.
+Per-row RMSNorm: divide each row by its root-mean-square so values land in a
+stable range, then scale elementwise by the learned weight (see the layer
+primer). Two precision details are load-bearing: eps is added inside the sqrt
+— to the mean-square, not to the rms — and there is no mean subtraction or
+bias, which is exactly what distinguishes RMSNorm from LayerNorm.
 
 ```{.c .numberLines startFrom="346"}
 void vox_rms_norm(float *out, const float *x, const float *weight,
@@ -3098,10 +3312,12 @@ void vox_gelu(float *x, int n) {
 
 ### `void vox_softmax(float *x, int rows, int cols)`
 
-Numerically-stable row-wise softmax over an [rows,cols] matrix, done in place:
-subtract the per-row max before exp, then divide by the row sum. The standalone
-attention kernel instead fuses softmax online, so this is used where full score
-rows are materialized.
+Numerically stable row-wise softmax — rewriting each row as positive weights
+that sum to 1 — done in place: subtract the per-row max before exponentiating,
+then divide by the row sum; without the max shift, scores near 90 would
+already overflow expf. The attention kernel below fuses its own softmax
+online, so this standalone version serves the places where full score rows are
+materialized.
 
 ```{.c .numberLines startFrom="386"}
 void vox_softmax(float *x, int rows, int cols) {
@@ -3134,12 +3350,16 @@ void vox_softmax(float *x, int rows, int cols) {
 
 ### `void vox_causal_attention(…)`
 
-Single-pass GQA attention producing out[seq_q, n_heads*head_dim] from Q and the
-cached K/V laid out [seq_k, n_kv_heads*head_dim]. Each query head h maps to KV
-head h/(n_heads/n_kv_heads); attendance runs from k_start (sliding-window lower
-bound) to global_pos+1, where global_pos = q_offset+i gives the causal cutoff. It
-uses online softmax with a running max and correction factor so V is accumulated
-in one pass without storing the score row.
+The scalar reference for attention — each query scores every visible key, and
+the softmax of those scores weights an average of the value vectors, the layer
+primer's core equation — in a single pass over out[seq_q, n_heads*head_dim].
+It supports GQA: query head h reads KV head h/(n_heads/n_kv_heads), so several
+query heads share one cached K/V stream. Each query attends from k_start (the
+sliding-window lower bound) to global_pos+1, where global_pos = q_offset + i
+enforces causality — no reading later positions. The online softmax is the
+subtle part: a running max and correction factor let V be accumulated in one
+pass without ever storing the score row, so scratch memory stays O(head_dim)
+regardless of sequence length.
 
 ```{.c .numberLines startFrom="412"}
 void vox_causal_attention(float *out, const float *Q, const float *K, const float *V,
@@ -3222,9 +3442,12 @@ void vox_causal_attention(float *out, const float *Q, const float *K, const floa
 
 ### `void vox_compute_rope_freqs(float *freqs, const int *pos, int seq, int dim, float theta)`
 
-Precomputes interleaved cos/sin RoPE coefficients into freqs[seq, head_dim/2, 2]
-for the given integer positions, with per-dimension frequency 1/theta^(2d/dim).
-Storing both cos and sin once per position lets vox_apply_rope stay branch-free.
+Precomputes the cos/sin coefficients for RoPE (position injected by rotating
+query/key coordinate pairs — see the RoPE section of the intro) into
+freqs[seq, head_dim/2, 2] for the given integer positions, with per-pair
+frequency 1/theta^(2d/dim). Doing the trig once per position here lets
+vox_apply_rope stay a branch-free multiply-add loop even though it runs once
+per layer.
 
 ```{.c .numberLines startFrom="488"}
 void vox_compute_rope_freqs(float *freqs, const int *pos, int seq, int dim, float theta) {
@@ -3245,11 +3468,14 @@ void vox_compute_rope_freqs(float *freqs, const int *pos, int seq, int dim, floa
 
 ### `void vox_apply_rope(float *x, const float *freqs, int seq, int heads, int head_dim)`
 
-Applies rotary embedding in place to x[seq, heads*head_dim] using the cos/sin
-pairs from vox_compute_rope_freqs. It rotates adjacent element pairs
-(x0,x1) -> (x0*cos - x1*sin, x0*sin + x1*cos), the interleaved (GPT-J-style)
-pairing of adjacent dimensions (not the rotate-half GPT-NeoX convention).
-Called on Q and K before they enter attention and before K is written to cache.
+Applies the RoPE rotation (the position encoding) in place to
+x[seq, heads*head_dim] using the precomputed cos/sin pairs: adjacent elements
+(x0,x1) become (x0*cos - x1*sin, x0*sin + x1*cos) — each pair is one 2-D
+rotation by the position-dependent angle. This is the interleaved
+(GPT-J-style) pairing of adjacent dimensions, not the rotate-half GPT-NeoX
+layout; choosing the wrong pairing silently yields wrong output. It runs on Q
+and K before attention, and crucially before K is written to the KV cache,
+which is why cached keys carry their positions baked in.
 
 ```{.c .numberLines startFrom="502"}
 void vox_apply_rope(float *x, const float *freqs, int seq, int heads, int head_dim) {

@@ -89,7 +89,8 @@ projection 25 MB, the merged gate/up FFN weights 113 MB, and the down projection
 for the final logits matmul against the tied token-embedding table. Call it
 **~7 GB of weight reads per token**.
 
-The arithmetic per token is tiny by GPU standards (one position, matvecs), so
+The arithmetic per token is tiny by GPU standards (one position, matvecs —
+matrix-vector products), so
 the GPU's compute units are mostly waiting on memory. Tokens per second is
 therefore approximately *memory bandwidth ÷ bytes per token*: at the ~12.5
 tokens/s the realtime checkpoint targets, the runtime sustains on the order of

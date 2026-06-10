@@ -8,7 +8,9 @@ first meaningful use, where its local design consequences are easier to see.
 ## Swift language
 
 `actor`
-: A reference type whose mutable state is isolated by Swift concurrency.
+: A reference type whose mutable state is isolated by Swift concurrency: at
+  most one task touches that state at a time, and outside callers may need
+  `await` to enter.
 
 ARC
 : Automatic Reference Counting, Swift and Objective-C's compiler-assisted
@@ -26,6 +28,9 @@ attribute
 : Metadata beginning with `@`, such as `@discardableResult` or `@MainActor`,
   that changes compiler checking or generated behavior.
 
+`Binding<T>`
+: A typed getter/setter pair exposed as mutable state to SwiftUI controls.
+
 closure
 : An anonymous function value that can capture variables from its surrounding
   scope. `{ $0.id == target }` uses `$0` for its first inferred parameter.
@@ -36,8 +41,16 @@ closure
 computed property
 : A property implemented by accessor code rather than a stored field.
 
+continuation
+: A handle representing a suspended `async` caller. Resuming it — exactly once —
+  with a value or an error restarts the suspended code; it is the bridge from
+  callback-style APIs into `async` functions.
+
 copy-on-write
 : Value semantics implemented by sharing storage until one copy mutates.
+
+`deinit`
+: Finalizer run when the last strong reference to a class instance is released.
 
 `enum`
 : A compiler-checked sum type. Cases may carry typed payloads, making it
@@ -66,6 +79,10 @@ generic type
 `LocalizedError`
 : Foundation protocol exposing a human-readable error description.
 
+`@MainActor`
+: Global-actor annotation isolating a declaration to Swift's main executor —
+  the "main actor" that owns UI-visible state in this application.
+
 `mutating`
 : Allows a struct or enum method to modify `self`.
 
@@ -74,6 +91,9 @@ generic type
 
 nil coalescing (`??`)
 : Returns an optional's wrapped value or a fallback when it is `nil`.
+
+`@Observable`
+: Observation-framework macro that synthesizes change tracking used by SwiftUI.
 
 optional chaining (`?.`)
 : Calls a member only when the preceding optional contains a value.
@@ -84,6 +104,10 @@ optional chaining (`?.`)
 `private(set)`
 : Exposes a property getter more widely than its setter.
 
+property wrapper
+: A type attached to a property with `@Name` syntax that supplies the
+  property's storage or access behavior; SwiftUI's `@State` is an example.
+
 `protocol`
 : A compiler-checked interface contract.
 
@@ -91,8 +115,23 @@ optional chaining (`?.`)
 : Concurrency protocol indicating that a value may cross isolation boundaries.
   It does not serialize mutable implementation state.
 
+serial queue
+: A Grand Central Dispatch queue (`DispatchQueue`) that runs submitted
+  closures one at a time in submission order. Code that touches a resource
+  only from one serial queue gets mutual exclusion without a separate lock.
+
+`some Protocol`
+: Opaque return type hiding one concrete type while preserving static typing.
+
+`@State`
+: SwiftUI property wrapper providing persistent framework-managed storage to a
+  transient view value.
+
 `struct`
 : A Swift value type. Assignment conceptually copies the value.
+
+`Task`
+: Unit of Swift asynchronous work with cancellation and task-local context.
 
 `throws`, `throw`, and `try`
 : Swift's structured error-propagation mechanism.
@@ -101,68 +140,113 @@ trailing closure
 : Syntax placing a function's final closure argument after the closing
   parenthesis.
 
-`var`
-: Declares a mutable binding or stored property.
-
-`@MainActor`
-: Global-actor annotation isolating a declaration to Swift's main executor.
-
-`@Observable`
-: Observation-framework macro that synthesizes change tracking used by SwiftUI.
-
-`@State`
-: SwiftUI property wrapper providing persistent framework-managed storage to a
-  transient view value.
-
 `@unchecked Sendable`
 : Manual promise that a type satisfies cross-isolation safety even though the
   compiler cannot prove it.
 
-`@ViewBuilder`
-: Result builder used to compose declarative SwiftUI child expressions.
-
-`Binding<T>`
-: A typed getter/setter pair exposed as mutable state to SwiftUI controls.
-
-`deinit`
-: Finalizer run when the last strong reference to a class instance is released.
-
-`some Protocol`
-: Opaque return type hiding one concrete type while preserving static typing.
-
-`Task`
-: Unit of Swift asynchronous work with cancellation and task-local context.
-
 `Unmanaged<T>`
 : Explicit retain/release interface for passing Swift object references through
   C APIs that do not participate in ARC.
+
+`var`
+: Declares a mutable binding or stored property.
+
+`@ViewBuilder`
+: Result builder used to compose declarative SwiftUI child expressions.
 
 ## Application and models
 
 ASR
 : Automatic Speech Recognition.
 
+attention
+: The transformer operation that moves information between sequence positions:
+  each position's query is scored against every key, softmax turns the scores
+  into weights, and the weighted sum of values becomes that position's new
+  content.
+
+attention head
+: One of several parallel attention units inside a layer, each operating on
+  its own slice of the position vector, so different heads can track different
+  relationships.
+
 attention KV cache
 : Key-value cache retaining transformer attention projections from previous
-  positions during autoregressive decoding.
+  positions during autoregressive decoding, so each new position reads them
+  instead of recomputing them.
 
 AUHAL
-: Audio Unit Hardware Abstraction Layer.
+: Audio Unit Hardware Abstraction Layer, the macOS Audio Unit that exposes
+  hardware input/output devices to applications.
+
+autoregressive
+: Generating a sequence one token at a time, each conditioned on everything
+  generated before it.
+
+BF16
+: Brain Floating Point, a 16-bit floating-point format that keeps float32's
+  8-bit exponent with a shorter fraction. It is not interchangeable with FP16.
+
+BLAS
+: Basic Linear Algebra Subprograms, the standard interface to tuned
+  matrix/vector routines; Apple's implementation lives in Accelerate.
+
+checkpoint
+: A saved set of trained model weights.
 
 CLI
 : Command-Line Interface.
 
 dBFS
-: Decibels relative to Full Scale.
+: Decibels relative to Full Scale, a logarithmic level measure in which 0 is
+  the loudest representable sample and more negative is quieter.
+
+DFT
+: Discrete Fourier Transform; rewrites a finite sampled signal as a sum of
+  sinusoids, giving the energy contributed by each frequency.
 
 DTO
 : Data Transfer Object.
 
+embedding
+: A learned numeric vector that represents a token, position, or other input
+  inside the model.
+
+FFT
+: Fast Fourier Transform, a fast algorithm for computing the DFT.
+
 FIFO
 : First In, First Out.
 
+FP16
+: IEEE-754 binary16 half-precision floating-point format.
+
+GELU
+: Gaussian Error Linear Unit, a smooth nonlinear activation.
+
 GPU
 : Graphics Processing Unit.
+
+GQA
+: Grouped-Query Attention: more query heads than key/value heads, each group
+  of query heads sharing one K/V head. It shrinks the KV cache (fourfold in
+  this decoder) at a small quality cost.
+
+greedy decoding
+: Always choosing the single highest-scoring token (the argmax of the logits)
+  instead of sampling, which makes generation deterministic.
+
+kernel (GPU)
+: A function compiled for the GPU and executed by every thread of a dispatch
+  grid, each thread computing one output element.
+
+logits
+: The raw per-vocabulary-entry scores a model produces before a token is
+  selected; argmax or softmax converts them into a choice.
+
+mel scale
+: A perceptual pitch scale, roughly logarithmic in frequency, on which equal
+  steps sound equally far apart to a human listener.
 
 MLX
 : Apple's array and machine-learning framework for Apple silicon.
@@ -170,11 +254,89 @@ MLX
 MLX-LM
 : Language-model tooling built on MLX.
 
+MPS
+: Metal Performance Shaders, Apple's library of tuned GPU primitives.
+
+MSL
+: Metal Shading Language, the C++-like language Metal kernels are written in.
+
+`MTLBuffer`
+: Metal byte allocation visible to GPU commands and, depending on storage mode,
+  the CPU.
+
+`MTLCommandBuffer`
+: Ordered collection of Metal commands submitted to a command queue.
+
 PCM
-: Pulse-Code Modulation.
+: Pulse-Code Modulation: audio stored as a stream of integer samples taken at
+  a fixed rate.
+
+pipeline state
+: A compiled, executable form of one GPU shader function. Creating it is
+  expensive, so the runtime caches pipeline state objects per kernel.
+
+prefill
+: Processing all positions of an existing prompt in one batched pass, filling
+  the KV cache, before one-token-at-a-time decoding begins.
 
 RMS
-: Root Mean Square.
+: Root Mean Square, the square root of the mean of squared samples — a
+  loudness measure.
+
+RMSNorm
+: Root Mean Square Layer Normalization.
+
+RoPE
+: Rotary Position Embedding; encodes position by rotating query/key vector
+  pairs by position-dependent angles, so attention sees relative distance.
+
+sample rate
+: The number of audio measurements (samples) per second; this application
+  converts capture to 16,000 samples per second.
+
+SiLU
+: Sigmoid Linear Unit activation.
+
+SIMD group
+: The hardware subdivision of a Metal threadgroup (32 threads on Apple GPUs)
+  whose threads execute in lockstep and can exchange values directly.
+
+softmax
+: Normalizes a vector of scores into positive weights that sum to one, by
+  exponentiating each entry and dividing by the total.
+
+spectrogram
+: A time-frequency picture of a signal: each column is one short time frame,
+  each row the energy in one frequency band.
+
+SPM
+: Swift Package Manager.
+
+STFT
+: Short-Time Fourier Transform: a DFT applied to successive overlapping
+  windows of a signal, producing a spectrogram.
+
+temperature
+: A sampling parameter that scales logits before a token is chosen; zero (or
+  greedy decoding) always picks the most likely token.
+
+tensor
+: A multi-dimensional numeric array, the unit of model computation; its shape,
+  such as `[sequence, dimension]`, is part of its meaning.
+
+threadgroup
+: A block of GPU threads dispatched together that share a small fast memory
+  and can synchronize at a barrier; a dispatch grid is divided into
+  threadgroups.
+
+token
+: A model-chosen unit of text, often a word fragment or byte sequence; the
+  tokenizer maps token ids to bytes and back.
+
+transformer
+: A neural-network architecture built from stacked layers of attention and
+  feed-forward blocks; both the Voxtral audio encoder and text decoder are
+  transformers.
 
 UI
 : User Interface.
@@ -185,38 +347,9 @@ UUID
 WAV
 : Waveform Audio File Format.
 
-FFT
-: Fast Fourier Transform.
-
-FP16
-: IEEE-754 binary16 half-precision floating-point format.
-
-GELU
-: Gaussian Error Linear Unit activation.
-
-MSL
-: Metal Shading Language.
-
-MPS
-: Metal Performance Shaders.
-
-RMSNorm
-: Root Mean Square Layer Normalization.
-
-RoPE
-: Rotary Position Embedding.
-
-SiLU
-: Sigmoid Linear Unit activation.
-
-SPM
-: Swift Package Manager.
-
-STFT
-: Short-Time Fourier Transform.
-
 WER
-: Word Error Rate.
+: Word Error Rate: word insertions, deletions, and substitutions divided by
+  the reference word count.
 
 ## Networking and formats
 
@@ -229,14 +362,33 @@ API
 ASCII
 : American Standard Code for Information Interchange.
 
-BF16
-: Brain Floating Point, a 16-bit floating-point format.
+Base64
+: Binary-to-text encoding representing each 24 input bits as four printable
+  characters, normally expanding data by roughly one third.
 
-BLAS
-: Basic Linear Algebra Subprograms.
+bearer token (capability)
+: A secret random value whose possession alone authorizes access, with no
+  account identity; the caption viewer and student URLs each embed one.
+
+Bonjour
+: Apple's zero-configuration networking: multicast DNS name lookup plus DNS
+  Service Discovery on the local network.
+
+DNS
+: Domain Name System, the protocol that maps names to network addresses;
+  Bonjour uses its multicast form on the local network.
+
+endpoint
+: A network address a client sends requests to — host and port, plus a path
+  for HTTP.
+
+`EventSource`
+: The browser's built-in SSE client object; it opens the stream and
+  automatically reconnects after interruptions.
 
 HTTP
-: Hypertext Transfer Protocol.
+: Hypertext Transfer Protocol, the request/response protocol used by web
+  clients and servers.
 
 I/O
 : Input/Output.
@@ -250,6 +402,19 @@ JSON
 little-endian
 : Integer byte order storing the least significant byte first.
 
+loopback
+: The machine-internal network interface (127.0.0.1); traffic sent to it never
+  leaves the computer.
+
+`mmap`
+: POSIX operation mapping file-backed bytes into a process's virtual address
+  space.
+
+NAT
+: Network Address Translation: a router rewrites addresses so many devices
+  share one outward address, which can make distinct clients appear to be one
+  source.
+
 PC
 : Personal Computer.
 
@@ -259,39 +424,35 @@ POST
 QR
 : Quick Response code.
 
+rate limiting
+: Rejecting requests that exceed a configured count per time window. It
+  protects availability; it does not prove identity.
+
 RIFF
 : Resource Interchange File Format, the chunk container used by WAV.
 
 SSE
-: Server-Sent Events.
+: Server-Sent Events: one HTTP response stays open and the server appends
+  UTF-8 `event:`/`data:` blocks that the browser receives incrementally — a
+  one-way push stream.
 
 TCP
-: Transmission Control Protocol.
+: Transmission Control Protocol, the reliable ordered byte-stream transport
+  beneath HTTP.
 
 URL
 : Uniform Resource Locator.
 
+`URLSession`
+: Foundation's HTTP client. Requests run asynchronously; results arrive
+  through completion callbacks, delegate methods, or `async` calls.
+
 UTF-8
 : Unicode Transformation Format, 8-bit form.
+
+WebSocket
+: HTTP-upgraded bidirectional framed transport over one connection.
 
 Wi-Fi
 : Wi-Fi Alliance brand name for IEEE 802.11 wireless networking. It is not an
   acronym for “Wireless Fidelity.”
-
-Base64
-: Binary-to-text encoding representing each 24 input bits as four printable
-  characters, normally expanding data by roughly one third.
-
-`mmap`
-: POSIX operation mapping file-backed bytes into a process's virtual address
-  space.
-
-`MTLBuffer`
-: Metal byte allocation visible to GPU commands and, depending on storage mode,
-  the CPU.
-
-`MTLCommandBuffer`
-: Ordered collection of Metal commands submitted to a command queue.
-
-WebSocket
-: HTTP-upgraded bidirectional framed transport over one connection.

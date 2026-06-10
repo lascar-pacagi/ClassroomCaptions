@@ -71,7 +71,9 @@ ClassroomCaptions.app/
 
 The packaging script builds release code, creates this hierarchy, copies the
 executable/property list, and ad-hoc code-signs the bundle with
-`codesign --force --deep --sign -`. Model weights are
+`codesign --force --deep --sign -` (an ad-hoc signature carries no developer
+identity; it is the minimum signing Apple-silicon macOS requires to run an
+executable). Model weights are
 not copied into the bundle because they are tens of gigabytes and have an
 independent download/update lifecycle.
 
@@ -85,7 +87,9 @@ nominally compatible.
 ## Documentation build
 
 The book build first regenerates source chapters and verifies byte-for-byte
-coverage, then asks Quarto to render HTML and Typst/PDF. Generated chapters are
+coverage, then asks Quarto (the publishing system that builds this book) to
+render HTML and Typst/PDF (Typst is the typesetting engine used for the PDF
+output). Generated chapters are
 artifacts; human explanations live in generator metadata, introductions, and
 figures so rebuilding does not erase them.
 
@@ -105,6 +109,21 @@ Length: 52 lines. SHA-256: `419b0d7980ec3b8c9921df61ed62d3d79d44c6126c5a1c7dae26
 ### Imports and file preamble {.unnumbered .unlisted}
 
 The file begins by importing `PackageDescription`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
+
+The whole file is one `Package(...)` call that Swift Package Manager compiles
+and runs to learn the build graph; the `// swift-tools-version: 6.2` comment on
+line 1 is mandatory and pins which manifest dialect SPM applies. Each entry in
+`targets` is a compilation unit (one source directory built into one module):
+`CVoxtralEngine` holds the C/Objective-C engine and so carries the C-only knobs
+— `.define` adds `-D` preprocessor macros, `.unsafeFlags` passes `-O3
+-march=native` to the C compiler verbatim, and each `.linkedFramework` plays
+the role of a `-l` linker argument, naming the Apple system library to link
+(Accelerate for BLAS, the Metal trio for the GPU). Each entry in `products` is
+what a consumer can ask SPM to build or link against: the GUI executable, the
+benchmark executable, and the importable core library. The `dependencies`
+arrays replace hand-written Makefile rules — SPM derives compile order and
+link lines from them — and the test target depends on all three modules so the
+tests can exercise each layer directly.
 
 ```{.swift .numberLines startFrom="1"}
 // swift-tools-version: 6.2
@@ -176,6 +195,20 @@ Length: 34 lines. SHA-256: `4b6d794e278ffa1ad373afba8a2119c7aac8416760b9735b4aa3
 
 This preamble establishes file-level context for the declarations below.
 
+`Info.plist` is the bundle's identity card: macOS reads this XML dictionary,
+not the executable, to learn what the application is and what it may request.
+The `CFBundle*` keys supply the launcher's facts — executable name, the
+reverse-DNS identifier `org.classroomcaptions.app` (the unique name macOS files
+permissions and preferences under), display name, version strings, and package
+type `APPL`, meaning "application". `LSMinimumSystemVersion` lets the system
+refuse to launch on macOS older than 15, and `NSHighResolutionCapable` opts
+into native Retina rendering instead of pixel-doubled scaling. The last three
+keys are security declarations: macOS shows the microphone and local-network
+strings verbatim in its permission dialogs and denies those capabilities
+outright when the key is absent, and `NSBonjourServices` names the one Bonjour
+(Apple's local-network service discovery) service type, `_classcaptions._tcp`,
+the app uses to be found by the paired phone.
+
 ```{.xml .numberLines startFrom="1"}
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -236,6 +269,15 @@ This map gives the reading spine of the file. Line numbers refer to the original
 
 The module preamble imports standard-library dependencies and defines configuration shared by the functions below.
 
+Every import is Python standard library — `urllib.request` for HTTP,
+`hashlib` for SHA-256, and `argparse`/`json`/`os`/`time`/`pathlib` for
+plumbing — so the downloader runs on stock Python 3 with nothing to install.
+The two module constants pin what a valid installation means: `REPOSITORY`
+names the Hugging Face repository (huggingface.co hosts model files in
+git-like repositories), and `FILES` lists the three required artifacts — the
+weights (`consolidated.safetensors`), the tokenizer data (`tekken.json`), and
+the architecture parameters (`params.json`).
+
 ```{.python .numberLines startFrom="1"}
 #!/usr/bin/env python3
 
@@ -280,10 +322,16 @@ def default_destination():
 
 ### `def download(filename, destination):`
 
-Downloads one artifact through an adjacent `.partial` file. Existing bytes
-produce an HTTP Range request; if the server does not confirm a content range,
-the function restarts safely in write mode. Eight-MiB chunks bound memory, and
-atomic `os.replace` publishes only a complete file.
+Downloads one artifact through an adjacent `.partial` file so an interrupted
+multi-gigabyte transfer resumes instead of starting over. Existing bytes
+produce an HTTP Range request (a standard header asking the server to send
+only the bytes from a given offset onward); the server confirms with a
+`Content-Range` reply header, and if that confirmation is absent the function
+restarts safely in write mode from byte zero rather than appending to a file
+the server is resending from the start. Eight-MiB chunks bound memory while
+feeding the live progress line, and the final `os.replace` is an atomic
+rename: the real filename only ever names a complete file, which is exactly
+the existing-and-non-empty test `main` relies on to skip finished downloads.
 
 ```{.python .numberLines startFrom="31"}
 def download(filename, destination):
@@ -409,6 +457,19 @@ Length: 26 lines. SHA-256: `fba6673c2c8f818e9084817417e0038e910e847874d52d41ce21
 
 The script preamble selects the interpreter and failure behavior before any build operation runs.
 
+A thin launcher that turns environment variables into benchmark flags.
+`set -euo pipefail` makes bash abort on any failed command, unset variable, or
+failure inside a pipeline, and `ROOT_DIR` resolves the repository root from
+the script's own location so the script works from any directory. The
+`${VAR:-default}` expansions let `VOXTRAL_MODEL_DIR`, `VOXTRAL_DELAY_MS`,
+`VOXTRAL_PROCESSING_INTERVAL`, and `VOXTRAL_CHUNK_MS` override the model path
+and timing knobs without editing the file, while `ARGS=(...)` with
+`"${ARGS[@]}"` is bash's array idiom for building an argument list that
+survives embedded spaces (the default model path contains one); a second
+positional argument adds an optional reference transcript. The closing
+`swift run -c release VoxtralBenchmark` compiles the benchmark in release
+mode if needed and runs it — SPM's equivalent of `make && ./bench`.
+
 ```{.bash .numberLines startFrom="1"}
 #!/usr/bin/env bash
 
@@ -450,6 +511,18 @@ Length: 21 lines. SHA-256: `4a83ebbea4e736500b0c1eff49a6b5af1428c72d9c985a069647
 
 The script preamble selects the interpreter and failure behavior before any build operation runs.
 
+The bridge from SPM's bare executable to the `.app` directory bundle macOS
+expects. It first builds the requested configuration (release by default),
+then assembles the bundle by hand: `rm -rf` clears any stale previous bundle,
+`Contents/MacOS/` receives the executable, `Contents/Info.plist` the property
+list, and `Contents/Resources/` is created for the conventional layout. The
+final `codesign --force --deep --sign -` applies an ad-hoc signature (`-`
+means sign with no developer certificate, just checksums of the bundle's
+contents) — enough for the machine that built it to launch the app and for
+macOS to associate its permission grants with stable code, but not enough to
+distribute to other Macs. Echoing the bundle path lets calling tooling pick
+up the result.
+
 ```{.bash .numberLines startFrom="1"}
 #!/usr/bin/env bash
 
@@ -485,6 +558,17 @@ Length: 9 lines. SHA-256: `5e0debc599111085ad117f23f8a730aa4322081f71266b10ec735
 ### Script preamble {.unnumbered .unlisted}
 
 The script preamble selects the interpreter and failure behavior before any build operation runs.
+
+The book's entire build in three commands, run from the repository root; the
+`CDPATH=` prefix neutralizes the shell's `cd` search-path feature so the
+`pwd` capture is clean wherever the script is invoked from.
+`generate_source_book.py` regenerates every `docs/generated/*.qmd` chapter
+from the real sources — including the byte-for-byte reconstruction check this
+chapter's introduction describes — `generate_domain_chapter.py` rebuilds the
+domain chapter, and only then does `quarto render docs` turn the Markdown
+into the HTML and PDF book. Plain `/bin/sh` with `set -eu` suffices because
+there are no pipelines: any failed step or unset variable stops the build
+instead of publishing a stale book.
 
 ```{.bash .numberLines startFrom="1"}
 #!/bin/sh

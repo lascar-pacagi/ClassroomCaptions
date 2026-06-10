@@ -64,7 +64,7 @@ The overlay requires behavior outside ordinary SwiftUI scene control:
 - no application activation when clicked;
 - explicit window level;
 - placement on a chosen `NSScreen`;
-- Spaces/full-screen collection behavior;
+- Spaces (macOS virtual desktops)/full-screen collection behavior;
 - pointer-level move and resize;
 - frame persistence per physical display.
 
@@ -102,7 +102,8 @@ invoke workflows; helper properties split a large dashboard into readable view
 fragments.
 
 The QR helper supplies UTF-8 URL bytes to Core Image, requests correction level
-M, then applies an integer scale without interpolation. The result transfers a
+M (a medium QR error-correction setting; Chapter 11 details the encoding), then
+applies an integer scale without interpolation. The result transfers a
 bearer URL visually; it does not add encryption or authentication.
 
 Length: 975 lines. SHA-256: `ef9502c8f3a153eb3d8a74e98555d7b383b7f491a57f183b055992c162f93eb3`.
@@ -122,6 +123,12 @@ This map gives the reading spine of the file. Line numbers refer to the original
 
 The file begins by importing `AppKit`, `ClassroomCaptionsCore`, `CoreImage`, `SwiftUI`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
+The dashboard needs all four imports: `SwiftUI` for the declarative controls,
+`AppKit` for the clipboard (`NSPasteboard`) and the `NSImage` QR bitmap,
+`CoreImage.CIFilterBuiltins` for the typed QR-code generator filter, and
+`ClassroomCaptionsCore` for the shared domain types (correction modes and
+states) the controls tag and display.
+
 ```{.swift .numberLines startFrom="1"}
 import AppKit
 import ClassroomCaptionsCore
@@ -132,12 +139,16 @@ import SwiftUI
 
 ### `struct DashboardView: View`
 
-The single SwiftUI dashboard, driven by an `@Bindable` `ClassroomAppModel`.
-Its `body` is a `NavigationSplitView` whose detail column stacks every settings
-group (session, iPhone sharing, questions, diagnostics, microphone, archive,
-Voxtral, correction, overlay, manual input, transcript). The `onChange` hooks
-forward display and font-size edits to `refreshOverlay` and correction-toggle
-edits to `correctionSettingChanged`, so all live state lives in the model.
+One SwiftUI view renders the whole dashboard. `@Bindable` lets the `$model.x`
+spelling used throughout the file produce a `Binding` (a get/set pair) into the
+observable `ClassroomAppModel`, so every toggle and text field edits model
+state directly rather than a view-local copy. Its `body` — the property SwiftUI
+re-evaluates whenever observed model data changes — is a `NavigationSplitView`
+(a sidebar-plus-detail layout) whose detail column stacks every settings group:
+session, iPhone sharing, questions, diagnostics, microphone, archive, Voxtral,
+correction, overlay, manual input, transcript. The `onChange` hooks forward
+display and font-size edits to `refreshOverlay` and correction-toggle edits to
+`correctionSettingChanged`, so all live state lives in the model.
 
 ```{.swift .numberLines startFrom="6"}
 struct DashboardView: View {
@@ -258,6 +269,14 @@ struct DashboardView: View {
 ```
 
 ### Continuation of `struct DashboardView: View` {.unnumbered .unlisted}
+
+This page renders the iPhone Live Captions group and the opening of the
+Anonymous Student Questions group. The sharing group swaps which start/stop
+button is prominent by state, copies the pairing URL to `NSPasteboard` (the
+system clipboard), and picks among three explanatory captions with
+`if case .failed(let message)` (pattern matching that extracts the error text
+from the status enum); the pairing QR image appears on the right only while a
+pairing URL exists.
 
 ```{.swift .numberLines startFrom="121"}
     private var iphoneSharing: some View {
@@ -395,6 +414,13 @@ struct DashboardView: View {
 
 ### Continuation of `struct DashboardView: View` {.unnumbered .unlisted}
 
+Still inside the student-questions group: the student QR link and copy button,
+the pending-queue row (Show Next / Dismiss Current / Clear Pending, each
+disabled exactly when its model precondition fails), and two voice-phrase text
+fields bound through `$model` that gray out while spoken overlay controls are
+off. The currently presented question, when there is one, is echoed in a
+selectable card so the professor sees what the classroom overlay is showing.
+
 ```{.swift .numberLines startFrom="252"}
                     if let url = model.studentQuestionURL {
                         Text("Students scan this QR code to submit anonymous text questions.")
@@ -511,10 +537,16 @@ struct DashboardView: View {
 
 ### `private func pairingQRCode(for url: URL) -> NSImage?`
 
-Formats Gemma's resident footprint, but when the byte count is still nil it
-distinguishes "Detecting..." (server ready, identity not yet resolved) from
-"Not loaded" based on `correctionServerReady`, so the row never falsely reads
-zero before the MLX process is found.
+Two jobs share this block. `pairingQRCode` turns a URL into a QR image: Core
+Image's built-in `qrCodeGenerator` filter encodes the URL's UTF-8 bytes at
+error-correction level M, a 10x affine scale enlarges the tiny native output,
+and an `NSCIImageRep` wraps the result as the `NSImage` the dashboard shows
+(call sites add `.interpolation(.none)` so the modules stay crisp squares).
+The rest is the Live Diagnostics grid behind the `showLiveDiagnostics` toggle:
+token-rate and memory rows whose summary helpers degrade to a dash or a status
+word when a value is nil — `gemmaMemorySummary` distinguishes "Detecting…"
+(server ready, MLX process identity not yet resolved) from "Not loaded" via
+`correctionServerReady`, so the Gemma memory row never falsely reads zero.
 
 ```{.swift .numberLines startFrom="363"}
     private func pairingQRCode(for url: URL) -> NSImage? {
@@ -649,11 +681,15 @@ zero before the MLX process is found.
 
 ### `private func formatMemory(_ bytes: UInt64) -> String`
 
-The Gemma correction group: a Standard/Science mode picker, a previous-captions
-context stepper, and server/model/endpoint fields (disabled during an active or
-starting session). Shows readiness, queue depth, and last latency, and either
-the current `correctionError` or the standing note that questions are proofread
-as quoted data and answer-like output is rejected.
+`formatMemory` wraps Foundation's `ByteCountFormatter` in its memory style so
+every diagnostics row prints byte counts the same human-readable way. The rest
+of this page is the Caption Overlay group — display picker, 24-64 pt text-size
+slider, a master toggle for spoken overlay controls, and three phrase fields —
+all bound straight into the model; the `showVoiceCommand` helper family below
+substitutes the default French phrases when a field is left blank, so the hint
+text never quotes an empty phrase (a blank field actually disables
+spoken-command recognition until it is refilled). The Gemma 4 correction group
+then opens with its Standard/Science segmented mode picker.
 
 ```{.swift .numberLines startFrom="491"}
     private func formatMemory(_ bytes: UInt64) -> String {
@@ -789,6 +825,16 @@ as quoted data and answer-like output is rejected.
 
 ### Continuation of `private func formatMemory(_ bytes: UInt64) -> String` {.unnumbered .unlisted}
 
+This page finishes the Gemma correction group: captions restating the chosen
+mode and context depth, a 0-8 previous-captions stepper, and server, model, and
+endpoint fields disabled during an active or starting session so the pipeline
+cannot be reconfigured mid-class. A status row shows readiness, queue depth,
+and last latency; the footer is either the current `correctionError` or the
+standing note that questions are proofread as quoted data and answer-like
+output is rejected. The Microphone group then begins: an input picker and
+refresh button locked while listening, plus a live level meter and a counter
+of captured audio bytes.
+
 ```{.swift .numberLines startFrom="620"}
                 Text(
                     model.correctionMode == .science
@@ -917,6 +963,16 @@ as quoted data and answer-like output is rejected.
 
 ### Continuation of `private func formatMemory(_ bytes: UInt64) -> String` {.unnumbered .unlisted}
 
+The Microphone group closes with either the capture error or a reminder that
+audio is converted locally to 16 kHz mono PCM. The Session Recording group's
+toggle and folder field are disabled while a session is active or starting (the
+folder also when recording is off), and it shows the last archive path with a
+Show in Finder button. The Voxtral Realtime group then opens with a backend
+picker that swaps which fields appear — model directory plus a max-context
+slider for the embedded backend, endpoint and model identifier fields for the
+WebSocket one — with controls locked while listening, starting, or connected
+so the backend cannot be reconfigured mid-stream.
+
 ```{.swift .numberLines startFrom="743"}
                 if let microphoneError = model.microphoneError {
                     Text(microphoneError)
@@ -1037,6 +1093,14 @@ as quoted data and answer-like output is rejected.
 ```
 
 ### Continuation of `private func formatMemory(_ bytes: UInt64) -> String` {.unnumbered .unlisted}
+
+The Voxtral group finishes with the shared model-delay slider (the 240-1200 ms
+commit interval), a caption explaining either the embedded context limit or the
+WebSocket compatibility mode, and a connection row that reports first-caption
+latency. Below it, the Development Caption Input group feeds the timeline by
+hand (`onSubmit` fires when Return is pressed in the field), and Recent
+Captions lists each finalized segment with its sequence number, text, and
+correction badge.
 
 ```{.swift .numberLines startFrom="859"}
                 GridRow {
@@ -1224,6 +1288,10 @@ This map gives the reading spine of the file. Line numbers refer to the original
 
 The file begins by importing `AppKit`, `SwiftUI`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
+Only two imports: `AppKit` for the panel, views, screens, cursors, and mouse
+events this file drives directly, and `SwiftUI` for the caption content the
+panel hosts. The file is precisely the bridge between those two UI systems.
+
 ```{.swift .numberLines startFrom="1"}
 import AppKit
 import SwiftUI
@@ -1232,11 +1300,13 @@ import SwiftUI
 
 ### `private final class OverlayInteractionView: NSView`
 
-A borderless `NSView` overlaid on the caption panel that owns only the move and
-resize gestures. It is non-opaque and reports drag translations via `onDrag`
-plus a completion via `onDragEnded`. It sits in front of the SwiftUI hosting
-view but claims hits only in its two handle rects (see `hitTest`), letting
-clicks elsewhere fall through.
+A transparent, borderless `NSView` (AppKit's basic rectangular view class —
+the unit that draws content and receives mouse events) stretched over the whole
+caption panel; it owns only the move and resize gestures. It declares itself
+non-opaque and reports drag translations through the `onDrag` closure plus a
+completion through `onDragEnded`, function values the controller installs at
+startup. It sits in front of the SwiftUI hosting view but claims hits only in
+its two handle rects (see `hitTest`), letting clicks elsewhere fall through.
 
 ```{.swift .numberLines startFrom="4"}
 private final class OverlayInteractionView: NSView {
@@ -1375,11 +1445,15 @@ to discard its cached start frame and persist final geometry.
 
 ### `final class CaptionOverlayController: NSObject, NSWindowDelegate`
 
-MainActor controller owning the floating caption `NSPanel`, the SwiftUI
-`NSHostingView`, and the `OverlayInteractionView`, plus the selected display and
-per-display saved geometry. It positions, clamps, persists, and restores the
-overlay frame, acts as the panel's `NSWindowDelegate`, and keeps `isApplyingFrame`
-to suppress persistence while it is itself setting the frame.
+The main-actor controller owning the imperative side of the overlay: the
+floating `NSPanel` (AppKit's auxiliary-window class — a window that can float
+above others without becoming the application's main window), the
+`NSHostingView` that renders SwiftUI content inside that AppKit window, the
+`OverlayInteractionView`, the selected display, and per-display saved geometry.
+It positions, clamps, persists, and restores the overlay frame, and acts as the
+panel's `NSWindowDelegate` (the object AppKit notifies when the window moves or
+resizes); `isApplyingFrame` suppresses persistence while the controller is
+itself setting the frame, so only user-driven geometry is saved.
 
 ```{.swift .numberLines startFrom="69"}
 @MainActor
@@ -1403,12 +1477,19 @@ final class CaptionOverlayController: NSObject, NSWindowDelegate {
 
 ### `override init()`
 
-Builds the borderless non-activating panel (clear background, floating level,
-joins all spaces, survives full-screen and deactivation) and composes a
-container holding the hosting view full-bleed with the interaction view pinned
-on top by Auto Layout. Wires the interaction view's `onDrag` to
-`movePanel`/`resizePanel`, then orders the panel out so it starts hidden. The
-`[weak self]` closures avoid a retain cycle between controller and view.
+Builds the panel; each flag buys something a captions window needs.
+`.borderless` strips the title bar so only the rounded SwiftUI card is visible;
+`.nonactivatingPanel` lets clicks on the overlay leave the professor's
+frontmost app (slides, IDE) active; `isReleasedWhenClosed = false` keeps the
+window's lifetime under Swift reference counting; the clear, non-opaque
+background makes the window rectangle itself invisible; level `.floating`
+stays above normal windows; `hidesOnDeactivate = false` keeps it on screen
+when the app loses focus; the collection behavior joins all Spaces (virtual
+desktops), may sit over full-screen apps, and is skipped by window cycling.
+Auto Layout (AppKit's constraint solver) pins the hosting and interaction
+views edge-to-edge in one container; the interaction view's closures route to
+`movePanel`/`resizePanel`/`finishInteraction` with `[weak self]` (so they do
+not retain the controller in a cycle), and `orderOut` starts the panel hidden.
 
 ```{.swift .numberLines startFrom="86"}
     override init() {
@@ -1588,11 +1669,14 @@ are preserved; only the origin moves.
 
 ### `private func resizePanel(by translation: CGSize)`
 
-Applies a resize drag from the lower-right corner: anchors the top edge
-(`start.maxY`) so the box grows downward and rightward, clamps new width/height
-between the minimum size and the room left to the screen margins, and re-derives
-the origin's y from the anchored top. Height uses `start.height -
-translation.height` because the corner is at the bottom.
+Applies a resize drag from the lower-right corner. macOS geometry places a
+rectangle's origin at its bottom-left corner with y growing upward, so dragging
+the grip downward makes `translation.height` negative; height is therefore
+`start.height - translation.height`, and the origin's y is re-derived from the
+anchored top edge (`start.maxY`) so the box grows downward and rightward while
+the top stays put. The new width and height are clamped between the minimum
+size and the room left before the screen margins, and the resulting rect still
+passes through `clamped` against the visible frame.
 
 ```{.swift .numberLines startFrom="206"}
     private func resizePanel(by translation: CGSize) {
@@ -1658,10 +1742,12 @@ visible bounds.
 
 ### `private func persistFrame()`
 
-Writes the panel's current frame to UserDefaults under the selected display's
-geometry key, but only when not mid-`applyFrame` and a display is selected. The
-`isApplyingFrame` guard is what prevents the delegate's move/resize callbacks
-from re-saving frames the controller just set programmatically.
+Writes the panel's current frame, serialized to a string, into `UserDefaults`
+(the per-application key-value preference store macOS persists across launches)
+under the selected display's geometry key — but only when not mid-`applyFrame`
+and a display is selected. The `isApplyingFrame` guard is what prevents the
+delegate's move/resize callbacks from re-saving frames the controller itself
+just set programmatically.
 
 ```{.swift .numberLines startFrom="248"}
     private func persistFrame() {
@@ -1761,9 +1847,15 @@ can leave the panel partly off a display.
 
 ### `struct CaptionOverlayView: View`
 
-Pure SwiftUI rendering of finalized lines, provisional text, question card,
-pending badge, and handles. Inputs are immutable values supplied by the
-controller; window ownership and geometry remain in AppKit.
+Pure SwiftUI rendering of the caption card: finalized lines, italic provisional
+text, the question card, the pending badge, and the two handle hints, layered
+in a `ZStack` (children drawn back to front) over the dark rounded background
+the audience sees. All inputs are immutable values supplied by the controller;
+window ownership and geometry remain in AppKit. `contentVersion` joins the
+lines and provisional text with control characters no caption can contain,
+producing one change-detection string: `onChange` watches it and re-scrolls
+through the `ScrollViewReader` proxy (a handle for commanding scroll position)
+so the newest caption is always in view.
 
 ```{.swift .numberLines startFrom="302"}
 struct CaptionOverlayView: View {
@@ -1857,9 +1949,11 @@ struct CaptionOverlayView: View {
 
 ### `private func captionText(_ text: String) -> some View`
 
-Creates unrestricted multiline caption text with vertical intrinsic sizing.
-`fixedSize(horizontal:false, vertical:true)` prevents the old ellipsis behavior
-while still wrapping to panel width.
+Renders one caption line as white text free to wrap onto any number of lines.
+A `Text` whose container offers too little height may be truncated with an
+ellipsis; `lineLimit(nil)` plus `fixedSize(horizontal: false, vertical: true)`
+forces layout to grant the text its full required height while still wrapping
+to the panel's width — the cure for the old ellipsis behavior.
 
 ```{.swift .numberLines startFrom="389"}
     private func captionText(_ text: String) -> some View {

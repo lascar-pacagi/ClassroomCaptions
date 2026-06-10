@@ -102,7 +102,8 @@ that read changed properties. It does not create synchronization. The
 `@MainActor` annotation is the synchronization rule: observable properties are
 read and written on the main executor.
 
-When a callback arrives from a dispatch queue, URLSession delegate, or server
+When a callback arrives from a dispatch queue, a URLSession delegate (the
+object Foundation's HTTP client calls back with results), or the server
 queue, the callback creates a `Task { @MainActor in ... }` or otherwise hops to
 the main actor. The copied event/question/snapshot crosses the boundary; the
 originating service object remains with its own owner.
@@ -141,7 +142,8 @@ the mutable `ClassroomSession` with AppKit or Network.framework.
 
 SwiftUI's `App` protocol is the process-level composition root. The
 `@State` wrapper gives the scene one persistent `ClassroomAppModel`; `WindowGroup`
-creates the dashboard scene; lifecycle hooks forward termination to the model.
+creates the dashboard scene (a scene is SwiftUI's unit of window content);
+lifecycle hooks forward termination to the model.
 For a C programmer, treat this file as the small `main` that constructs the
 long-lived owner graph rather than as an ordinary view.
 
@@ -158,6 +160,11 @@ This map gives the reading spine of the file. Line numbers refer to the original
 ### Imports and file preamble {.unnumbered .unlisted}
 
 The file begins by importing `SwiftUI`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
+
+A single `import SwiftUI` serves the whole file: a Swift import loads a
+compiled module rather than textually including a header, and on macOS the
+SwiftUI module also exposes the AppKit names (such as `NSApplication`) that
+the Quit button below relies on.
 
 ```{.swift .numberLines startFrom="1"}
 import SwiftUI
@@ -294,6 +301,13 @@ This map gives the reading spine of the file. Line numbers refer to the original
 
 The file begins by importing `AppKit`, `ClassroomCaptionsCore`, `Foundation`, `Observation`, `Synchronization`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
+Five imports map the coordinator's reach: `AppKit` for screens, Finder
+reveal, and app-lifecycle notifications; `ClassroomCaptionsCore` for the pure
+domain library (session, timeline, spoken-command recognizer); `Foundation`
+for `URL`, `Date`, `UserDefaults`, and `NotificationCenter`; `Observation`
+for the `@Observable` macro; and `Synchronization` for the `Mutex` that
+guards the audio capture gate.
+
 ```{.swift .numberLines startFrom="1"}
 import AppKit
 import ClassroomCaptionsCore
@@ -305,9 +319,15 @@ import Synchronization
 
 ### `struct DisplayChoice: Identifiable, Equatable`
 
-A stable UI projection of one `NSScreen`: Core Graphics display ID for
-persistence, localized name for selection, and global desktop frame for
-diagnostics. It contains no mutable `NSScreen` reference.
+A stable UI projection of one `NSScreen` (AppKit's object describing an
+attached display): the Core Graphics display ID for persistence, the
+localized name for the picker, and the global desktop frame (captured but currently unused by the UI).
+A `struct` is a value type — assignment copies it, as in C — and `let` fields
+are immutable once set. The names after the colon are protocol conformances
+(interfaces): `Identifiable` gives SwiftUI a stable `id` for picker rows, and
+`Equatable` synthesizes `==` so changes are detectable. Because it holds no
+mutable `NSScreen` reference, a disconnected projector cannot leave a
+dangling screen object inside UI state.
 
 ```{.swift .numberLines startFrom="7"}
 struct DisplayChoice: Identifiable, Equatable {
@@ -320,9 +340,14 @@ struct DisplayChoice: Identifiable, Equatable {
 
 ### `enum TranscriptionBackend: String, CaseIterable, Identifiable`
 
-The user-selectable implementation choice. String raw values persist cleanly,
-`CaseIterable` drives the picker, and `Identifiable` uses the enum value itself.
-The title is presentation text; workflow branching remains exhaustive on cases.
+The user-selectable transcription implementation: in-process Metal inference
+or an external WebSocket server. Unlike a C enum, a Swift enum is a full type
+that can carry methods and properties. `: String` gives each case a readable
+raw value that persists cleanly; `CaseIterable` synthesizes the `allCases`
+list the settings picker displays; `Identifiable` lets the value itself serve
+as its identity (`var id: Self { self }`). `title` is a computed property — a
+getter re-run on every access — so presentation text lives beside the cases
+while workflow code still branches exhaustively with `switch`.
 
 ```{.swift .numberLines startFrom="13"}
 enum TranscriptionBackend: String, CaseIterable, Identifiable {
@@ -358,10 +383,18 @@ struct ClassroomQuestion: Identifiable, Equatable {
 
 ### `final class ClassroomAppModel`
 
-Main-actor observable coordinator for all user-visible state and cross-service
-workflows. `@Observable` drives SwiftUI invalidation; `@MainActor` is the actual
-synchronization rule. Service internals remain on their own queues/actors and
-cross this boundary only as values or owned `Data`.
+Main-actor observable coordinator for all user-visible state and
+cross-service workflows; everything the dashboard and overlay show is a
+property here. `@Observable` drives SwiftUI invalidation, `@MainActor` is the
+actual synchronization rule, and service internals stay on their own
+queues/actors, crossing this boundary only as values or owned `Data`. In the
+property list, `private(set)` means any code may read but only this class may
+write, and a trailing `?` marks an optional (it holds a value or `nil`, and
+must be checked before use), used for not-yet-known facts such as the
+first-caption latency. The settings that follow pair `UserDefaults` (macOS's
+per-app preference store, read at startup with `??` supplying a default) with
+`didSet` — a property observer that runs after every assignment — so each
+change is written straight back and survives relaunch without a save button.
 
 ```{.swift .numberLines startFrom="33"}
 @MainActor
@@ -463,6 +496,17 @@ final class ClassroomAppModel {
 ```
 
 ### Continuation of `final class ClassroomAppModel` {.unnumbered .unlisted}
+
+This stretch finishes the persisted settings — live diagnostics and the five
+spoken-command phrases ('Bonjour soleil bleu' and friends), each using the
+same `UserDefaults`-plus-`didSet` pattern, with `showLiveDiagnostics` also
+starting or stopping the diagnostics poller on each change — plus two plain
+in-memory settings for recording and the archive folder. It then declares the
+long-lived service objects (overlay controller, microphone capture, both
+Voxtral backends, session archive, Gemma controller) and the stored `Task`
+handles kept so running jobs can be cancelled later. These service and task
+fields are `@ObservationIgnored`: excluded from `@Observable` change tracking
+because they are machinery, not state any view draws.
 
 ```{.swift .numberLines startFrom="129"}
                 captionFontSize,
@@ -577,8 +621,16 @@ final class ClassroomAppModel {
 ### `private struct PendingCorrection`
 
 Minimal FIFO work item: immutable segment identity plus the correction mode
-latched when queued. The worker re-reads caption/context by UUID, avoiding a
-second mutable copy of the segment.
+latched when queued; the worker re-reads caption and context by UUID,
+avoiding a second mutable copy of the segment. The fields that follow are
+per-session bookkeeping: `audioInputEnabled = Mutex(false)` is a
+lock-protected boolean — the capture gate the audio callback checks and every
+start/pause/stop path flips — and `captionServer: LocalCaptionServer!` is an
+implicitly unwrapped optional, its `!` promising assignment in `init` before
+first use. The `var name: Type { ... }` declarations are computed properties,
+recomputed on each read, so booleans such as `isListening` always reflect the
+session's current phase; their `guard let` (unwrap an optional or exit early)
+and `if case` (match a single enum case) are idioms this file uses throughout.
 
 ```{.swift .numberLines startFrom="236"}
     private struct PendingCorrection {
@@ -660,10 +712,19 @@ second mutable copy of the segment.
 
 ### `init()`
 
-Construction creates services once and installs value-returning callbacks.
-Callbacks that originate off the main actor re-enter it explicitly before
-touching observable state. The initializer also loads persisted settings, but
-does not start microphone or model resources.
+Runs once at app launch, before any session: construction creates services
+once and installs value-carrying callbacks, but starts no microphone or
+model resources (the persisted settings were already loaded by the property
+initializers above). The termination observer registers with
+`NotificationCenter` (a process-wide broadcast registry) using a trailing
+closure — a closure argument written after the call's closing parenthesis —
+so quitting by any route still stops the spawned Gemma child;
+`MainActor.assumeIsolated` asserts the code is already on the main thread,
+permitting synchronous access to main-actor state. The caption server's
+callbacks originate off the main actor and re-enter it with
+`Task { @MainActor in }` before touching observable state; the final `if`
+chains migrate voice phrases saved by older builds to the current
+'Bonjour soleil' wording.
 
 ```{.swift .numberLines startFrom="311"}
     init() {
@@ -721,9 +782,15 @@ does not start microphone or model resources.
 
 ### `func refreshDisplays()`
 
-Rebuilds display choices from current AppKit screens, repairs a missing/stale
-selection, and reprojects the overlay. This handles projector connection and
-desktop rearrangement without retaining obsolete screen objects.
+Runs at construction and again when the dashboard's Refresh Displays button
+is pressed: rebuilds the display list from current AppKit screens, repairs a
+missing or stale selection, and reprojects the overlay, handling projector
+connection and desktop rearrangement without retaining obsolete screen
+objects. `map` builds a new array by applying its closure to every
+`NSScreen`, yielding value-type `DisplayChoice` rows; in `contains(where:)`,
+`$0` is shorthand for the closure's single argument. If the remembered
+display ID no longer exists, selection falls back to the first screen so the
+overlay always has a real target.
 
 ```{.swift .numberLines startFrom="362"}
     func refreshDisplays() {
@@ -822,11 +889,15 @@ startup from consuming the first spoken audio without decoding it.
 
 ### `func pauseOrResume()`
 
-Toggles between listening and paused on the value-type session: pausing gates
-audio input off via the `audioInputEnabled` mutex and flushes buffered audio so
-no half-utterance leaks across the pause, while resuming re-enables input. Each
-branch guards on the session's own transition succeeding before mutating, then
-refreshes the overlay. No-ops in any other phase.
+Mid-session control, between start and stop: toggles the live session between
+listening and paused. `guard var session` is this file's recurring edit
+idiom — copy the optional value-type session into a local mutable variable
+(exiting if there is none), mutate the copy, then publish it back with
+`self.session = session`, so observers see one atomic change. Pausing gates
+audio input off via the `audioInputEnabled` mutex and flushes buffered audio
+so no half-utterance leaks across the pause; resuming re-enables input. Each
+branch proceeds only if the session's own phase transition succeeds, then
+refreshes the overlay; in any other phase neither branch acts, and the method merely republishes the unchanged session and refreshes the overlay.
 
 ```{.swift .numberLines startFrom="433"}
     func pauseOrResume() {
@@ -1061,9 +1132,13 @@ after USB/Bluetooth hardware changes.
 
 ### `private func observeTranscriptionEvents()`
 
-Cancels old observers, creates one task per backend stream, and filters events by
-the backend latched for the active session. A late event from an inactive
-service therefore cannot mutate the current transcript.
+Wired once in `init`, before any session exists: cancels any earlier
+observers, then creates one long-lived task per backend. Each backend
+publishes an `AsyncStream` (a typed asynchronous queue of values), and
+`for await` iterates it, suspending until the next event arrives — the
+asynchronous analogue of looping over reads from a pipe. Every delivery is
+filtered against the backend latched for the active session, so a late event
+from the inactive service cannot mutate the current transcript.
 
 ```{.swift .numberLines startFrom="605"}
     private func observeTranscriptionEvents() {
@@ -1093,10 +1168,16 @@ service therefore cannot mutate the current transcript.
 
 ### `private func handleVoxtralEvent(_ event: TranscriptionEvent)`
 
-This method is the reducer from backend events to domain transitions.
-Provisional and finalized text pass through spoken-command interception before
-timeline mutation. Metrics update diagnostics independently. Disconnect and
-failure events are interpreted in light of whether stop was expected.
+Runs for every event a backend emits while a session is alive: this is the
+reducer — one function that folds each incoming event into current state —
+from backend events to domain transitions. The `switch` shows that Swift enum
+cases carry payloads: `case .provisional(let text)` matches the case and
+binds the text it carries, where C would switch on a tag and then read a
+union field. `.connected` ends stage one of start and launches the microphone
+handoff; provisional and finalized text pass through spoken-command
+interception before timeline mutation; metrics update diagnostics
+independently; disconnect and failure are interpreted in light of whether
+stop was expected.
 
 ```{.swift .numberLines startFrom="628"}
     private func handleVoxtralEvent(_ event: TranscriptionEvent) {
@@ -1168,10 +1249,16 @@ failure events are interpreted in light of whether stop was expected.
 
 ### `private func startMicrophoneAfterVoxtralConnection() async`
 
-This asynchronous handoff checks that the original start attempt is still
-current before opening hardware. The callback creates owned PCM data, updates
-meter/archive accounting outside the real-time callback, and forwards audio
-only while the capture gate remains open.
+Stage two of the start transaction, entered when Voxtral reports `connected`:
+only now is microphone permission requested, the value-type
+`ClassroomSession` created, the archive opened, and hardware capture
+started — permission denial or capture failure unwinds everything back to
+idle. The audio callback captures the backend and recording flags latched at
+start, so it keeps serving the original start attempt's configuration. Each
+chunk arrives as owned PCM data on the capture queue, where it is archived
+and sent to Voxtral synchronously (per-chunk tasks would not preserve frame
+order); meter and byte accounting hop to the main actor and publish at
+roughly 15 Hz, and audio is forwarded only while the capture gate stays open.
 
 ```{.swift .numberLines startFrom="693"}
     private func startMicrophoneAfterVoxtralConnection() async {
@@ -1826,10 +1913,16 @@ memory. Failure remains `nil`, distinct from a false zero-byte footprint.
 
 ### `private func consumeOverlayVoiceCommand(…)`
 
-Potential command prefixes are held back while provisional recognition is
-incomplete. Completed commands are removed from the caption text and applied
-in source order. This prevents phrases such as the show/hide command from
-appearing as lecture content.
+Every transcript, provisional or finalized, passes through this filter before
+it can reach the timeline — via `handleVoxtralEvent` while live, and once
+more for the text drained at stop. It recognizes completed command phrases,
+applies them in spoken order, and returns the caption with those phrases
+removed; a provisional fragment that could still grow into a command yields
+an empty string, so a half-spoken control phrase never flashes on screen as
+lecture content. Because hypotheses are revised as recognition refines,
+executed actions are tracked element-wise per utterance — '...bleu' becoming
+'...rouge' re-executes the corrected command instead of counting as already
+handled — and the tracking list resets when text finalizes.
 
 ```{.swift .numberLines startFrom="1136"}
     private func consumeOverlayVoiceCommand(
@@ -2043,6 +2136,18 @@ controller's default frame, and makes the result visible for immediate feedback.
 
 ### `private func visibleOverlayLines(limit: Int = 3) -> [String]`
 
+Presentation helper called on every overlay refresh and remote publish during
+live captioning: it returns the last `limit` finalized caption lines,
+honoring the spoken 'clear' boundary. It walks the timeline backwards,
+stopping at `overlayMinimumVisibleSequence` — captions older than the
+boundary stay hidden — or once `limit` lines are collected, then reverses the
+result back into reading order. As the doc comment explains, sequence numbers
+grow with position, so the visible lines always form a suffix of the timeline
+and the scan costs O(limit) per caption event instead of filtering a whole
+lecture's history. `limit: Int = 3` is a default argument (callers may omit
+it), and `if let overlayMinimumVisibleSequence` is shorthand optional
+binding: it unwraps the field into a same-named local constant.
+
 ```{.swift .numberLines startFrom="1297"}
     private func visibleOverlayLines(limit: Int = 3) -> [String] {
         guard let segments = session?.timeline.segments else { return [] }
@@ -2202,8 +2307,13 @@ when iPhone sharing is inactive.
 
 ### `private extension NSScreen`
 
-Bridges AppKit's loosely typed device-description dictionary to the stable
-`CGDirectDisplayID` used for selection and per-display geometry keys.
+An `extension` adds members to an existing type from outside its definition —
+here a computed `displayID` property on AppKit's `NSScreen` — and `private`
+keeps it visible to this file only. It bridges AppKit's loosely typed
+device-description dictionary to the stable `CGDirectDisplayID` used for
+selection and per-display geometry keys: `as?` attempts a cast and yields an
+optional, and `?? 0` substitutes a default when the entry is missing or has
+the wrong type.
 
 ```{.swift .numberLines startFrom="1403"}
 private extension NSScreen {
@@ -2255,6 +2365,11 @@ This map gives the reading spine of the file. Line numbers refer to the original
 
 The file begins by importing `Darwin`, `Foundation`. These imports establish the APIs visible to the declarations below; they execute no application workflow by themselves.
 
+`Darwin` exposes the raw C system interfaces this file wraps —
+`proc_pidinfo`, `getpid`, and the `proc_taskinfo` struct — while `Foundation`
+supplies the base Swift platform layer. Nothing executes here; imports only
+make a module's declarations visible.
+
 ```{.swift .numberLines startFrom="1"}
 import Darwin
 import Foundation
@@ -2264,8 +2379,11 @@ import Foundation
 ### `enum ProcessMemory`
 
 A stateless namespace for reading a process's resident memory via the Darwin
-`proc_pidinfo` API. The diagnostics panel uses it to report both the app's own
-footprint and the separate Gemma MLX server's.
+`proc_pidinfo` API; the diagnostics panel uses it to report both the app's
+own footprint and the separate Gemma MLX server's. An enum with no cases is
+Swift's idiom for a pure namespace: it can never be instantiated, so its
+`static` functions are reachable only as `ProcessMemory.name(...)` — the
+closest C analogue is a prefix-named group of free functions.
 
 ```{.swift .numberLines startFrom="4"}
 enum ProcessMemory {
@@ -2297,10 +2415,14 @@ failure as `nil`.
 
 ### `private static func residentSizeBytes(processID: pid_t) -> UInt64?`
 
-Calls `proc_pidinfo(PROC_PIDTASKINFO)` into a `proc_taskinfo` struct and returns
-its `pti_resident_size`, or nil if the call does not return the exact expected
-struct size (which is how this API signals failure or a denied/dead pid). The
-size-equality check is the standard `proc_pidinfo` success test.
+Calls `proc_pidinfo(PROC_PIDTASKINFO)` into a `proc_taskinfo` struct and
+returns its `pti_resident_size`, or `nil` if the call does not return the
+exact expected struct size — which is how this API signals failure or a
+denied/dead pid; the size-equality check is the standard `proc_pidinfo`
+success test. `withUnsafeMutablePointer(to:)` is Swift's bridge to C
+out-parameters: it hands the closure a real C pointer to `info` that is valid
+only inside that closure, rather than letting an address escape as `&info`
+would in C. `MemoryLayout<proc_taskinfo>.size` is Swift's `sizeof`.
 
 ```{.swift .numberLines startFrom="13"}
     private static func residentSizeBytes(processID: pid_t) -> UInt64? {
