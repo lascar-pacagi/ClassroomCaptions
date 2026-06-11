@@ -175,13 +175,18 @@ CHAPTERS = (
     Chapter(
         "11-network-source",
         "Apple Networking, HTTP, SSE, Questions, and QR: Complete Source",
-        "The Mac acts as a local TCP server through Network.framework. It implements "
+        "The Mac acts as a local HTTPS server through Network.framework. It implements "
         "the deliberately small HTTP subset needed by two generated browser clients: "
-        "a read-only SSE caption viewer and an anonymous question form.",
+        "a read-only SSE caption viewer and an anonymous question form that also accepts "
+        "a spoken question as an audio clip. TLS is required because a browser only "
+        "grants microphone access over a secure connection.",
         "The server receives immutable snapshots from the app model. It cannot "
         "control the microphone, models, overlay, or filesystem. The dashboard turns "
         "its capability URLs into QR images.",
-        ("Sources/ClassroomCaptions/LocalCaptionServer.swift",),
+        (
+            "Sources/ClassroomCaptions/ServerTLSIdentity.swift",
+            "Sources/ClassroomCaptions/LocalCaptionServer.swift",
+        ),
     ),
     Chapter(
         "12-remote-benchmark-source",

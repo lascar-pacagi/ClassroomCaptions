@@ -28,6 +28,8 @@ captioning is preferable to a cloud service.
 - Live captions sent to students' own devices (phone, tablet, laptop) through a
   browser over trusted Wi-Fi — nothing to install on their side.
 - Anonymous student question page with a professor-controlled moderation queue.
+- Students can also **speak** a question (hold-to-talk); it is transcribed
+  locally on the Mac, the audio is discarded, and the text enters the same queue.
 - Spoken commands to show the next question and dismiss the current question.
 - Live token speed, transformation percentage, and memory diagnostics.
 - No cloud transcription and no model access from the student page.
@@ -209,23 +211,28 @@ Settings > Privacy & Security > Microphone** and enable ClassroomCaptions.
 
 ## Browser Sharing
 
-The Mac acts as a small HTTP server on port `8765`. A QR code contains a URL
+The Mac acts as a small HTTPS server on port `8765`. A QR code contains a URL
 with a fresh 256-bit random token. The caption page uses Server-Sent Events to
 receive updates. The student page uses a separate token and temporary,
-source-bound tickets.
+source-bound tickets, and can submit a question as text or as a short spoken
+audio clip.
 
 Any current browser on the same reachable Wi-Fi network can connect; it is not
 limited to Apple devices. The current caption server intentionally allows one
 simultaneous live caption stream. Many students may use the question page,
 subject to rate and queue limits.
 
-This transport is authenticated but **not encrypted**. Use a trusted classroom
-network or a personal hotspot. Anyone who obtains a QR code or copied link can
-use that capability until sharing is stopped. Stop sharing after class to
-invalidate both links.
+The transport is **encrypted with TLS**, using a self-signed certificate the Mac
+generates and reuses. Because it is self-signed (no certificate authority), each
+browser shows a one-time "not private" warning to accept before connecting —
+this is also what unlocks the microphone for spoken questions. Use a trusted
+classroom network or a personal hotspot; anyone who obtains a QR code or copied
+link can use that capability until sharing is stopped, so stop sharing after
+class to invalidate both links.
 
-Student text is placed only in the moderation queue. It cannot invoke Gemma,
-control the microphone, execute application commands, or modify captions.
+Student text and transcribed speech are placed only in the moderation queue.
+They cannot invoke Gemma, control the microphone, execute application commands,
+or modify captions; spoken-question audio is transcribed locally and discarded.
 
 ## Recordings and Privacy
 
@@ -305,7 +312,8 @@ security controls, QR encoding, testing, and reconstruction procedure.
 ## Known Boundaries
 
 - The native application currently requires macOS and Apple Silicon.
-- The browser transport is HTTP, not HTTPS.
+- The browser transport uses TLS with a self-signed certificate, so each device
+  accepts a one-time browser warning (there is no certificate authority).
 - Only one browser caption stream is accepted at a time.
 - There is no speaker diarization or word-level timestamp display.
 - Long-duration classroom and adverse-network soak testing should be repeated

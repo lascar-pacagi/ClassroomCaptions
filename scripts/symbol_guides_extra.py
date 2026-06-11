@@ -3467,17 +3467,23 @@ per-app preference store, read at startup with `??` supplying a default) with
 `didSet` — a property observer that runs after every assignment — so each
 change is written straight back and survives relaunch without a save button.
 """,
-    ('ClassroomAppModel.swift', '@129'): """
-This stretch finishes the persisted settings — live diagnostics and the five
-spoken-command phrases ('Bonjour soleil bleu' and friends), each using the
-same `UserDefaults`-plus-`didSet` pattern, with `showLiveDiagnostics` also
-starting or stopping the diagnostics poller on each change — plus two plain
-in-memory settings for recording and the archive folder. It then declares the
-long-lived service objects (overlay controller, microphone capture, both
-Voxtral backends, session archive, Gemma controller) and the stored `Task`
-handles kept so running jobs can be cancelled later. These service and task
-fields are `@ObservationIgnored`: excluded from `@Observable` change tracking
-because they are machinery, not state any view draws.
+    ('ClassroomAppModel.swift', '@132'): """
+This stretch is the middle of the persisted settings, all using the same
+`UserDefaults`-plus-`didSet` pattern: the Gemma server, model, and loopback
+endpoint and the quoted-context depth; the correction mode; the caption and
+answer text sizes and the overlay background opacity; the live-diagnostics
+toggle (which also starts or stops the diagnostics poller on each change); and
+the first of the spoken-command phrases.
+""",
+    ('ClassroomAppModel.swift', '@228'): """
+This stretch finishes the spoken-command phrases — the student-question,
+model-question, answer-toggle, and scroll phrases, each `UserDefaults`-backed —
+plus the opt-in recording flag and the archive folder. It then declares the
+long-lived service objects (overlay controller, microphone capture, both Voxtral
+backends, session archive, Gemma controller) and the stored `Task` handles kept
+so running jobs can be cancelled later. These service and task fields are
+`@ObservationIgnored`: excluded from `@Observable` change tracking because they
+are machinery, not state any view draws.
 """,
     ('ClassroomAppModel.swift', 'struct DisplayChoice'): """
 A stable UI projection of one `NSScreen` (AppKit's object describing an
@@ -7052,6 +7058,97 @@ only accepts an end that follows a start.
     ("ModelQuestionScanTests.swift", "testEmptyPhrasesYieldNone"): """
 With the feature unconfigured (empty phrases) nothing is detected, so disabling
 Assistant mode cannot accidentally capture text.
+""",
+    # === HTTPS identity + spoken student questions ===
+    ("ServerTLSIdentity.swift", "enum ServerTLSIdentity"): """
+A namespace (a case-less enum) that produces the TLS identity — a certificate
+plus its private key — the HTTPS listener presents to browsers. See this
+chapter's introduction for what HTTPS, TLS, and "self-signed" mean; in short, a
+browser only grants a page microphone access over an encrypted (HTTPS)
+connection, so capturing a student's voice in the browser requires it even on a
+private network.
+""",
+    ("ServerTLSIdentity.swift", "enum Failure"): """
+The typed failures of certificate generation and loading. Surfacing the OpenSSL
+message or the Security framework status code makes a setup problem diagnosable
+instead of an opaque "sharing failed".
+""",
+    ("ServerTLSIdentity.swift", "func makeIdentity"): """
+The entry point. It returns a `sec_identity_t` (the Network-framework handle for
+a certificate-and-key pair) for the given Wi-Fi address, generating and
+persisting one on first use and reusing it afterwards so a student's browser only
+shows the one-time "untrusted" warning again when the Mac's address changes.
+""",
+    ("ServerTLSIdentity.swift", "func storageDirectory"): """
+Resolves (creating it once) the per-user Application Support folder that holds
+the persisted identity, with owner-only permissions so the private key is not
+world-readable.
+""",
+    ("ServerTLSIdentity.swift", "func generate"): """
+Generates the identity with the system `openssl`: first a self-signed
+certificate and RSA key (the Wi-Fi IP goes in the Subject Alternative Name so the
+browser can match it to the address it visited), then bundles them into one
+PKCS#12 file — the format the Security framework imports.
+""",
+    ("ServerTLSIdentity.swift", "func runOpenSSL"): """
+Runs one `openssl` invocation and turns a non-zero exit into a typed error
+carrying the captured stderr. Shelling out mirrors how the app already launches
+the local Gemma server; macOS always ships `/usr/bin/openssl`.
+""",
+    ("ServerTLSIdentity.swift", "func importIdentity"): """
+Loads the PKCS#12 bytes into a `SecIdentity` via `SecPKCS12Import`. The system
+LibreSSL's PKCS#12 encryption is one the Security framework accepts (OpenSSL 3's
+modern default would be rejected), which is why the system `openssl` is used.
+""",
+    ("LocalCaptionServer.swift", "func isSpokenQuestionRequest"): """
+Peeks at the request line — available before the headers finish — to recognize a
+`POST /speak` upload. Only such a request is granted the much larger audio size
+budget, so an ordinary request can never claim the audio allowance.
+""",
+    ("LocalCaptionServer.swift", "func registerAcceptedSubmission"): """
+The shared sliding-window rate limiter for both typed and spoken questions. It
+expires old timestamps, checks the per-ticket interval and the per-source,
+global, and accepted-question caps, and records the submission — returning false
+(recording nothing) when any limit is hit so the caller can answer 429.
+""",
+    ("LocalCaptionServer.swift", "func submitSpokenQuestion"): """
+Handles `POST /speak`: it validates the ticket exactly like a typed question,
+bounds the clip (raw 16 kHz mono Int16 PCM, ~0.1 s to ~35 s), applies the shared
+rate limit, then forwards the audio to the app — which transcribes it locally —
+and answers 202. The audio itself is never stored by the server.
+""",
+    ("VoxtralEmbeddedService.swift", "func transcribeClip"): """
+Transcribes one complete spoken-question clip on a *transient* stream created
+from the already-loaded model. Because it runs on the same inference queue as the
+live caption stream, the two never execute concurrently; they only share the
+read-only weights, so no second multi-gigabyte model is loaded. A short silence
+preroll warms the cold decoder before the first phoneme.
+""",
+    ("VoxtralEmbeddedService.swift", "func readAllText"): """
+Reads every token a finished transient stream produced into one string, without
+touching the live stream's provisional text or emitting any caption events — the
+clip's transcription must not leak into the live captions.
+""",
+    ("ClassroomAppModel.swift", "func receiveSpokenQuestion"): """
+Receives a student's audio clip, transcribes it locally with
+`transcribeClip`, trims and length-bounds the text, and enqueues it in the same
+moderation queue as a typed question (flagged `spoken` so the overlay shows a
+microphone glyph). It needs the embedded model loaded; otherwise transcription
+returns nothing and the clip is dropped.
+""",
+    ("LocalCaptionServerTests.swift", "testSpokenQuestionRouteValidatesContentTypeAndTicket"): """
+Drives the `/speak` route over HTTPS: a wrong content type is rejected (415), a
+valid octet-stream clip with a live ticket is accepted (202), and an unknown
+ticket is refused (401).
+""",
+    ("LocalCaptionServerTests.swift", "class InsecureTrustDelegate"): """
+Lets the test client accept the server's self-signed certificate. It only ever
+runs against the loopback test listener, so trusting the presented certificate is
+safe here and never reaches a real network peer.
+""",
+    ("LocalCaptionServerTests.swift", "func urlSession"): """
+The URLSession delegate callback that approves the server-trust challenge for the
+local self-signed certificate during tests.
 """,
 }
 

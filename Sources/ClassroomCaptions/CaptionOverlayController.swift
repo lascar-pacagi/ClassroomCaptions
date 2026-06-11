@@ -149,6 +149,7 @@ final class CaptionOverlayController: NSObject, NSWindowDelegate {
         lines: [String],
         provisional: String?,
         question: String?,
+        questionSpoken: Bool = false,
         pendingQuestionCount: Int,
         fontSize: Double,
         answerMarkdown: String? = nil,
@@ -164,6 +165,7 @@ final class CaptionOverlayController: NSObject, NSWindowDelegate {
             lines: lines,
             provisional: provisional,
             question: question,
+            questionSpoken: questionSpoken,
             pendingQuestionCount: pendingQuestionCount,
             fontSize: fontSize,
             answerMarkdown: answerMarkdown,
@@ -321,6 +323,7 @@ struct CaptionOverlayView: View {
     let lines: [String]
     let provisional: String?
     let question: String?
+    var questionSpoken = false
     let pendingQuestionCount: Int
     let fontSize: Double
     var answerMarkdown: String? = nil
@@ -446,9 +449,14 @@ struct CaptionOverlayView: View {
 
     private func questionCard(_ question: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Label("Student question", systemImage: "questionmark.bubble.fill")
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(.orange)
+            Label(
+                questionSpoken ? "Spoken student question" : "Student question",
+                systemImage: questionSpoken
+                    ? "mic.fill"
+                    : "questionmark.bubble.fill"
+            )
+            .font(.system(size: 13, weight: .bold))
+            .foregroundStyle(.orange)
 
             ScrollView(.vertical) {
                 Text(question)

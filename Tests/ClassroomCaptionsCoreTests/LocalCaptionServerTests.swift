@@ -3,6 +3,15 @@ import Network
 import XCTest
 
 final class LocalCaptionServerTests: XCTestCase {
+    // The server now serves HTTPS with a self-signed identity, so the test
+    // client must accept that certificate. It only ever talks to the local
+    // listener, so trusting the presented server certificate is safe here.
+    private let session = URLSession(
+        configuration: .ephemeral,
+        delegate: InsecureTrustDelegate(),
+        delegateQueue: nil
+    )
+
     func testPairingTokenHasExpectedEntropyAndEncoding() throws {
         let first = try CaptionSharingSecurity.makeToken()
         let second = try CaptionSharingSecurity.makeToken()
@@ -79,12 +88,12 @@ final class LocalCaptionServerTests: XCTestCase {
             URLQueryItem(name: "token", value: "invalid"),
         ]
         let invalidURL = try XCTUnwrap(invalidComponents.url)
-        let (_, invalidResponse) = try await URLSession.shared.data(
+        let (_, invalidResponse) = try await session.data(
             from: invalidURL
         )
         XCTAssertEqual((invalidResponse as? HTTPURLResponse)?.statusCode, 404)
 
-        let (page, validResponse) = try await URLSession.shared.data(
+        let (page, validResponse) = try await session.data(
             from: pairingURL
         )
         XCTAssertEqual((validResponse as? HTTPURLResponse)?.statusCode, 200)
@@ -132,7 +141,7 @@ final class LocalCaptionServerTests: XCTestCase {
             return XCTFail("Student question URL was not published.")
         }
 
-        let (page, pageResponse) = try await URLSession.shared.data(
+        let (page, pageResponse) = try await session.data(
             from: studentURL
         )
         XCTAssertEqual((pageResponse as? HTTPURLResponse)?.statusCode, 200)
@@ -202,6 +211,88 @@ final class LocalCaptionServerTests: XCTestCase {
             (invalidResponse as? HTTPURLResponse)?.statusCode,
             401
         )
+    }
+
+    func testSpokenQuestionRouteValidatesContentTypeAndTicket() async throws {
+        let captionUpdates = AsyncStream.makeStream(
+            of: LocalCaptionServerStatus.self
+        )
+        let questionUpdates = AsyncStream.makeStream(
+            of: StudentQuestionServerStatus.self
+        )
+        let server = LocalCaptionServer(
+            statusHandler: { captionUpdates.continuation.yield($0) },
+            questionStatusHandler: { questionUpdates.continuation.yield($0) },
+            port: try XCTUnwrap(NWEndpoint.Port(rawValue: 18_767))
+        )
+        defer {
+            server.stop()
+            captionUpdates.continuation.finish()
+            questionUpdates.continuation.finish()
+        }
+
+        server.start()
+        guard await readyURL(
+            from: captionUpdates.stream,
+            timeout: .seconds(4)
+        ) != nil else {
+            throw XCTSkip("No active Wi-Fi listener is available.")
+        }
+        server.setQuestionSubmissionsEnabled(true)
+        guard let studentURL = await studentURL(
+            from: questionUpdates.stream,
+            timeout: .seconds(4)
+        ) else {
+            return XCTFail("Student question URL was not published.")
+        }
+
+        let ticketURL = try XCTUnwrap(URL(
+            string: "/student-ticket?\(try XCTUnwrap(studentURL.query))",
+            relativeTo: studentURL
+        ))
+        let (ticketData, _) = try await post(ticketURL, body: Data())
+        let ticketPayload = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: ticketData) as? [String: Any]
+        )
+        let ticket = try XCTUnwrap(ticketPayload["ticket"] as? String)
+
+        let audio = Data(count: 8_000) // 0.25 s of 16 kHz mono Int16 silence
+
+        // Wrong content type is rejected before any audio is accepted.
+        let jsonURL = try XCTUnwrap(URL(
+            string: "/speak?ticket=\(ticket)", relativeTo: studentURL
+        ))
+        var jsonRequest = URLRequest(url: jsonURL)
+        jsonRequest.httpMethod = "POST"
+        jsonRequest.setValue(
+            "application/json", forHTTPHeaderField: "Content-Type"
+        )
+        jsonRequest.httpBody = audio
+        let (_, wrongType) = try await session.data(for: jsonRequest)
+        XCTAssertEqual((wrongType as? HTTPURLResponse)?.statusCode, 415)
+
+        // A valid octet-stream clip with a live ticket is accepted.
+        var audioRequest = URLRequest(url: jsonURL)
+        audioRequest.httpMethod = "POST"
+        audioRequest.setValue(
+            "application/octet-stream", forHTTPHeaderField: "Content-Type"
+        )
+        audioRequest.httpBody = audio
+        let (_, accepted) = try await session.data(for: audioRequest)
+        XCTAssertEqual((accepted as? HTTPURLResponse)?.statusCode, 202)
+
+        // An unknown ticket is rejected.
+        let badURL = try XCTUnwrap(URL(
+            string: "/speak?ticket=invalid", relativeTo: studentURL
+        ))
+        var badRequest = URLRequest(url: badURL)
+        badRequest.httpMethod = "POST"
+        badRequest.setValue(
+            "application/octet-stream", forHTTPHeaderField: "Content-Type"
+        )
+        badRequest.httpBody = audio
+        let (_, badTicket) = try await session.data(for: badRequest)
+        XCTAssertEqual((badTicket as? HTTPURLResponse)?.statusCode, 401)
     }
 
     func testTicketIssuanceIsCappedPerSource() async throws {
@@ -339,6 +430,26 @@ final class LocalCaptionServerTests: XCTestCase {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = body
-        return try await URLSession.shared.data(for: request)
+        return try await session.data(for: request)
+    }
+}
+
+/// Accepts the local server's self-signed certificate during tests. It only
+/// ever runs against the loopback test listener, never a real network peer.
+private final class InsecureTrustDelegate: NSObject, URLSessionDelegate {
+    func urlSession(
+        _ session: URLSession,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping (
+            URLSession.AuthChallengeDisposition, URLCredential?
+        ) -> Void
+    ) {
+        if challenge.protectionSpace.authenticationMethod
+            == NSURLAuthenticationMethodServerTrust,
+            let trust = challenge.protectionSpace.serverTrust {
+            completionHandler(.useCredential, URLCredential(trust: trust))
+        } else {
+            completionHandler(.performDefaultHandling, nil)
+        }
     }
 }

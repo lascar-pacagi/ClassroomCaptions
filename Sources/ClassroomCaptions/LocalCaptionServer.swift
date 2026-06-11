@@ -34,6 +34,11 @@ enum CaptionSharingSecurity {
     static let tokenByteCount = 32
     static let maximumRequestBytes = 8 * 1_024
     static let maximumQuestionBytes = 2 * 1_024
+    // A spoken-question clip is 16 kHz mono Int16 (~32 KB/s); allow ~35 s of
+    // audio plus header slack. This much larger budget is granted only when the
+    // request line is POST /speak, so text requests stay tightly bounded.
+    static let maximumSpokenAudioBytes = 32_000 * 35
+    static let maximumSpokenRequestBytes = 32_000 * 35 + 4_096
     static let maximumQuestionCharacters = 500
     static let maximumTickets = 256
     static let maximumTicketsPerSource = 4
@@ -96,6 +101,9 @@ final class LocalCaptionServer: @unchecked Sendable {
         @Sendable (StudentQuestionServerStatus) -> Void
     private let questionHandler:
         @Sendable (SubmittedClassroomQuestion) -> Void
+    // Raw 16 kHz mono little-endian Int16 PCM of a spoken question; the app
+    // transcribes it locally and enqueues the text like a typed question.
+    private let spokenQuestionHandler: @Sendable (Data) -> Void
     private let port: NWEndpoint.Port
     private var listener: NWListener?
     private var streamConnection: NWConnection?
@@ -130,11 +138,13 @@ final class LocalCaptionServer: @unchecked Sendable {
         questionHandler: @escaping @Sendable (
             SubmittedClassroomQuestion
         ) -> Void = { _ in },
+        spokenQuestionHandler: @escaping @Sendable (Data) -> Void = { _ in },
         port: NWEndpoint.Port = defaultPort
     ) {
         self.statusHandler = statusHandler
         self.questionStatusHandler = questionStatusHandler
         self.questionHandler = questionHandler
+        self.spokenQuestionHandler = spokenQuestionHandler
         self.port = port
     }
 
@@ -169,8 +179,23 @@ final class LocalCaptionServer: @unchecked Sendable {
         statusHandler(.starting)
 
         do {
+            guard let host = Self.wifiIPv4Address() else {
+                statusHandler(.failed(
+                    "No active Wi-Fi IPv4 address was found. Connect the Mac to Wi-Fi or an iPhone hotspot."
+                ))
+                return
+            }
             token = try CaptionSharingSecurity.makeToken()
-            let parameters = NWParameters.tcp
+
+            // HTTPS: a browser only grants a page microphone access over a
+            // secure (TLS) context, so the listener presents a self-signed
+            // identity. See ServerTLSIdentity for what self-signed means here.
+            let identity = try ServerTLSIdentity.makeIdentity(ipv4: host)
+            let tlsOptions = NWProtocolTLS.Options()
+            sec_protocol_options_set_local_identity(
+                tlsOptions.securityProtocolOptions, identity
+            )
+            let parameters = NWParameters(tls: tlsOptions)
             parameters.requiredInterfaceType = .wifi
             parameters.includePeerToPeer = true
             parameters.allowLocalEndpointReuse = true
@@ -222,7 +247,7 @@ final class LocalCaptionServer: @unchecked Sendable {
         case .ready:
             guard let host = Self.wifiIPv4Address(),
                   let url = URL(
-                      string: "http://\(host):\(port)/?token=\(token)"
+                      string: "https://\(host):\(port)/?token=\(token)"
                   ) else {
                 statusHandler(.failed(
                     "No active Wi-Fi IPv4 address was found. Connect the Mac to Wi-Fi or an iPhone hotspot."
@@ -302,7 +327,14 @@ final class LocalCaptionServer: @unchecked Sendable {
             if let data {
                 request.append(data)
             }
-            guard request.count <= CaptionSharingSecurity.maximumRequestBytes else {
+            // /speak uploads binary audio and needs a much larger budget than a
+            // text request; the budget is gated on the request line itself so an
+            // ordinary request can never claim the audio allowance.
+            let isSpeak = Self.isSpokenQuestionRequest(request)
+            let requestBudget = isSpeak
+                ? CaptionSharingSecurity.maximumSpokenRequestBytes
+                : CaptionSharingSecurity.maximumRequestBytes
+            guard request.count <= requestBudget else {
                 self.respond(
                     status: "431 Request Header Fields Too Large",
                     body: "Request too large.",
@@ -326,7 +358,10 @@ final class LocalCaptionServer: @unchecked Sendable {
                     return
                 }
                 let contentLength = Self.contentLength(in: headerText)
-                guard contentLength <= CaptionSharingSecurity.maximumQuestionBytes else {
+                let bodyBudget = isSpeak
+                    ? CaptionSharingSecurity.maximumSpokenAudioBytes
+                    : CaptionSharingSecurity.maximumQuestionBytes
+                guard contentLength <= bodyBudget else {
                     self.respond(
                         status: "413 Content Too Large",
                         body: "Question is too large.",
@@ -371,6 +406,18 @@ final class LocalCaptionServer: @unchecked Sendable {
                 )
             }
         }
+    }
+
+    /// Whether the request line (available before the headers finish) is a
+    /// spoken-question upload, which is allowed a much larger size budget.
+    private static func isSpokenQuestionRequest(_ request: Data) -> Bool {
+        guard let lineEnd = request.range(of: Data("\r\n".utf8)),
+              let line = String(
+                  data: request[..<lineEnd.lowerBound], encoding: .utf8
+              ) else {
+            return false
+        }
+        return line.hasPrefix("POST /speak")
     }
 
     private func handleRequest(
@@ -488,7 +535,7 @@ final class LocalCaptionServer: @unchecked Sendable {
         guard questionsEnabled, !studentToken.isEmpty,
               let host,
               let url = URL(
-                  string: "http://\(host):\(port)/student?token=\(studentToken)"
+                  string: "https://\(host):\(port)/student?token=\(studentToken)"
               ) else {
             return
         }
@@ -506,7 +553,8 @@ final class LocalCaptionServer: @unchecked Sendable {
     ) -> Bool {
         guard components.path == "/student"
                 || components.path == "/student-ticket"
-                || components.path == "/questions" else {
+                || components.path == "/questions"
+                || components.path == "/speak" else {
             return false
         }
         guard questionsEnabled else {
@@ -555,6 +603,26 @@ final class LocalCaptionServer: @unchecked Sendable {
                 return true
             }
             submitQuestion(
+                body: body,
+                ticket: ticket,
+                sourceID: sourceID,
+                on: connection
+            )
+
+        case ("POST", "/speak"):
+            guard headers["content-type"]?
+                .lowercased()
+                .hasPrefix("application/octet-stream") == true,
+                  let ticket = Self.queryValue("ticket", in: components) else {
+                respond(
+                    status: "415 Unsupported Media Type",
+                    body: #"{"error":"invalid_request"}"#,
+                    contentType: "application/json; charset=utf-8",
+                    on: connection
+                )
+                return true
+            }
+            submitSpokenQuestion(
                 body: body,
                 ticket: ticket,
                 sourceID: sourceID,
@@ -635,7 +703,7 @@ final class LocalCaptionServer: @unchecked Sendable {
         }
 
         let now = Date()
-        guard var studentTicket = studentTickets[ticket],
+        guard let studentTicket = studentTickets[ticket],
               studentTicket.expiresAt > now,
               studentTicket.sourceID == sourceID else {
             respond(
@@ -659,6 +727,40 @@ final class LocalCaptionServer: @unchecked Sendable {
             return
         }
 
+        guard registerAcceptedSubmission(
+            ticket: ticket, sourceID: sourceID, now: now
+        ) else {
+            respond(
+                status: "429 Too Many Requests",
+                body: #"{"error":"rate_limited"}"#,
+                contentType: "application/json; charset=utf-8",
+                on: connection
+            )
+            return
+        }
+
+        questionHandler(SubmittedClassroomQuestion(
+            id: UUID(),
+            text: text,
+            submittedAt: now
+        ))
+        respond(
+            status: "202 Accepted",
+            body: #"{"accepted":true}"#,
+            contentType: "application/json; charset=utf-8",
+            on: connection
+        )
+    }
+
+    /// Applies the shared sliding-window rate limits and records one accepted
+    /// submission (typed or spoken). Returns false — recording nothing — when
+    /// any limit is hit, so the caller can answer 429.
+    private func registerAcceptedSubmission(
+        ticket: String,
+        sourceID: String,
+        now: Date
+    ) -> Bool {
+        guard var studentTicket = studentTickets[ticket] else { return false }
         studentTicket.submissionDates.removeAll {
             now.timeIntervalSince($0) > CaptionSharingSecurity.perSourceWindow
         }
@@ -686,13 +788,7 @@ final class LocalCaptionServer: @unchecked Sendable {
                   < CaptionSharingSecurity.globalQuestionLimit,
               acceptedQuestionDates.count
                   < CaptionSharingSecurity.acceptedQuestionLimit else {
-            respond(
-                status: "429 Too Many Requests",
-                body: #"{"error":"rate_limited"}"#,
-                contentType: "application/json; charset=utf-8",
-                on: connection
-            )
-            return
+            return false
         }
 
         studentTicket.submissionDates.append(now)
@@ -701,12 +797,53 @@ final class LocalCaptionServer: @unchecked Sendable {
         studentTickets[ticket] = studentTicket
         sourceSubmissionDates[sourceID] = sourceDates
         acceptedQuestionDates.append(now)
+        return true
+    }
 
-        questionHandler(SubmittedClassroomQuestion(
-            id: UUID(),
-            text: text,
-            submittedAt: now
-        ))
+    /// Accepts a spoken-question audio clip (raw 16 kHz mono Int16 PCM). Same
+    /// ticket and rate limits as a typed question; the clip is bounded and
+    /// forwarded to the app, which transcribes it and enqueues the text.
+    private func submitSpokenQuestion(
+        body: Data,
+        ticket: String,
+        sourceID: String,
+        on connection: NWConnection
+    ) {
+        let now = Date()
+        guard let studentTicket = studentTickets[ticket],
+              studentTicket.expiresAt > now,
+              studentTicket.sourceID == sourceID else {
+            respond(
+                status: "401 Unauthorized",
+                body: #"{"error":"invalid_ticket"}"#,
+                contentType: "application/json; charset=utf-8",
+                on: connection
+            )
+            return
+        }
+        // 16 kHz mono Int16 is ~32 KB per second. Require at least ~0.1 s and
+        // cap the clip near 35 s so one POST cannot upload an endless recording.
+        guard body.count >= 3_200, body.count <= 32_000 * 35 else {
+            respond(
+                status: "422 Unprocessable Content",
+                body: #"{"error":"invalid_audio"}"#,
+                contentType: "application/json; charset=utf-8",
+                on: connection
+            )
+            return
+        }
+        guard registerAcceptedSubmission(
+            ticket: ticket, sourceID: sourceID, now: now
+        ) else {
+            respond(
+                status: "429 Too Many Requests",
+                body: #"{"error":"rate_limited"}"#,
+                contentType: "application/json; charset=utf-8",
+                on: connection
+            )
+            return
+        }
+        spokenQuestionHandler(body)
         respond(
             status: "202 Accepted",
             body: #"{"accepted":true}"#,
@@ -956,6 +1093,13 @@ final class LocalCaptionServer: @unchecked Sendable {
             #message[data-kind="success"] { color: #62d982; }
             #message[data-kind="error"] { color: #ff7777; }
             .privacy { margin-top: 28px; font-size: 13px; color: #777; }
+            .voice { margin-top: 26px; padding-top: 22px; border-top: 1px solid #222; }
+            .voice-label { color: #aaa; margin: 0 0 10px; }
+            #talk { width: 100%; min-height: 64px; font-size: 20px; background: #2b6b3f; touch-action: none; user-select: none; -webkit-user-select: none; }
+            #talk[data-state="recording"] { background: #d23b3b; }
+            #voice-message { margin: 10px 0 0; color: #999; font-size: 14px; min-height: 18px; }
+            #voice-message[data-kind="success"] { color: #62d982; }
+            #voice-message[data-kind="error"] { color: #ff7777; }
           </style>
         </head>
         <body>
@@ -971,7 +1115,12 @@ final class LocalCaptionServer: @unchecked Sendable {
               </div>
               <p id="message" role="status" aria-live="polite"></p>
             </form>
-            <p class="privacy">No name is requested. A temporary in-memory ticket is used only for abuse prevention and disappears when classroom sharing stops.</p>
+            <div class="voice">
+              <p class="voice-label">Or ask out loud (held only while you press):</p>
+              <button id="talk" type="button" disabled>Hold to speak</button>
+              <p id="voice-message" role="status" aria-live="polite"></p>
+            </div>
+            <p class="privacy">No name is requested. A temporary in-memory ticket is used only for abuse prevention and disappears when classroom sharing stops. Your voice is sent only to the professor's Mac and transcribed there; the audio is then discarded.</p>
           </main>
           <script>
             const sessionToken = "\(token)";
@@ -980,6 +1129,8 @@ final class LocalCaptionServer: @unchecked Sendable {
             const submit = document.getElementById("submit");
             const count = document.getElementById("count");
             const message = document.getElementById("message");
+            const talk = document.getElementById("talk");
+            const voiceMessage = document.getElementById("voice-message");
             let ticket = null;
 
             function showMessage(text, kind) {
@@ -997,6 +1148,9 @@ final class LocalCaptionServer: @unchecked Sendable {
               const payload = await response.json();
               ticket = payload.ticket;
               submit.disabled = question.value.trim().length === 0;
+              if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                talk.disabled = false;
+              }
             }
 
             question.addEventListener("input", () => {
@@ -1031,6 +1185,113 @@ final class LocalCaptionServer: @unchecked Sendable {
               }
               submit.disabled = !ticket || question.value.trim().length === 0;
             });
+
+            const MAX_SPEAK_MS = 30000;
+            let recording = false, audioCtx = null, srcNode = null,
+                processor = null, micStream = null, captured = [], maxTimer = null;
+
+            function voiceStatus(text, kind) {
+              voiceMessage.textContent = text;
+              voiceMessage.dataset.kind = kind || "";
+            }
+
+            async function startSpeaking() {
+              if (recording || !ticket) return;
+              if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                voiceStatus("Voice needs a secure (https) connection.", "error");
+                return;
+              }
+              try {
+                micStream = await navigator.mediaDevices.getUserMedia({
+                  audio: { channelCount: 1, echoCancellation: true,
+                           noiseSuppression: true, autoGainControl: true }
+                });
+              } catch {
+                voiceStatus("Microphone access was declined.", "error");
+                return;
+              }
+              audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+              srcNode = audioCtx.createMediaStreamSource(micStream);
+              processor = audioCtx.createScriptProcessor(4096, 1, 1);
+              captured = [];
+              processor.onaudioprocess = e => {
+                captured.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+              };
+              srcNode.connect(processor);
+              processor.connect(audioCtx.destination);
+              recording = true;
+              talk.dataset.state = "recording";
+              talk.textContent = "Recording… release to send";
+              voiceStatus("Listening…", "");
+              maxTimer = setTimeout(() => stopSpeaking(true), MAX_SPEAK_MS);
+            }
+
+            async function stopSpeaking(send) {
+              if (!recording) return;
+              recording = false;
+              if (maxTimer) { clearTimeout(maxTimer); maxTimer = null; }
+              talk.dataset.state = "";
+              talk.textContent = "Hold to speak";
+              const sampleRate = audioCtx ? audioCtx.sampleRate : 48000;
+              try { processor.disconnect(); srcNode.disconnect(); } catch {}
+              if (micStream) micStream.getTracks().forEach(t => t.stop());
+              if (audioCtx) { try { await audioCtx.close(); } catch {} }
+              if (!send) { voiceStatus("", ""); captured = []; return; }
+              const pcm = encodePCM16(captured, sampleRate);
+              captured = [];
+              if (pcm.byteLength < 3200) {
+                voiceStatus("Too short — hold, then speak.", "error");
+                return;
+              }
+              voiceStatus("Sending…", "");
+              talk.disabled = true;
+              try {
+                const response = await fetch(
+                  "/speak?ticket=" + encodeURIComponent(ticket),
+                  { method: "POST", cache: "no-store", credentials: "omit",
+                    headers: { "Content-Type": "application/octet-stream" },
+                    body: pcm }
+                );
+                if (response.status === 202) {
+                  voiceStatus("Spoken question sent.", "success");
+                } else if (response.status === 429) {
+                  voiceStatus("Please wait before speaking again.", "error");
+                } else {
+                  voiceStatus("The question could not be sent.", "error");
+                }
+              } catch {
+                voiceStatus("Connection lost. Check the classroom Wi-Fi.", "error");
+              }
+              talk.disabled = !ticket;
+            }
+
+            // Average no resampling library: merge the captured blocks, linearly
+            // resample from the device rate to 16 kHz, and pack as Int16 PCM.
+            function encodePCM16(chunks, srcRate) {
+              let total = 0;
+              for (const c of chunks) total += c.length;
+              const merged = new Float32Array(total);
+              let offset = 0;
+              for (const c of chunks) { merged.set(c, offset); offset += c.length; }
+              const ratio = srcRate / 16000;
+              const outLength = Math.max(0, Math.floor(merged.length / ratio));
+              const out = new Int16Array(outLength);
+              for (let i = 0; i < outLength; i++) {
+                const pos = i * ratio;
+                const i0 = Math.floor(pos);
+                const i1 = Math.min(i0 + 1, merged.length - 1);
+                let s = merged[i0] + (merged[i1] - merged[i0]) * (pos - i0);
+                s = Math.max(-1, Math.min(1, s));
+                out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+              }
+              return out.buffer;
+            }
+
+            talk.addEventListener("pointerdown", e => { e.preventDefault(); startSpeaking(); });
+            talk.addEventListener("pointerup", e => { e.preventDefault(); stopSpeaking(true); });
+            talk.addEventListener("pointerleave", () => { if (recording) stopSpeaking(true); });
+            talk.addEventListener("pointercancel", () => { if (recording) stopSpeaking(false); });
+            talk.addEventListener("contextmenu", e => e.preventDefault());
 
             obtainTicket().catch(() => {
               showMessage("Question submissions are unavailable.", "error");

@@ -260,6 +260,88 @@ final class VoxtralEmbeddedService: @unchecked Sendable {
         }
     }
 
+    /// Transcribes one complete spoken-question clip (16 kHz mono Int16 PCM) on
+    /// a transient stream created from the already-loaded model. It runs on the
+    /// same inference queue as the live stream, so the two never execute
+    /// concurrently (they only share the read-only weights). Returns nil if no
+    /// model is loaded yet or nothing intelligible was recognized.
+    func transcribeClip(_ pcm16MonoData: Data) async -> String? {
+        await withCheckedContinuation { continuation in
+            inferenceQueue.async { [weak self] in
+                guard let self else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                guard let model = self.state.withLock({ $0.model }) else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+
+                var status = CCV_STATUS_OK
+                var errorBuffer = [CChar](repeating: 0, count: 512)
+                let options = ccv_stream_options_default()
+                let stream = ccv_stream_create(
+                    model, options, &status, &errorBuffer, errorBuffer.count
+                )
+                guard let stream else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                defer { ccv_stream_free(stream) }
+
+                // A short silence preroll warms the cold decoder and gives the
+                // encoder context before the first spoken phoneme.
+                let preroll = [Int16](repeating: 0, count: 16_000 * 3 / 10)
+                _ = preroll.withUnsafeBufferPointer {
+                    ccv_stream_feed_pcm16(stream, $0.baseAddress, $0.count)
+                }
+
+                let feedStatus = pcm16MonoData.withUnsafeBytes {
+                    bytes -> ccv_status_t in
+                    let samples = bytes.bindMemory(to: Int16.self)
+                    guard let base = samples.baseAddress, !samples.isEmpty else {
+                        return CCV_STATUS_INVALID_ARGUMENT
+                    }
+                    return ccv_stream_feed_pcm16(stream, base, samples.count)
+                }
+                guard feedStatus == CCV_STATUS_OK else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                _ = ccv_stream_finish(stream)
+                let text = self.readAllText(from: stream)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                continuation.resume(returning: text.isEmpty ? nil : text)
+            }
+        }
+    }
+
+    /// Reads every token a finished transient stream produced into one string,
+    /// without touching the live stream's `provisionalText` or emitting events.
+    private func readAllText(from stream: OpaquePointer) -> String {
+        var result = ""
+        while true {
+            var requiredCapacity = 0
+            var buffer = [CChar](repeating: 0, count: 256)
+            var status = ccv_stream_read_text(
+                stream, &buffer, buffer.count, &requiredCapacity
+            )
+            if status == CCV_STATUS_BUFFER_TOO_SMALL {
+                buffer = [CChar](repeating: 0, count: requiredCapacity)
+                status = ccv_stream_read_text(
+                    stream, &buffer, buffer.count, &requiredCapacity
+                )
+            }
+            guard status == CCV_STATUS_OK else { return result }
+            let terminator = buffer.firstIndex(of: 0) ?? buffer.endIndex
+            let token = String(
+                decoding: buffer[..<terminator].map(UInt8.init), as: UTF8.self
+            )
+            if token.isEmpty { continue }
+            result.append(token)
+        }
+    }
+
     private func drainText(from stream: OpaquePointer) {
         // Tokens arrive in bursts (one decode pass yields ~a dozen), and every
         // .provisional event triggers a full main-actor caption pipeline pass.

@@ -327,3 +327,89 @@ submitting questions.
 The complete server source below implements every step after QR decoding. The
 QR rendering helper itself appears in the dashboard chapter because it belongs
 to presentation, but its exact code is quoted above and included in full there.
+
+## HTTPS, TLS, and self-signed certificates
+
+The server speaks **HTTPS**, not plain HTTP. This section explains what that
+means and why it is required, assuming no prior networking background.
+
+### Why a secure connection is required here
+
+The connection carries nothing secret — captions and anonymous questions are not
+confidential. HTTPS is required for a different reason: a web browser will only
+let a page use the **microphone** when the page was loaded over a *secure
+connection*. This is a fixed browser rule, not a choice of ours. Because a
+student asks a question aloud by recording in the browser (covered below), the
+page must be served over HTTPS even on a trusted classroom Wi-Fi.
+
+### What TLS adds to a TCP socket
+
+A plain HTTP server is a TCP socket: bytes flow in the clear, and the client has
+no proof of who it is talking to. **TLS** (Transport Layer Security, the protocol
+the "S" in HTTPS stands for) wraps that same byte stream and adds two things:
+
+- **Encryption.** Before any request is sent, the two sides perform a *handshake*
+  that agrees on a fresh symmetric key; everything afterwards is encrypted. A
+  C analogy: instead of `write(fd, buf, n)` putting plaintext on the wire, TLS
+  encrypts `buf` first, transparently, on every write.
+- **Server authentication.** During the handshake the server presents a
+  **certificate**, and the client checks it before trusting the connection.
+
+In this code, `NWParameters(tls:)` asks Network.framework to run that handshake
+for us; we only supply the certificate.
+
+### What a certificate is
+
+A certificate is a small signed document binding a **public key** to an
+**identity** (a host name or IP address). It is one half of a *key pair*: the
+matching **private key** never leaves the Mac, and the server proves it owns the
+certificate by using that private key during the handshake. The pair "certificate
++ private key" is what the code calls an **identity** (`sec_identity_t`).
+
+Normally a certificate is signed by a **certificate authority** (CA) — a company
+whose signature browsers already trust — so a visitor's browser accepts it
+silently.
+
+### What "self-signed" means, and the one-time warning
+
+This app has no CA and contacts no company. Instead the Mac signs its **own**
+certificate: hence **self-signed**. Cryptographically the encryption is exactly
+as strong; what is missing is the third-party vouching for the identity. A
+browser cannot tell a benign self-signed server from an impostor, so it shows a
+one-time **"this connection is not private"** warning. The student taps through
+it once ("visit anyway"); afterwards the browser remembers the decision for that
+address and the microphone becomes available. The warning is the price of not
+involving an external authority, which is the right trade for a local-first app.
+
+`ServerTLSIdentity` builds this identity. macOS has no high-level call to mint a
+self-signed certificate, so it shells out to the system `openssl` (always present
+at `/usr/bin/openssl`) to produce the certificate and key, bundles them into a
+**PKCS#12** file (a standard container for an identity), and loads that with
+`SecPKCS12Import`, which yields the `SecIdentity` the TLS listener needs. The
+identity is generated once and persisted, so the student's one-time warning is
+not repeated every class — only if the Mac's Wi-Fi address changes, because the
+address is written into the certificate.
+
+::: {.callout-note title="Swift for a C programmer: opaque handles for crypto objects"}
+`sec_identity_t` and `SecIdentity` are opaque handles, like a `FILE *`: you never
+see their fields, only pass them to framework calls. `sec_identity_create`
+wraps the Security-framework `SecIdentity` in the Network-framework type the TLS
+options expect. No key material is ever copied into our own memory.
+:::
+
+## Spoken student questions
+
+The question form accepts a **spoken** question as well as a typed one. Holding
+the page's "hold to speak" button records the microphone; on release the browser
+**resamples the audio to 16 kHz mono 16-bit PCM** — exactly Voxtral's input
+format — and POSTs the raw samples to `POST /speak`. That route validates the
+same source-bound ticket and the same sliding-window rate limits as a typed
+question, bounds the clip size, and hands the bytes to the app.
+
+The app transcribes the clip **locally**, on a transient Voxtral stream sharing
+the already-loaded model (see the embedded-runtime chapter), and the resulting
+text enters the **same moderation queue** as a typed question — it is simply a
+question dictated instead of typed. The audio is never stored: it is transcribed
+and discarded. This keeps the feature a natural fallback for when a directional
+microphone in the room does not catch a distant student, without sending any
+voice to a cloud service.

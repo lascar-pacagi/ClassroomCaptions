@@ -28,6 +28,9 @@ struct ClassroomQuestion: Identifiable, Equatable {
     let id: UUID
     let text: String
     let submittedAt: Date
+    // True when the question was spoken (transcribed) rather than typed, so the
+    // overlay can mark it with a microphone glyph.
+    var spoken = false
 }
 
 @MainActor
@@ -435,6 +438,11 @@ final class ClassroomAppModel {
             questionHandler: { [weak self] question in
                 Task { @MainActor [weak self] in
                     self?.receiveStudentQuestion(question)
+                }
+            },
+            spokenQuestionHandler: { [weak self] pcm in
+                Task { @MainActor [weak self] in
+                    await self?.receiveSpokenQuestion(pcm)
                 }
             }
         )
@@ -1689,6 +1697,7 @@ final class ClassroomAppModel {
             lines: lines,
             provisional: provisional,
             question: questionText,
+            questionSpoken: presentedStudentQuestion?.spoken ?? false,
             pendingQuestionCount: pendingStudentQuestions.count,
             fontSize: captionFontSize,
             answerMarkdown: showAnswer ? modelAnswerMarkdown : nil,
@@ -1742,6 +1751,29 @@ final class ClassroomAppModel {
             text: submission.text,
             submittedAt: submission.submittedAt
         ))
+        refreshOverlay()
+    }
+
+    /// A spoken question (audio clip from a student's phone). It is transcribed
+    /// locally on a transient Voxtral stream and then enters the same moderation
+    /// queue as a typed question. Requires the embedded model to be loaded (an
+    /// embedded session); otherwise the transcription returns nothing.
+    private func receiveSpokenQuestion(_ pcm: Data) async {
+        guard pendingStudentQuestions.count < 500 else { return }
+        guard let raw = await embeddedVoxtral.transcribeClip(pcm) else { return }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let text = String(
+            trimmed.prefix(CaptionSharingSecurity.maximumQuestionCharacters)
+        )
+        guard pendingStudentQuestions.count < 500 else { return }
+        pendingStudentQuestions.append(ClassroomQuestion(
+            id: UUID(),
+            text: text,
+            submittedAt: Date(),
+            spoken: true
+        ))
+        statusText = "Spoken student question received"
         refreshOverlay()
     }
 
