@@ -1117,7 +1117,7 @@ final class LocalCaptionServer: @unchecked Sendable {
             </form>
             <div class="voice">
               <p class="voice-label">Or ask out loud (held only while you press):</p>
-              <button id="talk" type="button" disabled>Hold to speak</button>
+              <button id="talk" type="button" disabled>Tap to enable microphone</button>
               <p id="voice-message" role="status" aria-live="polite"></p>
             </div>
             <p class="privacy">No name is requested. A temporary in-memory ticket is used only for abuse prevention and disappears when classroom sharing stops. Your voice is sent only to the professor's Mac and transcribed there; the audio is then discarded.</p>
@@ -1187,20 +1187,26 @@ final class LocalCaptionServer: @unchecked Sendable {
             });
 
             const MAX_SPEAK_MS = 30000;
-            let recording = false, audioCtx = null, srcNode = null,
-                processor = null, micStream = null, captured = [], maxTimer = null;
+            let micEnabled = false, recording = false, audioCtx = null,
+                srcNode = null, processor = null, micStream = null,
+                captured = [], maxTimer = null;
 
             function voiceStatus(text, kind) {
               voiceMessage.textContent = text;
               voiceMessage.dataset.kind = kind || "";
             }
 
-            async function startSpeaking() {
-              if (recording || !ticket) return;
+            // First step: a single TAP requests microphone permission. Doing it
+            // here, not during a press-and-hold, keeps the permission pop-up from
+            // interrupting the recording gesture. The stream is then kept open so
+            // every later hold records instantly with no further prompt.
+            async function enableMic() {
+              if (micEnabled) return;
               if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
                 voiceStatus("Voice needs a secure (https) connection.", "error");
                 return;
               }
+              voiceStatus("Allow microphone access…", "");
               try {
                 micStream = await navigator.mediaDevices.getUserMedia({
                   audio: { channelCount: 1, echoCancellation: true,
@@ -1213,12 +1219,22 @@ final class LocalCaptionServer: @unchecked Sendable {
               audioCtx = new (window.AudioContext || window.webkitAudioContext)();
               srcNode = audioCtx.createMediaStreamSource(micStream);
               processor = audioCtx.createScriptProcessor(4096, 1, 1);
-              captured = [];
               processor.onaudioprocess = e => {
-                captured.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+                if (recording) {
+                  captured.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+                }
               };
               srcNode.connect(processor);
               processor.connect(audioCtx.destination);
+              micEnabled = true;
+              talk.textContent = "Hold to speak";
+              voiceStatus("Microphone ready — press and hold to speak.", "success");
+            }
+
+            function startSpeaking() {
+              if (!micEnabled || recording || !ticket) return;
+              if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+              captured = [];
               recording = true;
               talk.dataset.state = "recording";
               talk.textContent = "Recording… release to send";
@@ -1233,12 +1249,13 @@ final class LocalCaptionServer: @unchecked Sendable {
               talk.dataset.state = "";
               talk.textContent = "Hold to speak";
               const sampleRate = audioCtx ? audioCtx.sampleRate : 48000;
-              try { processor.disconnect(); srcNode.disconnect(); } catch {}
-              if (micStream) micStream.getTracks().forEach(t => t.stop());
-              if (audioCtx) { try { await audioCtx.close(); } catch {} }
-              if (!send) { voiceStatus("", ""); captured = []; return; }
-              const pcm = encodePCM16(captured, sampleRate);
+              const chunks = captured;
               captured = [];
+              if (!send) {
+                voiceStatus("Microphone ready — press and hold to speak.", "");
+                return;
+              }
+              const pcm = encodePCM16(chunks, sampleRate);
               if (pcm.byteLength < 3200) {
                 voiceStatus("Too short — hold, then speak.", "error");
                 return;
@@ -1262,7 +1279,7 @@ final class LocalCaptionServer: @unchecked Sendable {
               } catch {
                 voiceStatus("Connection lost. Check the classroom Wi-Fi.", "error");
               }
-              talk.disabled = !ticket;
+              talk.disabled = false;
             }
 
             // Average no resampling library: merge the captured blocks, linearly
@@ -1287,8 +1304,14 @@ final class LocalCaptionServer: @unchecked Sendable {
               return out.buffer;
             }
 
-            talk.addEventListener("pointerdown", e => { e.preventDefault(); startSpeaking(); });
-            talk.addEventListener("pointerup", e => { e.preventDefault(); stopSpeaking(true); });
+            talk.addEventListener("pointerdown", e => {
+              e.preventDefault();
+              if (micEnabled) { startSpeaking(); } else { enableMic(); }
+            });
+            talk.addEventListener("pointerup", e => {
+              e.preventDefault();
+              if (recording) stopSpeaking(true);
+            });
             talk.addEventListener("pointerleave", () => { if (recording) stopSpeaking(true); });
             talk.addEventListener("pointercancel", () => { if (recording) stopSpeaking(false); });
             talk.addEventListener("contextmenu", e => e.preventDefault());
