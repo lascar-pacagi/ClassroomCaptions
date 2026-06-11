@@ -7098,7 +7098,11 @@ the local Gemma server; macOS always ships `/usr/bin/openssl`.
     ("ServerTLSIdentity.swift", "func importIdentity"): """
 Loads the PKCS#12 bytes into a `SecIdentity` via `SecPKCS12Import`. The system
 LibreSSL's PKCS#12 encryption is one the Security framework accepts (OpenSSL 3's
-modern default would be rejected), which is why the system `openssl` is used.
+modern default would be rejected), which is why the system `openssl` is used. The
+import is "to memory only" so the private key is never placed in a keychain:
+otherwise macOS would ask the user to authorize the app on every TLS handshake,
+and because the app is ad-hoc signed that approval would not persist across
+rebuilds.
 """,
     ("LocalCaptionServer.swift", "func isSpokenQuestionRequest"): """
 Peeks at the request line — available before the headers finish — to recognize a

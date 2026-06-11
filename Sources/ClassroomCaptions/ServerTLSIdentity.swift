@@ -136,9 +136,18 @@ enum ServerTLSIdentity {
     }
 
     private static func importIdentity(from data: Data) throws -> SecIdentity {
-        let options = [kSecImportExportPassphrase as String: passphrase] as CFDictionary
+        // Import the identity "to memory only" so the private key is never added
+        // to a keychain. Otherwise macOS asks the user to authorize this app
+        // every time the TLS handshake uses the key, and — because the app is
+        // ad-hoc signed — that approval does not persist across rebuilds. The
+        // option's documented string value is "toMemoryOnly"; passing the string
+        // keeps it usable regardless of SDK symbol availability.
+        let options: [CFString: Any] = [
+            kSecImportExportPassphrase: passphrase,
+            "toMemoryOnly" as CFString: true,
+        ]
         var items: CFArray?
-        let status = SecPKCS12Import(data as CFData, options, &items)
+        let status = SecPKCS12Import(data as CFData, options as CFDictionary, &items)
         guard status == errSecSuccess else { throw Failure.importFailed(status) }
         guard let array = items as? [[String: Any]],
               let identity = array.first?[kSecImportItemIdentity as String] else {
