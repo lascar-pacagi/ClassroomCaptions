@@ -308,7 +308,6 @@ security controls, QR encoding, testing, and reconstruction procedure.
 - The browser transport is HTTP, not HTTPS.
 - Only one browser caption stream is accepted at a time.
 - There is no speaker diarization or word-level timestamp display.
-- Model startup is substantial; start the app before the lecture.
 - Long-duration classroom and adverse-network soak testing should be repeated
   after model, macOS, or compiler upgrades.
 
