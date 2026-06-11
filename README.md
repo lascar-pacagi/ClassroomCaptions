@@ -3,10 +3,12 @@
 ClassroomCaptions is a local-first macOS application for live classroom
 subtitles. It captures a selected microphone, transcribes speech with Voxtral
 on the Mac, optionally proofreads finalized captions with Gemma, and displays
-the result in a movable overlay. Captions and anonymous student questions can
-also be shared with any modern browser on the same local network.
+the result in a movable overlay. Captions can also be sent live to other devices
+on the same local Wi-Fi network — students read them in a browser on their own
+phone, tablet, or laptop, with no app to install — and they can submit anonymous
+questions back.
 
-The application was designed for a hard-of-hearing computer-science professor,
+The application was designed for a hearing-impaired computer-science professor,
 but its architecture is useful anywhere private, low-latency, offline
 captioning is preferable to a cloud service.
 
@@ -14,13 +16,17 @@ captioning is preferable to a cloud service.
 
 - Embedded full-precision Voxtral Realtime inference using Metal.
 - Fast provisional subtitles followed by optional Gemma correction.
-- Standard and science correction modes; science mode favors Unicode
+- Standard, science, and assistant correction modes; science mode favors Unicode
   mathematics, logic, set, probability, and programming notation.
+- Assistant mode: ask the model a spoken, keyword-framed question and read its
+  answer — with syntax-highlighted code and compiled LaTeX — in a dedicated,
+  locked-down overlay card (no network, no tools, displayed never executed).
 - Raw Voxtral text is retained when correction fails or is rejected.
 - Movable and resizable overlay, independently placed on any connected display.
 - Spoken commands to show, hide, or clear the overlay.
 - Local recording with WAV audio and text/JSON transcripts.
-- Browser-based live captions over trusted Wi-Fi.
+- Live captions sent to students' own devices (phone, tablet, laptop) through a
+  browser over trusted Wi-Fi — nothing to install on their side.
 - Anonymous student question page with a professor-controlled moderation queue.
 - Spoken commands to show the next question and dismiss the current question.
 - Live token speed, transformation percentage, and memory diagnostics.
@@ -194,6 +200,9 @@ Settings > Privacy & Security > Microphone** and enable ClassroomCaptions.
 | `Bonjour soleil blanc` | Clear visible captions without deleting the transcript |
 | `Bonjour question suivante` | Show the oldest pending student question |
 | `Bonjour question terminée` | Dismiss the current student question |
+| `Bonjour modèle début` … `Bonjour modèle fin` | Frame a spoken question to the model (assistant mode) |
+| `Bonjour réponse` | Show or hide the model answer |
+| `Bonjour monter` / `Bonjour plonger` | Scroll the answer up / down |
 
 12. Press **Stop Session** and wait for final correction and export to finish.
 13. Open the session folder under `~/Documents/ClassroomCaptions`.
@@ -249,6 +258,13 @@ class.
   latency.
 - **Science mode** performs aggressive notation formatting but is still
   forbidden from solving or answering captioned questions.
+- **Assistant mode** corrects captions exactly like science mode and adds a
+  separate path: a question you frame in speech between the start and end phrases
+  is sent to the model, and its answer is rendered (code highlighting, LaTeX) in
+  a dedicated overlay card. The model still only ever receives text and returns
+  text — it is given no tools and no machine access, and its answer is displayed,
+  never executed. The card has priority rules: a displayed student question hides
+  it, and it returns once that question is dismissed.
 - If Gemma fails, times out, or rewrites too much, the raw caption remains
   visible.
 
