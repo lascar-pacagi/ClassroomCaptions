@@ -220,7 +220,10 @@ control the microphone, execute application commands, or modify captions.
 
 ## Recordings and Privacy
 
-When recording is enabled, each session contains:
+Recording is **disabled by default**: archiving a class is a consent decision.
+Enable **Record sessions** in the Session Recording group before class if you
+want an archive; the choice is remembered across launches. When recording is
+enabled, each session contains:
 
 - `audio.wav`: 16 kHz, signed 16-bit, mono PCM;
 - `transcript.txt`: readable corrected transcript;

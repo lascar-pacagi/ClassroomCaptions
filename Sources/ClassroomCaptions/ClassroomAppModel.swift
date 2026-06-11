@@ -202,7 +202,18 @@ final class ClassroomAppModel {
             )
         }
     }
-    var recordSessions = true
+    // Recording is opt-in: archiving a class is a consent/privacy decision the
+    // professor must take deliberately, so a fresh install never records.
+    var recordSessions = UserDefaults.standard.object(
+        forKey: "recordSessions"
+    ) as? Bool ?? false {
+        didSet {
+            UserDefaults.standard.set(
+                recordSessions,
+                forKey: "recordSessions"
+            )
+        }
+    }
     var sessionArchiveDirectory = NSString(
         string: "~/Documents/ClassroomCaptions"
     ).expandingTildeInPath
