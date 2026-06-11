@@ -7098,11 +7098,27 @@ the local Gemma server; macOS always ships `/usr/bin/openssl`.
     ("ServerTLSIdentity.swift", "func importIdentity"): """
 Loads the PKCS#12 bytes into a `SecIdentity` via `SecPKCS12Import`. The system
 LibreSSL's PKCS#12 encryption is one the Security framework accepts (OpenSSL 3's
-modern default would be rejected), which is why the system `openssl` is used. The
-import is "to memory only" so the private key is never placed in a keychain:
-otherwise macOS would ask the user to authorize the app on every TLS handshake,
-and because the app is ad-hoc signed that approval would not persist across
-rebuilds.
+modern default would be rejected), which is why the system `openssl` is used.
+After removing any previous copy, the key is imported into the default (login)
+keychain — already unlocked, so it never asks to "use the keychain" — with an
+access policy that lets any application use it without a prompt. Otherwise macOS
+asks the user to authorize the app every time the TLS handshake signs with the
+key, repeatedly, because ad-hoc signing changes the app's identity on each build
+so "Always Allow" never persists. macOS offers no non-deprecated API for that
+access policy, so the deprecated `SecAccess` calls are used deliberately and
+confined to `unrestrictedAccess`.
+""",
+    ("ServerTLSIdentity.swift", "func deletePreviousIdentity"): """
+Removes a prior copy of our identity precisely before re-import: the private key
+is located via the identity (so no other application's generically labelled key
+is touched), then the identity and certificate are deleted. Without this the old
+key would survive with its prompting ACL. Uses only modern Security APIs.
+""",
+    ("ServerTLSIdentity.swift", "func unrestrictedAccess"): """
+Builds the access policy attached to the imported key: it walks the access
+object's ACL entries and sets each to trust every application (a nil application
+list) with no confirmation prompt. This is the only reliable way to stop the
+per-handshake keychain dialog for an ad-hoc-signed app.
 """,
     ("LocalCaptionServer.swift", "func isSpokenQuestionRequest"): """
 Peeks at the request line — available before the headers finish — to recognize a

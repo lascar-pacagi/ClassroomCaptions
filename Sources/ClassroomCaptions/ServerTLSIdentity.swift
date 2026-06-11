@@ -136,25 +136,79 @@ enum ServerTLSIdentity {
     }
 
     private static func importIdentity(from data: Data) throws -> SecIdentity {
-        // Import the identity "to memory only" so the private key is never added
-        // to a keychain. Otherwise macOS asks the user to authorize this app
-        // every time the TLS handshake uses the key, and — because the app is
-        // ad-hoc signed — that approval does not persist across rebuilds. The
-        // option's documented string value is "toMemoryOnly"; passing the string
-        // keeps it usable regardless of SDK symbol availability.
-        let options: [CFString: Any] = [
-            kSecImportExportPassphrase: passphrase,
-            "toMemoryOnly" as CFString: true,
-        ]
+        // Replace any earlier copy so the re-import installs the key with an
+        // unrestricted access policy (an existing key keeps its old, prompting
+        // ACL).
+        deletePreviousIdentity()
+
+        // Import into the default (login) keychain — already unlocked, so it
+        // never asks to "use the keychain" — but attach an access policy that
+        // lets any application use the key without a confirmation dialog.
+        // Otherwise macOS prompts on every TLS handshake, and because the app is
+        // ad-hoc signed that approval never persists across rebuilds. macOS has
+        // no non-deprecated API for this, so the deprecated SecAccess calls are
+        // used deliberately and confined to `unrestrictedAccess`.
+        var options: [CFString: Any] = [kSecImportExportPassphrase: passphrase]
+        if let access = unrestrictedAccess() {
+            options[kSecImportExportAccess] = access
+        }
         var items: CFArray?
         let status = SecPKCS12Import(data as CFData, options as CFDictionary, &items)
-        guard status == errSecSuccess else { throw Failure.importFailed(status) }
-        guard let array = items as? [[String: Any]],
+        guard status == errSecSuccess,
+              let array = items as? [[String: Any]],
               let identity = array.first?[kSecImportItemIdentity as String] else {
-            throw Failure.noIdentity
+            throw Failure.importFailed(status)
         }
         // SecPKCS12Import returns the identity as a SecIdentity (a cert + key
         // pair); the cast is to the concrete Security type.
         return identity as! SecIdentity
+    }
+
+    /// Removes a prior copy of our identity precisely: the private key (located
+    /// via the identity, so no other application's key is touched), then the
+    /// identity and certificate. Uses only modern, non-deprecated Security APIs.
+    private static func deletePreviousIdentity() {
+        var match: CFTypeRef?
+        let found = SecItemCopyMatching([
+            kSecClass as String: kSecClassIdentity,
+            kSecAttrLabel as String: label,
+            kSecReturnRef as String: true,
+        ] as CFDictionary, &match)
+        if found == errSecSuccess, let identity = match {
+            var key: SecKey?
+            if SecIdentityCopyPrivateKey(
+                identity as! SecIdentity, &key
+            ) == errSecSuccess, let key {
+                SecItemDelete([kSecValueRef as String: key] as CFDictionary)
+            }
+        }
+        for itemClass in [kSecClassIdentity, kSecClassCertificate] {
+            SecItemDelete([
+                kSecClass as String: itemClass,
+                kSecAttrLabel as String: label,
+            ] as CFDictionary)
+        }
+    }
+
+    /// An access policy that lets any application use the imported key without a
+    /// keychain confirmation prompt — the only reliable way to stop the per-
+    /// handshake dialog for an ad-hoc-signed app.
+    private static func unrestrictedAccess() -> SecAccess? {
+        var access: SecAccess?
+        guard SecAccessCreate(label as CFString, nil, &access) == errSecSuccess,
+              let access else {
+            return nil
+        }
+        var aclList: CFArray?
+        guard SecAccessCopyACLList(access, &aclList) == errSecSuccess,
+              let acls = aclList as? [SecACL] else {
+            return access
+        }
+        for acl in acls {
+            // A nil application list means every application is trusted; an empty
+            // prompt selector means no confirmation dialog is shown.
+            SecACLSetContents(acl, nil, "" as CFString, [])
+        }
+        return access
     }
 }
