@@ -66,6 +66,20 @@ final class ClassroomAppModel {
     private(set) var studentQuestionURL: URL?
     private(set) var pendingStudentQuestions: [ClassroomQuestion] = []
     private(set) var presentedStudentQuestion: ClassroomQuestion?
+    // Assistant-mode answer state. `modelAnswerMarkdown` is the current answer
+    // (nil = none); it survives behind a displayed student question and behind a
+    // manual hide, reappearing once both clear. `modelQuestionCapture`
+    // accumulates a question that spans several finalized segments.
+    private(set) var modelAnswerMarkdown: String?
+    private(set) var modelAnswerLoading = false
+    private(set) var modelAnswerHidden = false
+    private var modelQuestionCapture: String?
+    private var modelAnswerScrollToken = 0
+    private var modelAnswerScrollDirection: AnswerScrollDirection = .down
+    @ObservationIgnored
+    private var modelAnswerTask: Task<Void, Never>?
+    @ObservationIgnored
+    private var modelQuestionTimeoutTask: Task<Void, Never>?
     var selectedDisplayID: CGDirectDisplayID?
     var selectedMicrophoneID: String?
     var transcriptionBackend = TranscriptionBackend.embedded
@@ -128,6 +142,28 @@ final class ClassroomAppModel {
             UserDefaults.standard.set(
                 captionFontSize,
                 forKey: "captionFontSize"
+            )
+        }
+    }
+    // Opacity of the overlay's dark backing panel (the text itself stays opaque).
+    var overlayBackgroundOpacity = UserDefaults.standard.object(
+        forKey: "overlayBackgroundOpacity"
+    ) as? Double ?? 0.82 {
+        didSet {
+            UserDefaults.standard.set(
+                overlayBackgroundOpacity,
+                forKey: "overlayBackgroundOpacity"
+            )
+        }
+    }
+    // Text size inside the model-answer card, independent of caption text size.
+    var answerFontSize = UserDefaults.standard.object(
+        forKey: "answerFontSize"
+    ) as? Double ?? 18 {
+        didSet {
+            UserDefaults.standard.set(
+                answerFontSize,
+                forKey: "answerFontSize"
             )
         }
     }
@@ -199,6 +235,59 @@ final class ClassroomAppModel {
             UserDefaults.standard.set(
                 studentDismissQuestionVoiceCommand,
                 forKey: "studentDismissQuestionVoiceCommand"
+            )
+        }
+    }
+    // Assistant mode: the professor frames a spoken question between these two
+    // phrases; the model's answer replaces the span in a dedicated overlay card.
+    var modelQuestionStartVoiceCommand = UserDefaults.standard.string(
+        forKey: "modelQuestionStartVoiceCommand"
+    ) ?? "Bonjour modèle début" {
+        didSet {
+            UserDefaults.standard.set(
+                modelQuestionStartVoiceCommand,
+                forKey: "modelQuestionStartVoiceCommand"
+            )
+        }
+    }
+    var modelQuestionEndVoiceCommand = UserDefaults.standard.string(
+        forKey: "modelQuestionEndVoiceCommand"
+    ) ?? "Bonjour modèle fin" {
+        didSet {
+            UserDefaults.standard.set(
+                modelQuestionEndVoiceCommand,
+                forKey: "modelQuestionEndVoiceCommand"
+            )
+        }
+    }
+    // Hides / restores the answer card, and pages through a long answer.
+    var modelAnswerToggleVoiceCommand = UserDefaults.standard.string(
+        forKey: "modelAnswerToggleVoiceCommand"
+    ) ?? "Bonjour réponse" {
+        didSet {
+            UserDefaults.standard.set(
+                modelAnswerToggleVoiceCommand,
+                forKey: "modelAnswerToggleVoiceCommand"
+            )
+        }
+    }
+    var overlayScrollUpVoiceCommand = UserDefaults.standard.string(
+        forKey: "overlayScrollUpVoiceCommand"
+    ) ?? "Bonjour monter" {
+        didSet {
+            UserDefaults.standard.set(
+                overlayScrollUpVoiceCommand,
+                forKey: "overlayScrollUpVoiceCommand"
+            )
+        }
+    }
+    var overlayScrollDownVoiceCommand = UserDefaults.standard.string(
+        forKey: "overlayScrollDownVoiceCommand"
+    ) ?? "Bonjour plonger" {
+        didSet {
+            UserDefaults.standard.set(
+                overlayScrollDownVoiceCommand,
+                forKey: "overlayScrollDownVoiceCommand"
             )
         }
     }
@@ -364,6 +453,18 @@ final class ClassroomAppModel {
             || overlayClearVoiceCommand == "Rideau blanc" {
             overlayClearVoiceCommand = "Bonjour soleil blanc"
         }
+        // "haut"/"bas" are too short for Voxtral to transcribe reliably (it hears
+        // "au", "aux", "O"), and "descendre" gets heard as "décembre"; migrate to
+        // long, phonetically distinct verbs.
+        if UserDefaults.standard.object(forKey: "overlayScrollUpVoiceCommand") == nil
+            || overlayScrollUpVoiceCommand == "Bonjour haut" {
+            overlayScrollUpVoiceCommand = "Bonjour monter"
+        }
+        if UserDefaults.standard.object(forKey: "overlayScrollDownVoiceCommand") == nil
+            || overlayScrollDownVoiceCommand == "Bonjour bas"
+            || overlayScrollDownVoiceCommand == "Bonjour descendre" {
+            overlayScrollDownVoiceCommand = "Bonjour plonger"
+        }
         refreshDisplays()
         refreshMicrophones()
         observeTranscriptionEvents()
@@ -488,9 +589,10 @@ final class ClassroomAppModel {
                 return
             }
             if let drainedText {
-                let remainingText = self.consumeOverlayVoiceCommand(
+                var remainingText = self.consumeOverlayVoiceCommand(
                     in: drainedText
                 )
+                remainingText = self.consumeModelQuestion(in: remainingText)
                 if let segment = completedSession.finalizeCaption(
                     remainingText,
                     correctionEnabled: self.correctionEnabled
@@ -595,6 +697,14 @@ final class ClassroomAppModel {
         activeTranscriptionBackend = nil
         resetLiveDiagnostics()
         resetOverlayClearState()
+        modelAnswerTask?.cancel()
+        modelAnswerTask = nil
+        modelQuestionTimeoutTask?.cancel()
+        modelQuestionTimeoutTask = nil
+        modelAnswerMarkdown = nil
+        modelAnswerLoading = false
+        modelAnswerHidden = false
+        modelQuestionCapture = nil
         refreshOverlay()
     }
 
@@ -649,10 +759,11 @@ final class ClassroomAppModel {
 
         case .provisional(let text):
             guard var session else { return }
-            let provisionalText = consumeOverlayVoiceCommand(
+            var provisionalText = consumeOverlayVoiceCommand(
                 in: text,
                 provisional: true
             )
+            provisionalText = previewModelQuestion(in: provisionalText)
             session.updateProvisional(provisionalText)
             self.session = session
             recordFirstCaptionLatencyIfNeeded()
@@ -661,7 +772,8 @@ final class ClassroomAppModel {
         case .finalized(let text):
             guard var session else { return }
             let wasClearingOverlay = overlayClearFinalizationPending
-            let remainingText = consumeOverlayVoiceCommand(in: text)
+            var remainingText = consumeOverlayVoiceCommand(in: text)
+            remainingText = consumeModelQuestion(in: remainingText)
             let segment = session.finalizeCaption(
                 remainingText,
                 correctionEnabled: correctionEnabled
@@ -1166,6 +1278,23 @@ final class ClassroomAppModel {
             studentDismissQuestionVoiceCommand.trimmingCharacters(
                 in: .whitespacesAndNewlines
             )
+        // Scroll / answer-toggle phrases are optional: an empty one is simply
+        // ignored by the recognizer, so they are not part of the guard below.
+        let scrollUpPhrase = overlayScrollUpVoiceCommand.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        let scrollDownPhrase = overlayScrollDownVoiceCommand.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        let toggleAnswerPhrase = modelAnswerToggleVoiceCommand.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        let modelStartPhrase = modelQuestionStartVoiceCommand.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        let modelEndPhrase = modelQuestionEndVoiceCommand.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
         guard !showPhrase.isEmpty, !hidePhrase.isEmpty,
               !clearPhrase.isEmpty, !nextQuestionPhrase.isEmpty,
               !dismissQuestionPhrase.isEmpty else {
@@ -1178,7 +1307,10 @@ final class ClassroomAppModel {
             hidePhrase: hidePhrase,
             clearPhrase: clearPhrase,
             nextQuestionPhrase: nextQuestionPhrase,
-            dismissQuestionPhrase: dismissQuestionPhrase
+            dismissQuestionPhrase: dismissQuestionPhrase,
+            scrollUpPhrase: scrollUpPhrase,
+            scrollDownPhrase: scrollDownPhrase,
+            toggleAnswerPhrase: toggleAnswerPhrase
         )
         if !commands.isEmpty {
             // Compare the recognized actions element-wise with what was
@@ -1215,7 +1347,12 @@ final class ClassroomAppModel {
                hidePhrase: hidePhrase,
                clearPhrase: clearPhrase,
                nextQuestionPhrase: nextQuestionPhrase,
-               dismissQuestionPhrase: dismissQuestionPhrase
+               dismissQuestionPhrase: dismissQuestionPhrase,
+               scrollUpPhrase: scrollUpPhrase,
+               scrollDownPhrase: scrollDownPhrase,
+               toggleAnswerPhrase: toggleAnswerPhrase,
+               modelQuestionStartPhrase: modelStartPhrase,
+               modelQuestionEndPhrase: modelEndPhrase
            ) {
             return ""
         }
@@ -1234,6 +1371,10 @@ final class ClassroomAppModel {
             overlayController.hide()
             statusText = "Overlay hidden by voice command"
         case .clear:
+            // Clear is also the escape hatch out of a stuck question capture.
+            if modelQuestionCapture != nil {
+                cancelModelQuestionCapture(restoringCaption: false)
+            }
             overlayShouldResumeAfterClear =
                 overlayShouldResumeAfterClear || overlayController.isVisible
             overlayMinimumVisibleSequence =
@@ -1257,6 +1398,207 @@ final class ClassroomAppModel {
             } else {
                 dismissPresentedStudentQuestion()
                 statusText = "Student question dismissed by voice command"
+            }
+        case .scrollUp:
+            scrollModelAnswer(.up)
+        case .scrollDown:
+            scrollModelAnswer(.down)
+        case .toggleAnswer:
+            guard modelAnswerMarkdown != nil || modelAnswerLoading else {
+                statusText = "No model answer to show or hide"
+                break
+            }
+            modelAnswerHidden.toggle()
+            statusText = modelAnswerHidden
+                ? "Model answer hidden by voice command"
+                : "Model answer shown by voice command"
+            refreshOverlay(
+                forceVisible: !modelAnswerHidden
+                    && presentedStudentQuestion == nil
+            )
+        }
+    }
+
+    /// Pages the displayed answer card; the WebView reacts to the bumped token.
+    private func scrollModelAnswer(_ direction: AnswerScrollDirection) {
+        guard modelAnswerMarkdown != nil,
+              !modelAnswerHidden,
+              presentedStudentQuestion == nil else {
+            statusText = "No model answer to scroll"
+            return
+        }
+        modelAnswerScrollDirection = direction
+        modelAnswerScrollToken &+= 1
+        refreshOverlay()
+    }
+
+    private var assistantQuestionPhrases: (start: String, end: String)? {
+        let start = modelQuestionStartVoiceCommand.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        let end = modelQuestionEndVoiceCommand.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        guard !start.isEmpty, !end.isEmpty else { return nil }
+        return (start, end)
+    }
+
+    /// Finalized-text path: pulls a keyword-framed question out of the caption
+    /// stream (accumulating across segments), fires it at the model, and returns
+    /// the surrounding text that should still become an ordinary subtitle.
+    private func consumeModelQuestion(in text: String) -> String {
+        guard correctionMode == .assistant,
+              let phrases = assistantQuestionPhrases else { return text }
+        let scan = SpokenOverlayCommandRecognizer.scanModelQuestion(
+            in: text,
+            startPhrase: phrases.start,
+            endPhrase: phrases.end
+        )
+        switch scan.kind {
+        case .none:
+            if modelQuestionCapture != nil {
+                appendToQuestionCapture(text)
+                armModelQuestionTimeout()
+                refreshOverlay(forceVisible: true)
+                return ""
+            }
+            return text
+        case .opens:
+            modelQuestionCapture = scan.question
+            armModelQuestionTimeout()
+            refreshOverlay(forceVisible: true)
+            return scan.before
+        case .complete:
+            modelQuestionTimeoutTask?.cancel()
+            modelQuestionTimeoutTask = nil
+            modelQuestionCapture = nil
+            submitModelQuestion(scan.question)
+            return joinedCaption(scan.before, scan.after)
+        case .closes:
+            let full = [modelQuestionCapture, scan.question]
+                .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .joined(separator: " ")
+            modelQuestionTimeoutTask?.cancel()
+            modelQuestionTimeoutTask = nil
+            modelQuestionCapture = nil
+            submitModelQuestion(full)
+            return scan.after
+        }
+    }
+
+    /// While a question is being captured, show the professor a banner with the
+    /// exact end phrase, so a mis-heard "end" can never silently swallow the
+    /// captions with no way out.
+    private func armModelQuestionTimeout() {
+        modelQuestionTimeoutTask?.cancel()
+        modelQuestionTimeoutTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(30))
+            guard !Task.isCancelled, let self,
+                  self.modelQuestionCapture != nil else { return }
+            self.statusText = "Model question cancelled — no end phrase was heard"
+            self.cancelModelQuestionCapture(restoringCaption: true)
+        }
+    }
+
+    /// Leaves question-capture mode. When `restoringCaption` is true the text
+    /// gathered so far becomes an ordinary subtitle instead of being lost (used
+    /// by the 30 s safety timeout); the clear command discards it instead.
+    private func cancelModelQuestionCapture(restoringCaption: Bool) {
+        modelQuestionTimeoutTask?.cancel()
+        modelQuestionTimeoutTask = nil
+        let captured = modelQuestionCapture?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        modelQuestionCapture = nil
+        if restoringCaption, let captured, !captured.isEmpty, var session {
+            if let segment = session.finalizeCaption(
+                captured,
+                correctionEnabled: correctionEnabled
+            ) {
+                self.session = session
+                enqueueCorrection(segment)
+            }
+        }
+        refreshOverlay()
+    }
+
+    /// Provisional-text path: never acts, only hides the part of the live
+    /// hypothesis that belongs to a question being dictated so it does not flash
+    /// as a subtitle.
+    private func previewModelQuestion(in text: String) -> String {
+        guard correctionMode == .assistant,
+              let phrases = assistantQuestionPhrases else { return text }
+        if modelQuestionCapture != nil { return "" }
+        let scan = SpokenOverlayCommandRecognizer.scanModelQuestion(
+            in: text,
+            startPhrase: phrases.start,
+            endPhrase: phrases.end
+        )
+        switch scan.kind {
+        case .opens, .complete:
+            return scan.before
+        case .none, .closes:
+            return text
+        }
+    }
+
+    private func appendToQuestionCapture(_ text: String) {
+        let addition = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !addition.isEmpty else { return }
+        modelQuestionCapture = [modelQuestionCapture, addition]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
+    private func joinedCaption(_ lhs: String, _ rhs: String) -> String {
+        [lhs, rhs]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
+    /// Sends a captured question to the model and surfaces its answer (Markdown)
+    /// in the overlay card. The model is given only text and returns only text;
+    /// the answer is rendered, never executed, and never leaves the machine.
+    private func submitModelQuestion(_ question: String) {
+        let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        modelAnswerTask?.cancel()
+        modelAnswerLoading = true
+        modelAnswerHidden = false
+        statusText = "Asking the model…"
+        refreshOverlay(forceVisible: presentedStudentQuestion == nil)
+        modelAnswerTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let configuration = try self.gemmaConfiguration()
+                try await self.gemmaServer.ensureReady(
+                    executablePath: configuration.executablePath,
+                    modelPath: configuration.modelPath,
+                    endpoint: configuration.endpoint
+                )
+                guard !Task.isCancelled else { return }
+                self.correctionServerReady = true
+                let service = GemmaCorrectionService(endpoint: configuration.endpoint)
+                let answer = try await service.answer(question: trimmed)
+                guard !Task.isCancelled else { return }
+                self.modelAnswerMarkdown = answer
+                self.modelAnswerLoading = false
+                self.statusText = "Model answer ready"
+                self.refreshOverlay(
+                    forceVisible: self.presentedStudentQuestion == nil
+                )
+            } catch {
+                guard !Task.isCancelled else { return }
+                self.modelAnswerLoading = false
+                self.modelAnswerMarkdown =
+                    "**The model could not answer.**\n\n"
+                    + error.localizedDescription
+                self.statusText = "Model answer failed"
+                self.refreshOverlay(
+                    forceVisible: self.presentedStudentQuestion == nil
+                )
             }
         }
     }
@@ -1334,13 +1676,29 @@ final class ClassroomAppModel {
             return
         }
 
+        // Card priority: a displayed student question wins the slot; otherwise
+        // the model answer shows unless the professor hid it. The answer is not
+        // discarded while suppressed — it returns once both conditions clear.
+        let questionText = presentedStudentQuestion?.text
+        let showAnswer = questionText == nil && !modelAnswerHidden
+        let captureHint = modelQuestionEndVoiceCommand.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
         overlayController.show(
             on: selectedScreen,
             lines: lines,
             provisional: provisional,
-            question: presentedStudentQuestion?.text,
+            question: questionText,
             pendingQuestionCount: pendingStudentQuestions.count,
-            fontSize: captionFontSize
+            fontSize: captionFontSize,
+            answerMarkdown: showAnswer ? modelAnswerMarkdown : nil,
+            answerLoading: showAnswer ? modelAnswerLoading : false,
+            answerScrollToken: modelAnswerScrollToken,
+            answerScrollDirection: modelAnswerScrollDirection,
+            capturingQuestion: modelQuestionCapture,
+            captureHint: captureHint.isEmpty ? "Bonjour modèle fin" : captureHint,
+            backgroundOpacity: overlayBackgroundOpacity,
+            answerFontSize: answerFontSize
         )
     }
 

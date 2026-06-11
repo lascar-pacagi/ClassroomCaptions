@@ -120,7 +120,10 @@ final class GemmaServerController {
             "--host", host,
             "--port", String(port),
             "--temp", "0",
-            "--max-tokens", "384",
+            // Caps generation per request. Corrections stay short (each request
+            // sends its own small max_tokens); Assistant-mode answers ask for
+            // more, so the server ceiling must be high enough to fit them.
+            "--max-tokens", "1536",
             "--chat-template-args", #"{"enable_thinking":false}"#,
             "--decode-concurrency", "1",
             "--prompt-concurrency", "1",

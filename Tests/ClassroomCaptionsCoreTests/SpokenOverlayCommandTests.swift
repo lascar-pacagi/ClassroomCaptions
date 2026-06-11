@@ -292,4 +292,47 @@ final class SpokenOverlayCommandTests: XCTestCase {
         )
         XCTAssertEqual(commands.count, 1)
     }
+
+    func testRecognizesScrollAndToggleAnswerCommands() {
+        XCTAssertEqual(
+            SpokenOverlayCommandRecognizer.recognize(
+                in: "Bonjour bas.",
+                showPhrase: "Bonjour soleil bleu",
+                hidePhrase: "Bonjour soleil rouge",
+                scrollDownPhrase: "Bonjour bas"
+            ),
+            SpokenOverlayCommand(action: .scrollDown, remainingText: "")
+        )
+        XCTAssertEqual(
+            SpokenOverlayCommandRecognizer.recognize(
+                in: "Bonjour haut.",
+                showPhrase: "Bonjour soleil bleu",
+                hidePhrase: "Bonjour soleil rouge",
+                scrollUpPhrase: "Bonjour haut"
+            ),
+            SpokenOverlayCommand(action: .scrollUp, remainingText: "")
+        )
+        XCTAssertEqual(
+            SpokenOverlayCommandRecognizer.recognize(
+                in: "Bonjour réponse.",
+                showPhrase: "Bonjour soleil bleu",
+                hidePhrase: "Bonjour soleil rouge",
+                toggleAnswerPhrase: "Bonjour réponse"
+            ),
+            SpokenOverlayCommand(action: .toggleAnswer, remainingText: "")
+        )
+    }
+
+    func testEmptyScrollPhrasesAreIgnored() {
+        // Unconfigured (empty) scroll/toggle phrases must not match anything.
+        let commands = SpokenOverlayCommandRecognizer.recognizeAll(
+            in: "Nous parlons de tri rapide.",
+            showPhrase: "Bonjour soleil bleu",
+            hidePhrase: "Bonjour soleil rouge",
+            scrollUpPhrase: "",
+            scrollDownPhrase: "",
+            toggleAnswerPhrase: ""
+        )
+        XCTAssertTrue(commands.isEmpty)
+    }
 }

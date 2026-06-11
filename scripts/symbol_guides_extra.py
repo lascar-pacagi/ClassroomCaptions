@@ -3879,36 +3879,42 @@ text never quotes an empty phrase (a blank field actually disables
 spoken-command recognition until it is refilled). The Gemma 4 correction group
 then opens with its Standard/Science segmented mode picker.
 """,
-    ('DashboardView.swift', '@620'): """
-This page finishes the Gemma correction group: captions restating the chosen
-mode and context depth, a 0-8 previous-captions stepper, and server, model, and
-endpoint fields disabled during an active or starting session so the pipeline
-cannot be reconfigured mid-class. A status row shows readiness, queue depth,
-and last latency; the footer is either the current `correctionError` or the
-standing note that questions are proofread as quoted data and answer-like
-output is rejected. The Microphone group then begins: an input picker and
-refresh button locked while listening, plus a live level meter and a counter
-of captured audio bytes.
+    ('DashboardView.swift', '@614'): """
+This page finishes the Caption Overlay group — the scroll-up and scroll-down
+phrase fields, the help line that now also explains framing an Assistant-mode
+question, and the Show/Refresh/Reset overlay buttons — then defines the small
+helper properties that supply placeholder phrases and the per-mode description
+text. The Gemma correction group then begins: the Standard/Science/Assistant
+segmented picker, that description, the 0-8 previous-captions stepper, and the
+start of the server/model/endpoint grid.
 """,
-    ('DashboardView.swift', '@743'): """
-The Microphone group closes with either the capture error or a reminder that
-audio is converted locally to 16 kHz mono PCM. The Session Recording group's
-toggle and folder field are disabled while a session is active or starting (the
-folder also when recording is off), and it shows the last archive path with a
-Show in Finder button. The Voxtral Realtime group then opens with a backend
-picker that swaps which fields appear — model directory plus a max-context
-slider for the embedded backend, endpoint and model identifier fields for the
-WebSocket one — with controls locked while listening, starting, or connected
-so the backend cannot be reconfigured mid-stream.
+    ('DashboardView.swift', '@739'): """
+The Gemma group closes: model and endpoint fields disabled during an active or
+starting session so the pipeline cannot be reconfigured mid-class, a status row
+showing readiness, queue depth, and last latency, and a footer that is either
+the current `correctionError` or the standing note that questions are proofread
+as quoted data and answer-like output is rejected. The Microphone group follows
+— an input picker and refresh locked while listening, a live level meter and a
+captured-byte counter, and a local-PCM reminder — then the Session Recording
+group begins with its record toggle and archive-folder field, both disabled
+during a session (the folder also when recording is off).
 """,
-    ('DashboardView.swift', '@859'): """
-The Voxtral group finishes with the shared model-delay slider (the 240-1200 ms
-commit interval), a caption explaining either the embedded context limit or the
-WebSocket compatibility mode, and a connection row that reports first-caption
-latency. Below it, the Development Caption Input group feeds the timeline by
-hand (`onSubmit` fires when Return is pressed in the field), and Recent
-Captions lists each finalized segment with its sequence number, text, and
-correction badge.
+    ('DashboardView.swift', '@868'): """
+The Session Recording group ends with the last archive path and a Show in Finder
+button (or a note listing the exported files) plus any archive error. The
+Voxtral Realtime group then fills the rest: a backend picker that swaps which
+fields appear — model directory and a max-context slider for the embedded
+backend, endpoint and model fields for the WebSocket one, all locked while
+listening or starting — the shared 240-1200 ms model-delay slider, a caption
+explaining the embedded context limit or the WebSocket compatibility mode, and a
+connection row that reports first-caption latency.
+""",
+    ('DashboardView.swift', '@999'): """
+The Development Caption Input group feeds the timeline by hand: a text field
+whose `onSubmit` (Return in the field) finalizes, plus Preview-as-Provisional
+and Finalize buttons. The Recent Captions group then lists each finalized
+segment with its sequence number, display text, and correction badge, or an
+empty-state placeholder when none exist yet.
 """,
     ('CaptionOverlayController.swift', '@1'): """
 Only two imports: `AppKit` for the panel, views, screens, cursors, and mouse
@@ -6850,6 +6856,202 @@ the server is resending from the start. Eight-MiB chunks bound memory while
 feeding the live progress line, and the final `os.replace` is an atomic
 rename: the real filename only ever names a complete file, which is exactly
 the existing-and-non-empty test `main` relies on to skip finished downloads.
+""",
+    # === Assistant mode: spoken questions to the model + rich answer overlay ===
+    ("ModelAnswerWebView.swift", "enum AnswerScrollDirection"): """
+A two-value direction carried from the spoken scroll commands down to the answer
+web view. Modeling it as an enum rather than a bool keeps call sites readable and
+lets the view turn each case into a positive or negative pixel delta.
+""",
+    ("ModelAnswerWebView.swift", "class AnswerAssetSchemeHandler"): """
+Serves the bundled rendering libraries (KaTeX, highlight.js, markdown-it, plus
+our `render.js`/`overlay.css` and the math fonts) to the answer page over a
+private `ccassets://` URL scheme. Because it only ever opens files inside the
+bundled `RenderAssets` directory, the page can load our code while its
+Content-Security-Policy still forbids every network origin: the answer can be
+styled but can reach nothing on the machine or the network.
+""",
+    ("ModelAnswerWebView.swift", "override init"): """
+Resolves the `RenderAssets` directory once from `Bundle.module` — the resource
+bundle SwiftPM builds for this target. `resourceURL` is optional (a bundle need
+not carry resources), so it is kept as `URL?` and every request re-checks it.
+""",
+    ("ModelAnswerWebView.swift", "start task"): """
+WebKit calls this for every `ccassets://` sub-resource the page requests. It
+resolves the path inside `RenderAssets` and refuses anything whose standardized
+path escapes that directory (a `..` traversal), so the scheme cannot read
+arbitrary files. On success it returns the bytes with a MIME type; any failure
+fails the task.
+""",
+    ("ModelAnswerWebView.swift", "stop task"): """
+WebKit calls this if a request is cancelled. The handler reads small local files
+synchronously and has nothing to unwind, so the body is intentionally empty.
+""",
+    ("ModelAnswerWebView.swift", "func mimeType"): """
+Maps a file extension to the MIME type WebKit needs to interpret each asset
+(stylesheet, script, JSON, font). An unknown extension falls back to a generic
+binary type rather than guessing.
+""",
+    ("ModelAnswerWebView.swift", "enum ModelAnswerRenderer"): """
+A namespace — an enum with no cases is Swift's idiom for a bag of static helpers
+— that builds the self-contained HTML page wrapping one Markdown answer.
+""",
+    ("ModelAnswerWebView.swift", "func html"): """
+Assembles the page. The Markdown is embedded as JSON inside a non-executable
+`<script type="application/json">` block, and `<`, `>`, `&` are escaped to
+`\\uXXXX` so a literal `</script>` in the answer can never close that block
+early — nothing the model wrote can become live markup. The strict CSP allows
+only our `ccassets:` assets and forbids all network access; the injected
+`font-size` rule applies the professor's chosen answer text size.
+""",
+    ("ModelAnswerWebView.swift", "struct ModelAnswerView"): """
+A SwiftUI wrapper around an AppKit `WKWebView`; `NSViewRepresentable` is the
+bridge between SwiftUI's value-type views and AppKit's reference-type views. It
+holds no logic of its own — it builds the locked-down web view, reloads it when
+the answer or font size changes, and forwards scroll commands.
+""",
+    ("ModelAnswerWebView.swift", "func makeCoordinator"): """
+Creates the Coordinator, the long-lived reference object that survives SwiftUI's
+repeated recreation of the value-type view and holds the web view plus the
+last-rendered state.
+""",
+    ("ModelAnswerWebView.swift", "func makeNSView"): """
+Builds the web view once: registers the asset scheme handler, enables JavaScript
+(KaTeX and highlight.js need it), makes the background transparent so the card's
+own backing shows through, and loads the initial HTML from memory with a
+`ccassets://` base URL so relative asset references resolve through the handler.
+""",
+    ("ModelAnswerWebView.swift", "func updateNSView"): """
+SwiftUI calls this when an input changes. It reloads the page only when the
+Markdown or font size actually differs (avoiding needless reloads); when only the
+scroll token advanced it runs a small `window.scrollBy`, so a spoken "scroll
+up/down" pages through a long answer.
+""",
+    ("ModelAnswerWebView.swift", "class Coordinator"): """
+Holds the mutable state the value-type view cannot: the web view, the last-loaded
+Markdown and font size (to detect real changes), and the last scroll token. As
+`WKNavigationDelegate` it also vetoes navigation — only the in-memory load and
+our asset scheme are allowed, so a link in the answer cannot send the view
+anywhere.
+""",
+    ("ClassroomAppModel.swift", "func scrollModelAnswer"): """
+Handles the spoken scroll commands. It acts only when an answer is actually on
+screen (not hidden, no student question in front), then bumps a counter and
+records the direction; the overlay's web view watches that counter and performs
+the scroll. The counter avoids passing a closure across the SwiftUI boundary.
+""",
+    ("ClassroomAppModel.swift", "func consumeModelQuestion"): """
+The finalized-text half of Assistant mode. It scans one finalized caption for the
+start/end keyword phrases and, accumulating across segments, decides: pass text
+through unchanged, begin capturing a question, append to one in progress, or — on
+the end phrase — send the assembled question to the model. It returns whatever
+surrounding text should still become an ordinary subtitle, so the framed question
+never leaks into the captions.
+""",
+    ("ClassroomAppModel.swift", "func armModelQuestionTimeout"): """
+The safety net that stops a mis-heard end phrase from swallowing the captions
+forever. Each time the capture grows it restarts a 30-second timer; if no end
+phrase arrives, the capture is abandoned and the gathered text restored as a
+normal subtitle. Cancelling the previous task first means only inactivity counts.
+""",
+    ("ClassroomAppModel.swift", "func cancelModelQuestionCapture"): """
+Leaves capture mode. `restoringCaption` decides the gathered text's fate: the
+timeout restores it as a subtitle (nothing the professor said is lost) while the
+clear command discards it (he asked to wipe it). Either way it stops the timer
+and refreshes the overlay so the capture banner disappears.
+""",
+    ("ClassroomAppModel.swift", "func previewModelQuestion"): """
+The provisional-text half. Live hypotheses change constantly, so this never acts;
+it only hides the part of the in-progress hypothesis that belongs to a question
+being dictated, so the keyword phrases and the question do not flash as subtitles
+before they are finalized.
+""",
+    ("ClassroomAppModel.swift", "func appendToQuestionCapture"): """
+Appends a newly finalized segment to the question being assembled, trimming and
+skipping empties so a multi-segment question joins with single spaces.
+""",
+    ("ClassroomAppModel.swift", "func joinedCaption"): """
+Joins the text before a start phrase and after an end phrase into the single
+subtitle they should form, dropping empties — used when a whole question arrives
+inside one finalized segment.
+""",
+    ("ClassroomAppModel.swift", "func submitModelQuestion"): """
+Sends a captured question to Gemma and surfaces the answer. It cancels any
+in-flight request, shows the "generating" state, then on a background task warms
+the server, calls the answer endpoint, and stores the Markdown (or an error
+message) for the overlay. The model is handed only text and returns only text —
+its reply is rendered, never executed, and never leaves the machine.
+""",
+    ("CaptionOverlayController.swift", "func captureBanner"): """
+The mint banner shown while a question is being dictated. It names the exact end
+phrase to say and echoes the text captured so far, so a mis-heard end phrase can
+never leave the professor staring at vanished captions with no idea why.
+""",
+    ("CaptionOverlayController.swift", "func answerCard"): """
+The model-answer card: a header above the locked-down `ModelAnswerView` web view,
+given a solid dark backing so it stays readable regardless of the overlay's
+background-opacity slider (that slider is for the captions). The neighbouring
+loading card shows a spinner while the answer is still being generated.
+""",
+    ("DashboardView.swift", "func formatMemory"): """
+Formats a raw byte count as a human-readable string for the diagnostics panel
+using `ByteCountFormatter` with the memory count style, so a multi-gigabyte model
+footprint reads naturally instead of as a long digit string.
+""",
+    ("GemmaCorrectionService.swift", "func answer"): """
+Assistant mode's question path, deliberately separate from `correct`. It posts
+the question with the answer-permitting system prompt, asks for more tokens than a
+correction would, and returns the raw Markdown reply. No validator runs because
+this is an answer, not a transcription — and the reply is rendered as text, never
+executed.
+""",
+    ("SpokenOverlayCommandTests.swift", "testRecognizesScrollAndToggleAnswerCommands"): """
+Confirms the three new overlay actions — scroll up, scroll down, and show/hide
+answer — are each recognized from their configured phrase.
+""",
+    ("SpokenOverlayCommandTests.swift", "testEmptyScrollPhrasesAreIgnored"): """
+Confirms an unconfigured (empty) scroll or toggle phrase matches nothing, so
+leaving a command blank simply disables it.
+""",
+    ("ModelQuestionScanTests.swift", "class ModelQuestionScanTests"): """
+Exercises the keyword-framed question detector used by Assistant mode, covering
+every split of a transcript into surrounding caption text and the framed question.
+""",
+    ("ModelQuestionScanTests.swift", "func scan"): """
+Test helper that runs the detector with the fixed default start/end phrases, so
+each case reads as just its input and expected split.
+""",
+    ("ModelQuestionScanTests.swift", "testCompleteQuestionInOneSegment"): """
+A whole question framed within one segment is reported as `.complete`, with the
+question extracted and no surrounding caption.
+""",
+    ("ModelQuestionScanTests.swift", "testSurroundingTextStaysCaption"): """
+Text before the start phrase and after the end phrase is preserved as caption,
+while only the framed span becomes the question.
+""",
+    ("ModelQuestionScanTests.swift", "testOpensWithoutClosing"): """
+A start phrase with no end phrase is `.opens`: capture begins and the text after
+the phrase is the question so far.
+""",
+    ("ModelQuestionScanTests.swift", "testClosesAnOpenCapture"): """
+An end phrase with no start phrase is `.closes`: it finishes a question opened in
+an earlier segment, and the text after it returns to the captions.
+""",
+    ("ModelQuestionScanTests.swift", "testPlainTextIsNotAQuestion"): """
+Ordinary speech with neither phrase is `.none` and stays entirely caption.
+""",
+    ("ModelQuestionScanTests.swift", "testToleratesMissingAccentsAndCase"): """
+The phrases are matched after accent- and case-folding, so "bonjour modele
+debut/fin" triggers exactly like the accented spelling Voxtral may or may not
+produce.
+""",
+    ("ModelQuestionScanTests.swift", "testEndBeforeStartDoesNotClose"): """
+An end phrase appearing before the start phrase must not pair with it: detection
+only accepts an end that follows a start.
+""",
+    ("ModelQuestionScanTests.swift", "testEmptyPhrasesYieldNone"): """
+With the feature unconfigured (empty phrases) nothing is detected, so disabling
+Assistant mode cannot accidentally capture text.
 """,
 }
 

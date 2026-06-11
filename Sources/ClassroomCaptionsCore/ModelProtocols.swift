@@ -41,6 +41,10 @@ public protocol StreamingTranscriptionService: Sendable {
 public enum CaptionCorrectionMode: String, CaseIterable, Codable, Equatable, Sendable {
     case standard
     case science
+    /// Behaves like `.science` for caption correction, and additionally lets the
+    /// professor ask the model a spoken, keyword-framed question whose answer is
+    /// rendered in a dedicated overlay card.
+    case assistant
 }
 
 public struct CaptionCorrectionRequest: Equatable, Sendable {

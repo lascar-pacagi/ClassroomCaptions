@@ -6,6 +6,40 @@ public enum SpokenOverlayAction: Equatable, Sendable {
     case clear
     case nextQuestion
     case dismissQuestion
+    case scrollUp
+    case scrollDown
+    case toggleAnswer
+}
+
+/// Result of scanning a transcript for the keyword-framed model question used by
+/// the Assistant mode ("model question start ... model question end"). Detection
+/// works on a single transcript; the app accumulates across segments.
+public struct ModelQuestionScan: Equatable, Sendable {
+    public enum Kind: Equatable, Sendable {
+        /// No framing phrase present.
+        case none
+        /// A start phrase opened a question that this transcript does not close.
+        case opens
+        /// An end phrase closed a question opened in an earlier segment.
+        case closes
+        /// Both phrases present, start before end: a whole question in one go.
+        case complete
+    }
+
+    public let kind: Kind
+    /// Caption text before the start phrase (stays an ordinary subtitle).
+    public let before: String
+    /// The question itself, between the framing phrases.
+    public let question: String
+    /// Caption text after the end phrase (stays an ordinary subtitle).
+    public let after: String
+
+    public init(kind: Kind, before: String, question: String, after: String) {
+        self.kind = kind
+        self.before = before
+        self.question = question
+        self.after = after
+    }
 }
 
 public struct SpokenOverlayCommand: Equatable, Sendable {
@@ -63,7 +97,10 @@ public enum SpokenOverlayCommandRecognizer {
         hidePhrase: String,
         clearPhrase: String = "",
         nextQuestionPhrase: String = "",
-        dismissQuestionPhrase: String = ""
+        dismissQuestionPhrase: String = "",
+        scrollUpPhrase: String = "",
+        scrollDownPhrase: String = "",
+        toggleAnswerPhrase: String = ""
     ) -> SpokenOverlayCommand? {
         recognizeAll(
             in: text,
@@ -71,7 +108,10 @@ public enum SpokenOverlayCommandRecognizer {
             hidePhrase: hidePhrase,
             clearPhrase: clearPhrase,
             nextQuestionPhrase: nextQuestionPhrase,
-            dismissQuestionPhrase: dismissQuestionPhrase
+            dismissQuestionPhrase: dismissQuestionPhrase,
+            scrollUpPhrase: scrollUpPhrase,
+            scrollDownPhrase: scrollDownPhrase,
+            toggleAnswerPhrase: toggleAnswerPhrase
         ).first
     }
 
@@ -81,7 +121,10 @@ public enum SpokenOverlayCommandRecognizer {
         hidePhrase: String,
         clearPhrase: String = "",
         nextQuestionPhrase: String = "",
-        dismissQuestionPhrase: String = ""
+        dismissQuestionPhrase: String = "",
+        scrollUpPhrase: String = "",
+        scrollDownPhrase: String = "",
+        toggleAnswerPhrase: String = ""
     ) -> [SpokenOverlayCommand] {
         // Tokenizing is the expensive step (per-word allocation plus locale
         // diacritic folding over the whole provisional text); do it once and
@@ -100,6 +143,21 @@ public enum SpokenOverlayCommandRecognizer {
                     dismissQuestionPhrase,
                     captionTokens: captionTokens,
                     action: .dismissQuestion
+                )
+                + matches(
+                    scrollUpPhrase,
+                    captionTokens: captionTokens,
+                    action: .scrollUp
+                )
+                + matches(
+                    scrollDownPhrase,
+                    captionTokens: captionTokens,
+                    action: .scrollDown
+                )
+                + matches(
+                    toggleAnswerPhrase,
+                    captionTokens: captionTokens,
+                    action: .toggleAnswer
                 )
                 + (
                     normalizedWords(showPhrase) == ["sesame", "lumiere"]
@@ -149,7 +207,12 @@ public enum SpokenOverlayCommandRecognizer {
         hidePhrase: String,
         clearPhrase: String = "",
         nextQuestionPhrase: String = "",
-        dismissQuestionPhrase: String = ""
+        dismissQuestionPhrase: String = "",
+        scrollUpPhrase: String = "",
+        scrollDownPhrase: String = "",
+        toggleAnswerPhrase: String = "",
+        modelQuestionStartPhrase: String = "",
+        modelQuestionEndPhrase: String = ""
     ) -> Bool {
         let captionTokens = tokens(in: text).map(\.normalized)
         guard !captionTokens.isEmpty else { return false }
@@ -164,6 +227,85 @@ public enum SpokenOverlayCommandRecognizer {
                 captionTokens,
                 expectedPhrase: dismissQuestionPhrase
             )
+            || isPotentialPhrase(captionTokens, expectedPhrase: scrollUpPhrase)
+            || isPotentialPhrase(captionTokens, expectedPhrase: scrollDownPhrase)
+            || isPotentialPhrase(
+                captionTokens,
+                expectedPhrase: toggleAnswerPhrase
+            )
+            || isPotentialPhrase(
+                captionTokens,
+                expectedPhrase: modelQuestionStartPhrase
+            )
+            || isPotentialPhrase(
+                captionTokens,
+                expectedPhrase: modelQuestionEndPhrase
+            )
+    }
+
+    /// Scans one transcript for the Assistant-mode framing phrases and splits it
+    /// into the caption text before the start phrase, the question between the
+    /// phrases, and the caption text after the end phrase. The end phrase only
+    /// counts when it follows the start phrase (or, for `.closes`, when no start
+    /// phrase is present — the question was opened in an earlier segment).
+    public static func scanModelQuestion(
+        in text: String,
+        startPhrase: String,
+        endPhrase: String
+    ) -> ModelQuestionScan {
+        let captionTokens = tokens(in: text)
+        let starts = matches(startPhrase, captionTokens: captionTokens, action: .show)
+        let ends = matches(endPhrase, captionTokens: captionTokens, action: .hide)
+
+        let start = starts.first
+        let end: Match?
+        if let start {
+            end = ends.first { $0.range.lowerBound >= start.range.upperBound }
+        } else {
+            end = ends.first
+        }
+
+        func slice(_ range: Range<String.Index>) -> String {
+            cleanRemainingText(String(text[range]))
+        }
+        func trimmed(_ range: Range<String.Index>) -> String {
+            String(text[range]).trimmingCharacters(
+                in: .whitespacesAndNewlines.union(
+                    CharacterSet(charactersIn: ".,;:!?")
+                )
+            )
+        }
+
+        switch (start, end) {
+        case let (start?, end?):
+            return ModelQuestionScan(
+                kind: .complete,
+                before: slice(text.startIndex ..< start.range.lowerBound),
+                question: trimmed(start.range.upperBound ..< end.range.lowerBound),
+                after: slice(end.range.upperBound ..< text.endIndex)
+            )
+        case let (start?, nil):
+            return ModelQuestionScan(
+                kind: .opens,
+                before: slice(text.startIndex ..< start.range.lowerBound),
+                question: trimmed(start.range.upperBound ..< text.endIndex),
+                after: ""
+            )
+        case let (nil, end?):
+            return ModelQuestionScan(
+                kind: .closes,
+                before: "",
+                question: trimmed(text.startIndex ..< end.range.lowerBound),
+                after: slice(end.range.upperBound ..< text.endIndex)
+            )
+        case (nil, nil):
+            return ModelQuestionScan(
+                kind: .none,
+                before: text,
+                question: "",
+                after: ""
+            )
+        }
     }
 
     public static func isPotentialCommand(

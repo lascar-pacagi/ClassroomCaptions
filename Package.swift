@@ -34,7 +34,8 @@ let package = Package(
         .target(name: "ClassroomCaptionsCore"),
         .executableTarget(
             name: "ClassroomCaptions",
-            dependencies: ["ClassroomCaptionsCore", "CVoxtralEngine"]
+            dependencies: ["ClassroomCaptionsCore", "CVoxtralEngine"],
+            resources: [.copy("RenderAssets")]
         ),
         .executableTarget(
             name: "VoxtralBenchmark",

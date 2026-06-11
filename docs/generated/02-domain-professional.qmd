@@ -192,6 +192,11 @@ and from serialized forms such as JSON) permits persistence; declaring the enum
 `: String` gives each case a fixed textual raw value, so stored settings stay
 stable even if the source declaration is reordered.
 
+A third mode, `assistant`, corrects captions exactly like `science`; it adds
+nothing to this request. Its extra ability — answering a spoken, keyword-framed
+question from the professor — is a separate request path covered in later
+chapters, where the model is likewise handed only text and returns only text.
+
 Most importantly, the request exposes no tool, closure, URL, filesystem path,
 or application controller. Even if caption text contains an imperative or a
 question, Gemma receives only a text-correction task and has no capability with
@@ -210,6 +215,10 @@ context.
 public enum CaptionCorrectionMode: String, CaseIterable, Codable, Equatable, Sendable {
     case standard
     case science
+    /// Behaves like `.science` for caption correction, and additionally lets the
+    /// professor ask the model a spoken, keyword-framed question whose answer is
+    /// rendered in a dedicated overlay card.
+    case assistant
 }
 
 public struct CaptionCorrectionRequest: Equatable, Sendable {
@@ -251,7 +260,7 @@ Swift requires explicit unwrapping before the integer can be used. This makes
 absence part of the type rather than a sentinel convention.
 :::
 
-```{.swift .numberLines startFrom="64"}
+```{.swift .numberLines startFrom="68"}
 
 public struct CaptionCorrectionResult: Equatable, Sendable {
     public let text: String
@@ -1482,14 +1491,13 @@ transcription without leaking the command phrase into captions. This file keeps
 normalized words for comparison and original `String.Index` ranges for exact
 removal from Unicode source text.
 
-### Public command values and internal match coordinates
+### Public command actions
 
-The public result contains only the requested action and lecture text left
-after command removal. Internal `Match` and `Token` values retain ranges into
-the original string. `Range<String.Index>` is a half-open interval — lower
-bound included, upper bound excluded — of positions in one specific string.
-Swift string indices are not integer byte offsets; they remain valid only for
-the specific string from which they were produced.
+`SpokenOverlayAction` enumerates every overlay action the recognizer can extract
+from speech: show, hide, clear, the two student-question controls, and the three
+Assistant-mode additions — scroll up, scroll down, and show/hide the model
+answer. Modeling each as a case rather than a string keeps dispatch in the app
+model exhaustive: a new action does not compile until every switch handles it.
 
 ```{.swift .numberLines startFrom="1"}
 import Foundation
@@ -1500,8 +1508,66 @@ public enum SpokenOverlayAction: Equatable, Sendable {
     case clear
     case nextQuestion
     case dismissQuestion
+    case scrollUp
+    case scrollDown
+    case toggleAnswer
 }
 
+/// Result of scanning a transcript for the keyword-framed model question used by
+/// the Assistant mode ("model question start ... model question end"). Detection
+/// works on a single transcript; the app accumulates across segments.
+```
+
+### The keyword-framed question result
+
+`ModelQuestionScan` is the result of looking for the Assistant-mode framing
+phrases in one transcript. `Kind` records which of four situations was found:
+neither phrase (`none`), a start with no matching end (`opens`), an end closing a
+question begun earlier (`closes`), or both in order (`complete`). The three text
+fields split the transcript into the caption text before the question, the
+question itself, and the caption text after it, so the caller can send the
+question to the model while keeping the surrounding speech as ordinary subtitles.
+
+```{.swift .numberLines startFrom="17"}
+public struct ModelQuestionScan: Equatable, Sendable {
+    public enum Kind: Equatable, Sendable {
+        /// No framing phrase present.
+        case none
+        /// A start phrase opened a question that this transcript does not close.
+        case opens
+        /// An end phrase closed a question opened in an earlier segment.
+        case closes
+        /// Both phrases present, start before end: a whole question in one go.
+        case complete
+    }
+
+    public let kind: Kind
+    /// Caption text before the start phrase (stays an ordinary subtitle).
+    public let before: String
+    /// The question itself, between the framing phrases.
+    public let question: String
+    /// Caption text after the end phrase (stays an ordinary subtitle).
+    public let after: String
+
+    public init(kind: Kind, before: String, question: String, after: String) {
+        self.kind = kind
+        self.before = before
+        self.question = question
+        self.after = after
+    }
+}
+```
+
+### The command result and internal match coordinates
+
+The public `SpokenOverlayCommand` contains only the requested action and the
+lecture text left after the command phrase is removed. The recognizer's internal
+`Match` and `Token` values retain ranges into the original string.
+`Range<String.Index>` is a half-open interval — lower bound included, upper bound
+excluded — of positions in one specific string. Swift string indices are not
+integer byte offsets; they remain valid only for the string that produced them.
+
+```{.swift .numberLines startFrom="45"}
 public struct SpokenOverlayCommand: Equatable, Sendable {
     public let action: SpokenOverlayAction
     public let remainingText: String
@@ -1536,8 +1602,7 @@ functions apart by their parameter labels, so both overloads coexist. The
 second overload delegates to the multi-command implementation and returns its
 first result, preserving a simple API for callers that do not need batching.
 
-```{.swift .numberLines startFrom="31"}
-
+```{.swift .numberLines startFrom="66"}
     public static func recognize(
         in text: String,
         triggerPhrase: String
@@ -1572,7 +1637,10 @@ first result, preserving a simple API for callers that do not need batching.
         hidePhrase: String,
         clearPhrase: String = "",
         nextQuestionPhrase: String = "",
-        dismissQuestionPhrase: String = ""
+        dismissQuestionPhrase: String = "",
+        scrollUpPhrase: String = "",
+        scrollDownPhrase: String = "",
+        toggleAnswerPhrase: String = ""
     ) -> SpokenOverlayCommand? {
         recognizeAll(
             in: text,
@@ -1580,15 +1648,19 @@ first result, preserving a simple API for callers that do not need batching.
             hidePhrase: hidePhrase,
             clearPhrase: clearPhrase,
             nextQuestionPhrase: nextQuestionPhrase,
-            dismissQuestionPhrase: dismissQuestionPhrase
+            dismissQuestionPhrase: dismissQuestionPhrase,
+            scrollUpPhrase: scrollUpPhrase,
+            scrollDownPhrase: scrollDownPhrase,
+            toggleAnswerPhrase: toggleAnswerPhrase
         ).first
     }
 ```
 
 ### Recognizing and removing several commands safely
 
-All configured phrases are matched independently, then sorted by source
-position, longest first at equal positions. Distinct phrases can produce
+All configured phrases — including the scroll and answer-toggle phrases, an
+empty one simply contributing nothing — are matched independently, then sorted by
+source position, longest first at equal positions. Distinct phrases can produce
 overlapping matches — one phrase may be a token-prefix of another, or two
 commands may be configured with identical words — so the recognizer keeps the
 longest match at each position and drops anything it overlaps. The surviving
@@ -1600,15 +1672,17 @@ carries the cleaned remaining lecture text; otherwise a caller processing each
 result could append the same caption multiple times. The special alias is
 enabled only for the known phrase it repairs, limiting accidental matches.
 
-```{.swift .numberLines startFrom="77"}
-
+```{.swift .numberLines startFrom="118"}
     public static func recognizeAll(
         in text: String,
         showPhrase: String,
         hidePhrase: String,
         clearPhrase: String = "",
         nextQuestionPhrase: String = "",
-        dismissQuestionPhrase: String = ""
+        dismissQuestionPhrase: String = "",
+        scrollUpPhrase: String = "",
+        scrollDownPhrase: String = "",
+        toggleAnswerPhrase: String = ""
     ) -> [SpokenOverlayCommand] {
         // Tokenizing is the expensive step (per-word allocation plus locale
         // diacritic folding over the whole provisional text); do it once and
@@ -1627,6 +1701,21 @@ enabled only for the known phrase it repairs, limiting accidental matches.
                     dismissQuestionPhrase,
                     captionTokens: captionTokens,
                     action: .dismissQuestion
+                )
+                + matches(
+                    scrollUpPhrase,
+                    captionTokens: captionTokens,
+                    action: .scrollUp
+                )
+                + matches(
+                    scrollDownPhrase,
+                    captionTokens: captionTokens,
+                    action: .scrollDown
+                )
+                + matches(
+                    toggleAnswerPhrase,
+                    captionTokens: captionTokens,
+                    action: .toggleAnswer
                 )
                 + (
                     normalizedWords(showPhrase) == ["sesame", "lumiere"]
@@ -1673,23 +1762,25 @@ enabled only for the known phrase it repairs, limiting accidental matches.
 
 ### Holding back a possible provisional command
 
-Voxtral emits partial hypotheses such as “sésame lu…”. These methods answer
-whether current text is a prefix of any configured command. The app can
+Voxtral emits partial hypotheses such as “sésame lu…”. This method answers
+whether current text is a prefix of any configured command — now including the
+scroll, answer-toggle, and model-question framing phrases. The app can
 temporarily withhold such text from the overlay until the phrase either
 completes as a command or diverges into ordinary speech.
 
-The trigger-only overload compares only the available prefix. Empty input and
-empty configuration are rejected explicitly.
-
-```{.swift .numberLines startFrom="145"}
-
+```{.swift .numberLines startFrom="204"}
     public static func isPotentialCommand(
         _ text: String,
         showPhrase: String,
         hidePhrase: String,
         clearPhrase: String = "",
         nextQuestionPhrase: String = "",
-        dismissQuestionPhrase: String = ""
+        dismissQuestionPhrase: String = "",
+        scrollUpPhrase: String = "",
+        scrollDownPhrase: String = "",
+        toggleAnswerPhrase: String = "",
+        modelQuestionStartPhrase: String = "",
+        modelQuestionEndPhrase: String = ""
     ) -> Bool {
         let captionTokens = tokens(in: text).map(\.normalized)
         guard !captionTokens.isEmpty else { return false }
@@ -1704,8 +1795,109 @@ empty configuration are rejected explicitly.
                 captionTokens,
                 expectedPhrase: dismissQuestionPhrase
             )
+            || isPotentialPhrase(captionTokens, expectedPhrase: scrollUpPhrase)
+            || isPotentialPhrase(captionTokens, expectedPhrase: scrollDownPhrase)
+            || isPotentialPhrase(
+                captionTokens,
+                expectedPhrase: toggleAnswerPhrase
+            )
+            || isPotentialPhrase(
+                captionTokens,
+                expectedPhrase: modelQuestionStartPhrase
+            )
+            || isPotentialPhrase(
+                captionTokens,
+                expectedPhrase: modelQuestionEndPhrase
+            )
     }
 
+    /// Scans one transcript for the Assistant-mode framing phrases and splits it
+    /// into the caption text before the start phrase, the question between the
+    /// phrases, and the caption text after the end phrase. The end phrase only
+    /// counts when it follows the start phrase (or, for `.closes`, when no start
+    /// phrase is present — the question was opened in an earlier segment).
+```
+
+### Detecting a keyword-framed model question
+
+`scanModelQuestion` locates the start and end framing phrases with the same
+tolerant matching used for commands, then pairs them: the end phrase counts only
+when it follows the start, or — for a `closes` result — when no start is present
+because the question opened in an earlier segment. It returns the split as a
+`ModelQuestionScan`, cleaning the surrounding caption text and trimming the
+question of stray framing punctuation. Empty phrases disable the feature and
+yield `none`, so the app accumulates a multi-segment question itself rather than
+this pure function holding any state.
+
+```{.swift .numberLines startFrom="251"}
+    public static func scanModelQuestion(
+        in text: String,
+        startPhrase: String,
+        endPhrase: String
+    ) -> ModelQuestionScan {
+        let captionTokens = tokens(in: text)
+        let starts = matches(startPhrase, captionTokens: captionTokens, action: .show)
+        let ends = matches(endPhrase, captionTokens: captionTokens, action: .hide)
+
+        let start = starts.first
+        let end: Match?
+        if let start {
+            end = ends.first { $0.range.lowerBound >= start.range.upperBound }
+        } else {
+            end = ends.first
+        }
+
+        func slice(_ range: Range<String.Index>) -> String {
+            cleanRemainingText(String(text[range]))
+        }
+        func trimmed(_ range: Range<String.Index>) -> String {
+            String(text[range]).trimmingCharacters(
+                in: .whitespacesAndNewlines.union(
+                    CharacterSet(charactersIn: ".,;:!?")
+                )
+            )
+        }
+
+        switch (start, end) {
+        case let (start?, end?):
+            return ModelQuestionScan(
+                kind: .complete,
+                before: slice(text.startIndex ..< start.range.lowerBound),
+                question: trimmed(start.range.upperBound ..< end.range.lowerBound),
+                after: slice(end.range.upperBound ..< text.endIndex)
+            )
+        case let (start?, nil):
+            return ModelQuestionScan(
+                kind: .opens,
+                before: slice(text.startIndex ..< start.range.lowerBound),
+                question: trimmed(start.range.upperBound ..< text.endIndex),
+                after: ""
+            )
+        case let (nil, end?):
+            return ModelQuestionScan(
+                kind: .closes,
+                before: "",
+                question: trimmed(text.startIndex ..< end.range.lowerBound),
+                after: slice(end.range.upperBound ..< text.endIndex)
+            )
+        case (nil, nil):
+            return ModelQuestionScan(
+                kind: .none,
+                before: text,
+                question: "",
+                after: ""
+            )
+        }
+    }
+```
+
+### The trigger-only prefix check
+
+The trigger-only overload of the prefix check compares just the available
+provisional prefix against one trigger phrase, token by token. Empty input and
+empty configuration are rejected explicitly so a blank setting never matches.
+
+```{.swift .numberLines startFrom="311"}
     public static func isPotentialCommand(
         _ text: String,
         triggerPhrase: String
@@ -1732,8 +1924,7 @@ would create too many collisions in normal French speech.
 The local Levenshtein implementation uses Unicode characters and two rows. With
 the tiny command vocabulary, its quadratic time is insignificant.
 
-```{.swift .numberLines startFrom="183"}
-
+```{.swift .numberLines startFrom="326"}
     private static func matches(_ candidate: String, _ expected: String) -> Bool {
         if candidate == expected { return true }
 
@@ -1781,8 +1972,7 @@ Configured full phrases use a sliding token window, preserving every matching
 source range. This can return more than one occurrence, which is why
 `recognizeAll` later owns ordering and deletion.
 
-```{.swift .numberLines startFrom="222"}
-
+```{.swift .numberLines startFrom="365"}
     private static func action(for token: String) -> SpokenOverlayAction? {
         if ["affiche", "afficher", "montre", "montrer"].contains(token) {
             return .show
@@ -1825,8 +2015,7 @@ lumières”. This helper recognizes exactly that three-token acoustic confusion
 and maps it to `.show`. It is not a general language-model correction and is
 activated only when the configured show phrase is the corresponding command.
 
-```{.swift .numberLines startFrom="256"}
-
+```{.swift .numberLines startFrom="399"}
     private static func showAliases(in captionTokens: [Token]) -> [Match] {
         guard captionTokens.count >= 3 else { return [] }
         let expected = ["ces", "ames", "lumieres"]
@@ -1852,8 +2041,7 @@ be a literal prefix of its expected word, and it must contain at least two
 characters. This models streaming transcription while avoiding a holdback on
 every one-letter utterance.
 
-```{.swift .numberLines startFrom="273"}
-
+```{.swift .numberLines startFrom="416"}
     private static func isPotentialPhrase(
         _ captionTokens: [String],
         expectedPhrase: String
@@ -1894,8 +2082,7 @@ This dual representation is the key design point: comparing normalized copies
 alone would make it difficult to remove the corresponding accented,
 punctuated substring from the original caption reliably.
 
-```{.swift .numberLines startFrom="298"}
-
+```{.swift .numberLines startFrom="441"}
     private static func tokens(in text: String) -> [Token] {
         var result: [Token] = []
         var tokenStart: String.Index?
@@ -1922,23 +2109,24 @@ punctuated substring from the original caption reliably.
         appendToken(endingAt: text.endIndex)
         return result
     }
+```
 
+### Normalized words and cleaning punctuation left by command removal
+
+`normalizedWords` is a thin helper returning just the folded words of a string,
+used where ranges are not needed. The cleanup routine then handles punctuation
+stranded by command removal: if no lexical token remains, the caption is empty;
+otherwise anchored regular expressions remove punctuation at the beginning or
+end, and a third collapses a doubled period created where a command used to be.
+The `#"..."#` form is a raw string literal: between pound-delimited quotes,
+backslashes are ordinary characters, so regex escapes need no doubling. Cleanup
+is intentionally narrow; it does not rewrite punctuation inside the student's or
+professor's sentence.
+
+```{.swift .numberLines startFrom="468"}
     private static func normalizedWords(_ text: String) -> [String] {
         tokens(in: text).map(\.normalized)
     }
-```
-
-### Cleaning punctuation left by command removal
-
-If no lexical token remains, the correct caption is empty. Otherwise anchored
-regular expressions remove punctuation stranded at the beginning or end, and
-the third expression collapses a doubled period created where a command used
-to be. The `#"..."#` form is a raw string literal: between pound-delimited
-quotes, backslashes are ordinary characters, so regex escapes need no
-doubling. Cleanup is intentionally narrow; it does not rewrite punctuation
-inside the student's or professor's sentence.
-
-```{.swift .numberLines startFrom="329"}
 
     private static func cleanRemainingText(_ text: String) -> String {
         guard !tokens(in: text).isEmpty else { return "" }

@@ -112,7 +112,7 @@ a type-safe container parameterized by its element type. `[CaptionSegment]`
 later in the chapter is Swift's shorter spelling for `Array<CaptionSegment>`.
 :::
 """),
-            Section(40, 63, "A complete correction request", """
+            Section(40, 67, "A complete correction request", """
 The request is intentionally a data transfer object rather than a method on
 `CaptionSegment`. It carries the immutable segment to correct, a bounded recent
 context, professor-defined terminology, and the presentation policy.
@@ -124,6 +124,11 @@ of every case) supports a settings picker; `Codable` (synthesized conversion to
 and from serialized forms such as JSON) permits persistence; declaring the enum
 `: String` gives each case a fixed textual raw value, so stored settings stay
 stable even if the source declaration is reordered.
+
+A third mode, `assistant`, corrects captions exactly like `science`; it adds
+nothing to this request. Its extra ability — answering a spoken, keyword-framed
+question from the professor — is a separate request path covered in later
+chapters, where the model is likewise handed only text and returns only text.
 
 Most importantly, the request exposes no tool, closure, URL, filesystem path,
 or application controller. Even if caption text contains an imperative or a
@@ -138,7 +143,7 @@ shorthand for `CaptionCorrectionMode.standard`; the enum type is inferred from
 context.
 :::
 """),
-            Section(64, 85, "Correction result and service boundary", """
+            Section(68, 89, "Correction result and service boundary", """
 The result separates the candidate text from optional accounting metadata.
 Token counts are optional because not every local server or failure path
 reports usage. Absence is represented by `nil`, rather than a misleading zero.
@@ -583,15 +588,31 @@ transcription without leaking the command phrase into captions. This file keeps
 normalized words for comparison and original `String.Index` ranges for exact
 removal from Unicode source text.""",
         (
-            Section(1, 30, "Public command values and internal match coordinates", """
-The public result contains only the requested action and lecture text left
-after command removal. Internal `Match` and `Token` values retain ranges into
-the original string. `Range<String.Index>` is a half-open interval — lower
-bound included, upper bound excluded — of positions in one specific string.
-Swift string indices are not integer byte offsets; they remain valid only for
-the specific string from which they were produced.
+            Section(1, 16, "Public command actions", """
+`SpokenOverlayAction` enumerates every overlay action the recognizer can extract
+from speech: show, hide, clear, the two student-question controls, and the three
+Assistant-mode additions — scroll up, scroll down, and show/hide the model
+answer. Modeling each as a case rather than a string keeps dispatch in the app
+model exhaustive: a new action does not compile until every switch handles it.
 """),
-            Section(31, 76, "Legacy trigger form and the single-result facade", """
+            Section(17, 44, "The keyword-framed question result", """
+`ModelQuestionScan` is the result of looking for the Assistant-mode framing
+phrases in one transcript. `Kind` records which of four situations was found:
+neither phrase (`none`), a start with no matching end (`opens`), an end closing a
+question begun earlier (`closes`), or both in order (`complete`). The three text
+fields split the transcript into the caption text before the question, the
+question itself, and the caption text after it, so the caller can send the
+question to the model while keeping the surrounding speech as ordinary subtitles.
+"""),
+            Section(45, 65, "The command result and internal match coordinates", """
+The public `SpokenOverlayCommand` contains only the requested action and the
+lecture text left after the command phrase is removed. The recognizer's internal
+`Match` and `Token` values retain ranges into the original string.
+`Range<String.Index>` is a half-open interval — lower bound included, upper bound
+excluded — of positions in one specific string. Swift string indices are not
+integer byte offsets; they remain valid only for the string that produced them.
+"""),
+            Section(66, 117, "Legacy trigger form and the single-result facade", """
 The first overload recognizes a trigger phrase followed by one action synonym.
 It slides over token windows, uses tolerant token comparison, removes the exact
 source range, and cleans punctuation. `map(\\.normalized)` uses a key path — a
@@ -602,9 +623,10 @@ functions apart by their parameter labels, so both overloads coexist. The
 second overload delegates to the multi-command implementation and returns its
 first result, preserving a simple API for callers that do not need batching.
 """),
-            Section(77, 144, "Recognizing and removing several commands safely", """
-All configured phrases are matched independently, then sorted by source
-position, longest first at equal positions. Distinct phrases can produce
+            Section(118, 203, "Recognizing and removing several commands safely", """
+All configured phrases — including the scroll and answer-toggle phrases, an
+empty one simply contributing nothing — are matched independently, then sorted by
+source position, longest first at equal positions. Distinct phrases can produce
 overlapping matches — one phrase may be a token-prefix of another, or two
 commands may be configured with identical words — so the recognizer keeps the
 longest match at each position and drops anything it overlaps. The surviving
@@ -616,16 +638,29 @@ carries the cleaned remaining lecture text; otherwise a caller processing each
 result could append the same caption multiple times. The special alias is
 enabled only for the known phrase it repairs, limiting accidental matches.
 """),
-            Section(145, 182, "Holding back a possible provisional command", """
-Voxtral emits partial hypotheses such as “sésame lu…”. These methods answer
-whether current text is a prefix of any configured command. The app can
+            Section(204, 250, "Holding back a possible provisional command", """
+Voxtral emits partial hypotheses such as “sésame lu…”. This method answers
+whether current text is a prefix of any configured command — now including the
+scroll, answer-toggle, and model-question framing phrases. The app can
 temporarily withhold such text from the overlay until the phrase either
 completes as a command or diverges into ordinary speech.
-
-The trigger-only overload compares only the available prefix. Empty input and
-empty configuration are rejected explicitly.
 """),
-            Section(183, 221, "Bounded tolerance for recognition errors", """
+            Section(251, 310, "Detecting a keyword-framed model question", """
+`scanModelQuestion` locates the start and end framing phrases with the same
+tolerant matching used for commands, then pairs them: the end phrase counts only
+when it follows the start, or — for a `closes` result — when no start is present
+because the question opened in an earlier segment. It returns the split as a
+`ModelQuestionScan`, cleaning the surrounding caption text and trimming the
+question of stray framing punctuation. Empty phrases disable the feature and
+yield `none`, so the app accumulates a multi-segment question itself rather than
+this pure function holding any state.
+"""),
+            Section(311, 325, "The trigger-only prefix check", """
+The trigger-only overload of the prefix check compares just the available
+provisional prefix against one trigger phrase, token by token. Empty input and
+empty configuration are rejected explicitly so a blank setting never matches.
+"""),
+            Section(326, 364, "Bounded tolerance for recognition errors", """
 Matching proceeds from safest to loosest: exact equality, equality after
 removing a plural `s`, then edit distance at most one. Fuzzy matching is allowed
 only when both roots have at least five characters; applying it to short words
@@ -634,25 +669,25 @@ would create too many collisions in normal French speech.
 The local Levenshtein implementation uses Unicode characters and two rows. With
 the tiny command vocabulary, its quadratic time is insignificant.
 """),
-            Section(222, 255, "Action synonyms and sliding phrase matches", """
+            Section(365, 398, "Action synonyms and sliding phrase matches", """
 The legacy action word maps a small explicit French vocabulary to show/hide.
 Configured full phrases use a sliding token window, preserving every matching
 source range. This can return more than one occurrence, which is why
 `recognizeAll` later owns ordering and deletion.
 """),
-            Section(256, 272, "A narrowly scoped Voxtral alias", """
+            Section(399, 415, "A narrowly scoped Voxtral alias", """
 Empirical testing showed that “sésame lumière” can be transcribed as “ces âmes
 lumières”. This helper recognizes exactly that three-token acoustic confusion
 and maps it to `.show`. It is not a general language-model correction and is
 activated only when the configured show phrase is the corresponding command.
 """),
-            Section(273, 297, "Prefix matching for an unfinished final token", """
+            Section(416, 440, "Prefix matching for an unfinished final token", """
 All complete provisional tokens must match tolerantly. Only the final token may
 be a literal prefix of its expected word, and it must contain at least two
 characters. This models streaming transcription while avoiding a holdback on
 every one-letter utterance.
 """),
-            Section(298, 328, "Unicode-aware tokenization with removable ranges", """
+            Section(441, 467, "Unicode-aware tokenization with removable ranges", """
 The scanner starts a token on letters or numbers and closes it on punctuation
 or whitespace. The walk advances with `text.index(after:)` because string
 positions cannot be incremented arithmetically: one user-perceived character
@@ -665,14 +700,16 @@ This dual representation is the key design point: comparing normalized copies
 alone would make it difficult to remove the corresponding accented,
 punctuated substring from the original caption reliably.
 """),
-            Section(329, 350, "Cleaning punctuation left by command removal", """
-If no lexical token remains, the correct caption is empty. Otherwise anchored
-regular expressions remove punctuation stranded at the beginning or end, and
-the third expression collapses a doubled period created where a command used
-to be. The `#"..."#` form is a raw string literal: between pound-delimited
-quotes, backslashes are ordinary characters, so regex escapes need no
-doubling. Cleanup is intentionally narrow; it does not rewrite punctuation
-inside the student's or professor's sentence.
+            Section(468, 492, "Normalized words and cleaning punctuation left by command removal", """
+`normalizedWords` is a thin helper returning just the folded words of a string,
+used where ranges are not needed. The cleanup routine then handles punctuation
+stranded by command removal: if no lexical token remains, the caption is empty;
+otherwise anchored regular expressions remove punctuation at the beginning or
+end, and a third collapses a doubled period created where a command used to be.
+The `#"..."#` form is a raw string literal: between pound-delimited quotes,
+backslashes are ordinary characters, so regex escapes need no doubling. Cleanup
+is intentionally narrow; it does not rewrite punctuation inside the student's or
+professor's sentence.
 """),
         ),
     ),

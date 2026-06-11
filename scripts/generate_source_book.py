@@ -90,6 +90,7 @@ CHAPTERS = (
         (
             "Sources/ClassroomCaptions/DashboardView.swift",
             "Sources/ClassroomCaptions/CaptionOverlayController.swift",
+            "Sources/ClassroomCaptions/ModelAnswerWebView.swift",
         ),
     ),
     Chapter(

@@ -109,8 +109,28 @@ actor GemmaCorrectionService: CaptionCorrectionService {
     """
 
     private static func systemPrompt(for mode: CaptionCorrectionMode) -> String {
-        sharedPrompt + "\n\n" + (mode == .science ? sciencePrompt : standardPrompt)
+        // Assistant mode corrects captions exactly like Science mode; its extra
+        // question-answering capability is a separate request path entirely.
+        let scienceLike = mode == .science || mode == .assistant
+        return sharedPrompt + "\n\n" + (scienceLike ? sciencePrompt : standardPrompt)
     }
+
+    // Distinct from the correction prompts: here the model is *meant* to answer.
+    // It is still given only text and returns only text — no tools, no machine
+    // access — and its Markdown is rendered (never executed) in the overlay.
+    private static let answerSystemPrompt = """
+    You are a concise teaching assistant helping a professor answer a question \
+    during a live lecture. Answer directly, accurately, and as briefly as the \
+    question allows; if you are unsure, say so rather than inventing facts.
+
+    Format the answer in GitHub-Flavored Markdown so it can be displayed richly:
+    - put any code in a fenced block with a language tag (```python ... ```);
+    - write mathematics in LaTeX, $...$ for inline and $$...$$ for display;
+    - use short headings, lists, or a small table only when they aid clarity.
+
+    Do not emit raw HTML, do not address the students, and do not ask follow-up \
+    questions: produce the answer itself.
+    """
 
     private let endpoint: URL
     private let session: URLSession
@@ -202,5 +222,48 @@ actor GemmaCorrectionService: CaptionCorrectionService {
             promptTokens: decoded.usage?.promptTokens,
             generatedTokens: decoded.usage?.completionTokens
         )
+    }
+
+    /// Answers a spoken, keyword-framed question (Assistant mode). Unlike
+    /// correction this is a free-form reply, returned as raw Markdown for the
+    /// overlay's rich renderer; no validator runs because it is an answer, not a
+    /// transcription. The reply is never executed — it is rendered as text.
+    func answer(question: String) async throws -> String {
+        guard let url = URL(
+            string: "v1/chat/completions",
+            relativeTo: endpoint.appendingPathComponent("/")
+        ) else {
+            throw GemmaCorrectionError.invalidEndpoint
+        }
+        let payload = CompletionRequest(
+            messages: [
+                Message(role: "system", content: Self.answerSystemPrompt),
+                Message(role: "user", content: question),
+            ],
+            max_tokens: 1536
+        )
+
+        var urlRequest = URLRequest(url: url)
+        urlRequest.httpMethod = "POST"
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.httpBody = try JSONEncoder().encode(payload)
+
+        let (data, response) = try await session.data(for: urlRequest)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw GemmaCorrectionError.invalidResponse
+        }
+        guard (200 ..< 300).contains(httpResponse.statusCode) else {
+            throw GemmaCorrectionError.server(
+                httpResponse.statusCode,
+                String(data: data, encoding: .utf8) ?? "unknown error"
+            )
+        }
+        let decoded = try JSONDecoder().decode(CompletionResponse.self, from: data)
+        guard let content = decoded.choices.first?.message.content?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !content.isEmpty else {
+            throw GemmaCorrectionError.invalidResponse
+        }
+        return content
     }
 }

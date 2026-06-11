@@ -1,0 +1,137 @@
+/* Style of the model-answer card rendered inside the overlay WebView. Dark,
+   high-contrast, comfortable to read on a projector; the body itself scrolls so
+   the "scroll up/down" voice commands can page through a long answer. */
+:root {
+  color-scheme: dark;
+  --fg: #f2f4f8;
+  --muted: #aab2c0;
+  --bg: rgba(18, 22, 30, 0.96);
+  --code-bg: #0d1117;
+  --rule: rgba(255, 255, 255, 0.12);
+  --accent: #6aa3ff;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  /* Solid backing: the answer window stays readable no matter how transparent
+     the surrounding caption overlay is set to be. */
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.5 -apple-system, "SF Pro Text", system-ui, sans-serif;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+#content {
+  padding: 14px 18px 18px;
+  -webkit-text-size-adjust: 100%;
+}
+
+#content > :first-child {
+  margin-top: 0;
+}
+#content > :last-child {
+  margin-bottom: 0;
+}
+
+#content h1,
+#content h2,
+#content h3 {
+  line-height: 1.25;
+  margin: 0.8em 0 0.35em;
+}
+#content h1 {
+  font-size: 1.4em;
+}
+#content h2 {
+  font-size: 1.2em;
+}
+#content h3 {
+  font-size: 1.05em;
+}
+
+#content p,
+#content ul,
+#content ol {
+  margin: 0.4em 0;
+}
+#content li {
+  margin: 0.15em 0;
+}
+
+#content a {
+  color: var(--accent);
+}
+
+#content code {
+  font-family: "SF Mono", ui-monospace, Menlo, monospace;
+  font-size: 0.92em;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 0.12em 0.34em;
+  border-radius: 4px;
+}
+
+#content pre {
+  background: var(--code-bg);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  margin: 0.6em 0;
+}
+#content pre code {
+  background: none;
+  padding: 0;
+  font-size: 0.9em;
+  line-height: 1.45;
+}
+
+#content blockquote {
+  margin: 0.5em 0;
+  padding: 0.1em 0.9em;
+  border-left: 3px solid var(--accent);
+  color: var(--muted);
+}
+
+#content table {
+  border-collapse: collapse;
+  margin: 0.6em 0;
+  font-size: 0.95em;
+}
+#content th,
+#content td {
+  border: 1px solid var(--rule);
+  padding: 5px 10px;
+  text-align: left;
+}
+#content th {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+#content hr {
+  border: none;
+  border-top: 1px solid var(--rule);
+  margin: 0.9em 0;
+}
+
+/* KaTeX display blocks should scroll horizontally rather than overflow. */
+#content .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 0;
+}
+
+/* Slim, unobtrusive scrollbar for long answers. */
+body::-webkit-scrollbar {
+  width: 10px;
+}
+body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.22);
+  border-radius: 5px;
+}

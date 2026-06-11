@@ -519,6 +519,30 @@ struct DashboardView: View {
                 }
 
                 GridRow {
+                    Text("Background opacity")
+                    HStack {
+                        Slider(
+                            value: $model.overlayBackgroundOpacity,
+                            in: 0 ... 1,
+                            step: 0.02
+                        )
+                        Text("\(Int(model.overlayBackgroundOpacity * 100)) %")
+                            .monospacedDigit()
+                            .frame(width: 52, alignment: .trailing)
+                    }
+                }
+
+                GridRow {
+                    Text("Answer text size")
+                    HStack {
+                        Slider(value: $model.answerFontSize, in: 12 ... 32, step: 1)
+                        Text("\(Int(model.answerFontSize)) pt")
+                            .monospacedDigit()
+                            .frame(width: 52, alignment: .trailing)
+                    }
+                }
+
+                GridRow {
                     Text("Voice command")
                     Toggle(
                         "Enable spoken overlay controls",
@@ -556,13 +580,66 @@ struct DashboardView: View {
                     .textFieldStyle(.roundedBorder)
                     .disabled(!model.overlayVoiceCommandsEnabled)
                 }
+
+                GridRow {
+                    Text("Question start (Assistant)")
+                    TextField(
+                        "Bonjour modèle début",
+                        text: $model.modelQuestionStartVoiceCommand
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(!model.overlayVoiceCommandsEnabled)
+                }
+
+                GridRow {
+                    Text("Question end (Assistant)")
+                    TextField(
+                        "Bonjour modèle fin",
+                        text: $model.modelQuestionEndVoiceCommand
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(!model.overlayVoiceCommandsEnabled)
+                }
+
+                GridRow {
+                    Text("Answer show/hide")
+                    TextField(
+                        "Bonjour réponse",
+                        text: $model.modelAnswerToggleVoiceCommand
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(!model.overlayVoiceCommandsEnabled)
+                }
+
+                GridRow {
+                    Text("Scroll up phrase")
+                    TextField(
+                        "Bonjour monter",
+                        text: $model.overlayScrollUpVoiceCommand
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(!model.overlayVoiceCommandsEnabled)
+                }
+
+                GridRow {
+                    Text("Scroll down phrase")
+                    TextField(
+                        "Bonjour plonger",
+                        text: $model.overlayScrollDownVoiceCommand
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(!model.overlayVoiceCommandsEnabled)
+                }
             }
 
             Text(
                 "Say “\(showVoiceCommand)”, “\(hideVoiceCommand)”, "
                     + "or “\(clearVoiceCommand)”. Clear blanks the overlay "
                     + "without deleting the archived transcript. Commands are "
-                    + "removed before correction and export."
+                    + "removed before correction and export. In Assistant mode, "
+                    + "frame a question between the start and end phrases to ask "
+                    + "the model; its answer appears in a dedicated card you can "
+                    + "show/hide and scroll."
             )
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -608,20 +685,30 @@ struct DashboardView: View {
         return command.isEmpty ? "Bonjour soleil blanc" : command
     }
 
+    private var correctionModeDescription: String {
+        switch model.correctionMode {
+        case .standard:
+            return "Standard performs conservative proofreading with only common notation."
+        case .science:
+            return "Science favors compact Unicode math, logic, set, probability, and code notation."
+        case .assistant:
+            return "Assistant corrects like Science and lets you ask the model a "
+                + "spoken question framed by your start/end phrases; the answer "
+                + "renders (code highlighting, LaTeX) in a dedicated overlay card."
+        }
+    }
+
     private var correctionSettings: some View {
         GroupBox("Gemma 4 Subtitle Correction") {
             VStack(alignment: .leading, spacing: 12) {
                 Picker("Correction mode", selection: $model.correctionMode) {
                     Text("Standard").tag(CaptionCorrectionMode.standard)
                     Text("Science").tag(CaptionCorrectionMode.science)
+                    Text("Assistant").tag(CaptionCorrectionMode.assistant)
                 }
                 .pickerStyle(.segmented)
 
-                Text(
-                    model.correctionMode == .science
-                        ? "Science favors compact Unicode math, logic, set, probability, and code notation."
-                        : "Standard performs conservative proofreading with only common notation."
-                )
+                Text(correctionModeDescription)
                 .font(.caption)
                 .foregroundStyle(.secondary)
 

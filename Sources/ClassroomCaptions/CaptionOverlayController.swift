@@ -150,14 +150,30 @@ final class CaptionOverlayController: NSObject, NSWindowDelegate {
         provisional: String?,
         question: String?,
         pendingQuestionCount: Int,
-        fontSize: Double
+        fontSize: Double,
+        answerMarkdown: String? = nil,
+        answerLoading: Bool = false,
+        answerScrollToken: Int = 0,
+        answerScrollDirection: AnswerScrollDirection = .down,
+        capturingQuestion: String? = nil,
+        captureHint: String = "",
+        backgroundOpacity: Double = 0.82,
+        answerFontSize: Double = 18
     ) {
         hostingView.rootView = CaptionOverlayView(
             lines: lines,
             provisional: provisional,
             question: question,
             pendingQuestionCount: pendingQuestionCount,
-            fontSize: fontSize
+            fontSize: fontSize,
+            answerMarkdown: answerMarkdown,
+            answerLoading: answerLoading,
+            answerScrollToken: answerScrollToken,
+            answerScrollDirection: answerScrollDirection,
+            capturingQuestion: capturingQuestion,
+            captureHint: captureHint,
+            backgroundOpacity: backgroundOpacity,
+            answerFontSize: answerFontSize
         )
 
         let displayID = screen.displayID
@@ -307,9 +323,23 @@ struct CaptionOverlayView: View {
     let question: String?
     let pendingQuestionCount: Int
     let fontSize: Double
+    var answerMarkdown: String? = nil
+    var answerLoading: Bool = false
+    var answerScrollToken: Int = 0
+    var answerScrollDirection: AnswerScrollDirection = .down
+    var capturingQuestion: String? = nil
+    var captureHint: String = ""
+    var backgroundOpacity: Double = 0.82
+    var answerFontSize: Double = 18
 
     private var hasContent: Bool {
         !lines.isEmpty || provisional?.isEmpty == false
+    }
+
+    // When the model-answer card is on screen it should dominate the height,
+    // while the captions keep a guaranteed minimum strip beneath it.
+    private var showsAnswerCard: Bool {
+        (question?.isEmpty ?? true) && (answerLoading || answerMarkdown != nil)
     }
 
     private var contentVersion: String {
@@ -319,70 +349,90 @@ struct CaptionOverlayView: View {
     }
 
     var body: some View {
-        ZStack {
-            VStack(alignment: .leading, spacing: 10) {
-                moveHandle
+        GeometryReader { geometry in
+            ZStack {
+                VStack(alignment: .leading, spacing: 10) {
+                    moveHandle
 
-                if pendingQuestionCount > 0 {
-                    pendingQuestionIndicator
-                }
+                    if let capturingQuestion {
+                        captureBanner(capturingQuestion)
+                    }
 
-                if let question, !question.isEmpty {
-                    questionCard(question)
-                }
+                    if pendingQuestionCount > 0 {
+                        pendingQuestionIndicator
+                    }
 
-                ScrollViewReader { proxy in
-                    ScrollView(.vertical) {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Spacer(minLength: 4)
+                    // A displayed student question always wins the card slot; the
+                    // model answer waits in reserve and reappears once the question
+                    // is dismissed (priority is decided by the app model upstream).
+                    if let question, !question.isEmpty {
+                        questionCard(question)
+                    } else if answerLoading {
+                        answerLoadingCard
+                    } else if let answerMarkdown {
+                        // The answer takes a large, bounded share of the overlay
+                        // (so it shows lots of text) while the captions keep the
+                        // rest — never the whole height.
+                        answerCard(answerMarkdown)
+                            .frame(maxHeight: geometry.size.height * 0.58)
+                            .layoutPriority(1)
+                    }
 
-                            if hasContent {
-                                ForEach(
-                                    Array(lines.enumerated()),
-                                    id: \.offset
-                                ) { _, line in
-                                    captionText(line)
-                                }
+                    ScrollViewReader { proxy in
+                        ScrollView(.vertical) {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Spacer(minLength: 4)
 
-                                if let provisional, !provisional.isEmpty {
-                                    captionText(provisional)
+                                if hasContent {
+                                    ForEach(
+                                        Array(lines.enumerated()),
+                                        id: \.offset
+                                    ) { _, line in
+                                        captionText(line)
+                                    }
+
+                                    if let provisional, !provisional.isEmpty {
+                                        captionText(provisional)
+                                            .foregroundStyle(.white.opacity(0.72))
+                                            .italic()
+                                    }
+                                } else {
+                                    Text("Caption overlay preview")
                                         .foregroundStyle(.white.opacity(0.72))
-                                        .italic()
                                 }
-                            } else {
-                                Text("Caption overlay preview")
-                                    .foregroundStyle(.white.opacity(0.72))
+
+                                Color.clear
+                                    .frame(height: 1)
+                                    .id(Self.bottomAnchor)
                             }
-
-                            Color.clear
-                                .frame(height: 1)
-                                .id(Self.bottomAnchor)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .scrollIndicators(.hidden)
+                        .defaultScrollAnchor(.bottom)
+                        .onAppear {
+                            scrollToBottom(proxy)
+                        }
+                        .onChange(of: contentVersion) {
+                            scrollToBottom(proxy)
+                        }
                     }
-                    .scrollIndicators(.hidden)
-                    .defaultScrollAnchor(.bottom)
-                    .onAppear {
-                        scrollToBottom(proxy)
-                    }
-                    .onChange(of: contentVersion) {
-                        scrollToBottom(proxy)
-                    }
+                    .frame(minHeight: showsAnswerCard ? 64 : nil)
                 }
-            }
-            .font(.system(size: fontSize, weight: .semibold, design: .rounded))
-            .padding(.horizontal, 28)
-            .padding(.bottom, 20)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                .font(.system(size: fontSize, weight: .semibold, design: .rounded))
+                .padding(.horizontal, 28)
+                .padding(.bottom, 20)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
 
-            resizeHandle
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-        }
-        .background(.black.opacity(0.82))
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(.white.opacity(0.16), lineWidth: 1)
+                resizeHandle
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height)
+            .background(.black.opacity(backgroundOpacity))
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(.white.opacity(0.16), lineWidth: 1)
+            }
         }
     }
 
@@ -420,6 +470,81 @@ struct CaptionOverlayView: View {
         .overlay {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(.orange.opacity(0.55), lineWidth: 1)
+        }
+    }
+
+    private func captureBanner(_ text: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label(
+                "Asking the model — say “\(captureHint)” to send",
+                systemImage: "mic.fill"
+            )
+            .font(.system(size: 13, weight: .bold))
+            .foregroundStyle(.mint)
+
+            if !text.isEmpty {
+                Text(text)
+                    .font(.system(
+                        size: max(16, fontSize * 0.58),
+                        weight: .semibold,
+                        design: .rounded
+                    ))
+                    .foregroundStyle(.white)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.mint.opacity(0.18))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(.mint.opacity(0.55), lineWidth: 1)
+        }
+    }
+
+    private func answerCard(_ markdown: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("Model answer", systemImage: "sparkles")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(.blue)
+
+            ModelAnswerView(
+                markdown: markdown,
+                fontSize: answerFontSize,
+                scrollToken: answerScrollToken,
+                scrollDirection: answerScrollDirection
+            )
+            .frame(maxWidth: .infinity, minHeight: 120, maxHeight: .infinity)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .padding(12)
+        // Solid backing so the answer stays readable regardless of the overlay's
+        // background-opacity setting (that slider is for the captions, not here).
+        .background(.blue.opacity(0.16))
+        .background(.black.opacity(0.9))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(.blue.opacity(0.55), lineWidth: 1)
+        }
+    }
+
+    private var answerLoadingCard: some View {
+        HStack(spacing: 10) {
+            ProgressView().controlSize(.small)
+            Text("Generating answer…")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.85))
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.blue.opacity(0.16))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(.blue.opacity(0.55), lineWidth: 1)
         }
     }
 
